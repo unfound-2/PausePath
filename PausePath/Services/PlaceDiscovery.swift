@@ -1,0 +1,95 @@
+import MapKit
+import CoreLocation
+import Observation
+
+struct DiscoveredPlace: Identifiable {
+    let id = UUID()
+    let item: MKMapItem
+    let kind: FacilityKind
+}
+
+@MainActor @Observable final class PlaceDiscovery: NSObject, @preconcurrency CLLocationManagerDelegate {
+    var region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 41.8826, longitude: -87.6226), span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02))
+    var places: [DiscoveredPlace] = []
+    var status = "Search any city or neighborhood to begin."
+    var isLoading = false
+    var route: MKRoute?
+    private let locationManager = CLLocationManager()
+    private var generation = UUID()
+    override init() { super.init(); locationManager.delegate = self }
+
+    func useLocation() {
+        switch locationManager.authorizationStatus {
+        case .notDetermined: locationManager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse, .authorizedAlways: locationManager.requestLocation()
+        default: status = "Location access is unavailable. Search a place instead, or enable access in Settings."
+        }
+    }
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        if manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways { manager.requestLocation() }
+    }
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else { return }
+        generation = UUID(); places = []; route = nil; isLoading = false
+        region.center = location.coordinate
+        status = "Location found. Tap Search this area to find facilities."
+    }
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { status = "Could not locate you. You can still search a place." }
+
+    func findArea(_ query: String) async {
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let token = UUID(); generation = token; isLoading = true; route = nil
+        defer { if generation == token { isLoading = false } }
+        let request = MKLocalSearch.Request(); request.naturalLanguageQuery = query
+        do {
+            let response = try await MKLocalSearch(request: request).start()
+            guard token == generation else { return }
+            guard let first = response.mapItems.first else { status = "No matching place found. Try a nearby city."; return }
+            region = MKCoordinateRegion(center: first.placemark.coordinate, span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02))
+            places = []; status = "Area found. Tap Search this area to find facilities."
+        } catch { if token == generation { status = "Place search failed. Check your connection and try again." } }
+    }
+
+    func discover(kinds: Set<FacilityKind>, region searchRegion: MKCoordinateRegion) async {
+        let token = UUID(); generation = token; isLoading = true; places = []; route = nil
+        defer { if generation == token { isLoading = false } }
+        guard !kinds.isEmpty else { status = "Select at least one facility filter."; return }
+        var found: [DiscoveredPlace] = []
+        var failures = 0
+        for kind in kinds.sorted(by: { $0.rawValue < $1.rawValue }) {
+            let request = MKLocalSearch.Request()
+            request.region = searchRegion
+            switch kind {
+            case .bench: request.naturalLanguageQuery = "public benches seating"
+            case .bathroom: request.naturalLanguageQuery = "public restrooms"
+            case .fountain: request.naturalLanguageQuery = "drinking water fountains"
+            case .cafe: request.naturalLanguageQuery = "cafes"
+            }
+            do {
+                let response = try await MKLocalSearch(request: request).start()
+                guard token == generation else { return }
+                found += response.mapItems.filter {
+                    let c = $0.placemark.coordinate
+                    return abs(c.latitude - searchRegion.center.latitude) <= searchRegion.span.latitudeDelta / 2 && abs(c.longitude - searchRegion.center.longitude) <= searchRegion.span.longitudeDelta / 2
+                }.map { DiscoveredPlace(item: $0, kind: kind) }
+            } catch { failures += 1 }
+        }
+        guard token == generation else { return }
+        places = found
+        status = "\(found.count) possible stops. Facility type, seating and hours need confirmation.\(failures > 0 ? " Some searches failed; retry when connected." : "")"
+    }
+
+    func walkingDirections(to place: DiscoveredPlace, from origin: CLLocationCoordinate2D) async {
+        let token = UUID(); generation = token; route = nil; isLoading = true
+        defer { if token == generation { isLoading = false } }
+        let request = MKDirections.Request()
+        request.source = MKMapItem(placemark: MKPlacemark(coordinate: origin))
+        request.destination = place.item; request.transportType = .walking
+        do {
+            let response = try await MKDirections(request: request).calculate()
+            guard token == generation else { return }
+            route = response.routes.first
+            status = route == nil ? "No walking route available here." : "Walking directions from map center. Slope, seating gaps and opening hours are unverified."
+        } catch { if token == generation { status = "Walking directions unavailable here. Try another stop." } }
+    }
+}
