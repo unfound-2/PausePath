@@ -1,0 +1,13 @@
+{
+  "curate_route": {
+    "geometry": {"type":"LineString","coordinates":[[-87.623,41.88],[-87.623,41.9],[-87.623,41.92]]},
+    "movement_type":"walk",
+    "departure_at":"2026-10-15T10:00:00-05:00",
+    "speed_meters_per_second":1.1,
+    "preferences":{"target_break_interval_meters":2000,"prioritized_categories":["bench","drinking_water","toilet","cafe"],"allow_unknown_hours":false,"break_duration_seconds":300}
+  },
+  "status_report": {"kind":"status","request_id":"a13a17aa-cf70-4b76-bd29-3c7edfd518c1","poi_id":"00000000-0000-0000-0000-000000000001","report_type":"broken_or_empty"},
+  "suggestion": {"kind":"suggestion","request_id":"978347d1-caf4-4b53-ad78-de2bed36a115","name":"Surveyed park bench","category":"bench","location":{"type":"Point","coordinates":[-87.623,41.89]},"attributes":{"backrest":true,"shaded":true,"access":"public"}},
+  "osm_ingestion": {"south":41.88,"west":-87.63,"north":41.90,"east":-87.61},
+  "queue_osm_edit": {"poi_id":"00000000-0000-0000-0000-000000000001","action":"add","evidence":"Independently surveyed on site; location and amenity checked by a separate reviewer."}
+}

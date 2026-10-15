@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgis/postgis:16-3.5
+    environment:
+      POSTGRES_DB: pausepath
+      POSTGRES_USER: pausepath
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-only}
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["postgis-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pausepath"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  migrate:
+    build: .
+    env_file: .env
+    command: ["python", "scripts/migrate.py"]
+    depends_on:
+      db: {condition: service_healthy}
+  api:
+    build: .
+    env_file: .env
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+volumes:
+  postgis-data:

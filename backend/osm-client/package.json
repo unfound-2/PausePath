@@ -1,0 +1,8 @@
+{
+  "name": "pausepath-osm-review-client",
+  "private": true,
+  "type": "module",
+  "scripts": {"build": "esbuild client.js --bundle --format=esm --outfile=dist/client.js"},
+  "dependencies": {"osm-auth": "^3.0.0"},
+  "devDependencies": {"esbuild": "^0.25.0"}
+}

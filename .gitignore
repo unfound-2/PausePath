@@ -6,3 +6,11 @@ xcuserdata/
 .build-logs/
 
 .swiftpm/
+
+# PausePath backend: local credentials and dependencies
+backend/.env
+backend/.venv/
+backend/**/__pycache__/
+backend/.pytest_cache/
+backend/osm-client/node_modules/
+backend/osm-client/dist/

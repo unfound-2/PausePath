@@ -47,3 +47,7 @@ See [implementation plan](docs/IMPLEMENTATION_PLAN.md), [architecture](docs/ARCH
 - `scripts/generate_project.py`: dependency-free Xcode project generator; run after adding Swift source files. The generated project is committed and ready to open.
 
 Apple references: [MapKit for SwiftUI](https://developer.apple.com/documentation/mapkit/mapkit-for-swiftui), [HealthKit authorization](https://developer.apple.com/documentation/healthkit/authorizing-access-to-health-data).
+
+## Micro-amenity backend
+
+The separate [backend service](backend/README.md) provides PostGIS storage, OSM ingestion, break curation, authenticated community reports and an OSM review queue. See its [API schema](backend/openapi.json) and [validation record](backend/VALIDATION.md). The iOS app is not yet connected to this service; hosting, identity and provider settings remain configurable.
