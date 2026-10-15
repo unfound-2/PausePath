@@ -50,4 +50,4 @@ Apple references: [MapKit for SwiftUI](https://developer.apple.com/documentation
 
 ## Micro-amenity backend
 
-The separate [backend service](backend/README.md) provides PostGIS storage, OSM ingestion, break curation, authenticated community reports and an OSM review queue. See its [API schema](backend/openapi.json) and [validation record](backend/VALIDATION.md). The iOS app is not yet connected to this service; hosting, identity and provider settings remain configurable.
+The separate [backend service](backend/README.md) provides PostGIS storage, OSM ingestion, break curation, authenticated community reports and an OSM review queue. See its [API schema](backend/openapi.json) and [validation record](backend/VALIDATION.md). The iOS app is not yet connected to this service; the selected deployment is Supabase PostGIS/Auth, Render and Mapbox Search. See the [setup instructions](backend/DEPLOYMENT.md).

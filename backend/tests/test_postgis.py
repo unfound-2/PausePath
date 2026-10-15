@@ -55,3 +55,21 @@ def test_corridor_and_marker_query_uses_meters(conn):
     assert abs(rows[0]['marker_m']-total/2)<1
     assert rows[0]['target_distance']<40
     assert abs(rows[0]['score']-4*.6/(1+rows[0]['target_distance']))<1e-8
+
+def test_private_schema_and_data_api_access(conn,monkeypatch):
+    from app.database_config import set_search_path
+    conn.execute('CREATE SCHEMA pausepath_private_test')
+    conn.execute('CREATE ROLE pausepath_untrusted_test NOLOGIN')
+    monkeypatch.setenv('DB_SCHEMA','pausepath_private_test')
+    monkeypatch.setenv('DB_EXTENSIONS_SCHEMA','public')
+    set_search_path(conn)
+    folder=Path(__file__).resolve().parents[1]/'migrations'
+    for migration in sorted(folder.glob('*.sql')): conn.execute(migration.read_text())
+    key=poi(conn)
+    vote(conn,key,'user','confirm_exists')
+    assert conn.execute('SELECT confidence_score FROM pois WHERE id=%s',(key,)).fetchone()['confidence_score']>.6
+    conn.execute('GRANT USAGE ON SCHEMA pausepath_private_test TO pausepath_untrusted_test')
+    conn.execute('GRANT SELECT ON pois TO pausepath_untrusted_test')
+    conn.execute('SET LOCAL ROLE pausepath_untrusted_test')
+    assert conn.execute('SELECT * FROM pois').fetchall()==[]  # RLS still denies rows
+    conn.execute('RESET ROLE')

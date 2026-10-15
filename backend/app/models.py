@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from uuid import UUID
+from pydantic import UUID4
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Category = Literal['bench', 'toilet', 'drinking_water', 'cafe']
@@ -113,8 +114,38 @@ class QueueReceipt(StrictModel):
     status: Literal['submitted','needs_reconciliation']
     changeset_id: int = Field(gt=0)
 
-class CommercialLink(StrictModel):
-    google_place_id: str = Field(min_length=1, max_length=255, pattern=r'^[A-Za-z0-9_-]+$')
+class MapboxCategorySearch(StrictModel):
+    category: Literal['coffee', 'food_and_drink'] = 'coffee'
+    proximity: Point
+    bbox: Tuple[float, float, float, float]
+    limit: int = Field(default=10, ge=1, le=25)
+    language: str = Field(default='en', min_length=2, max_length=35, pattern=r'^[A-Za-z-]+$')
+    @model_validator(mode='after')
+    def bounded_viewport(self):
+        west, south, east, north = self.bbox
+        IngestRequest(west=west, south=south, east=east, north=north)
+        lon, lat = self.proximity.coordinates
+        if not west <= lon <= east or not south <= lat <= north:
+            raise ValueError('proximity must be inside bbox')
+        return self
+
+class MapboxSuggest(StrictModel):
+    query: str = Field(min_length=1, max_length=256)
+    proximity: Point
+    session_token: UUID4
+    limit: int = Field(default=5, ge=1, le=10)
+    language: str = Field(default='en', min_length=2, max_length=35, pattern=r'^[A-Za-z-]+$')
+
+class MapboxRetrieve(StrictModel):
+    mapbox_id: str = Field(min_length=1, max_length=512, pattern=r'^[A-Za-z0-9._:-]+$')
+    session_token: UUID4
+    language: str = Field(default='en', min_length=2, max_length=35, pattern=r'^[A-Za-z-]+$')
+
+class MapboxResponse(StrictModel):
+    provider: Literal['mapbox'] = 'mapbox'
+    storage: Literal['temporary'] = 'temporary'
+    arrival_hours_status: Literal['unknown'] = 'unknown'
+    data: Dict[str, Any]
 
 class POISummary(StrictModel):
     id: UUID

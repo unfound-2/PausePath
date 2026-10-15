@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: pausepath-api
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /ready
+    preDeployCommand: python scripts/migrate.py
+    dockerCommand: sh -c 'exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log'
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: MIGRATION_DATABASE_URL
+        sync: false
+      - key: DB_SCHEMA
+        value: pausepath
+      - key: DB_EXTENSIONS_SCHEMA
+        value: extensions
+      - key: DB_POOL_MAX_SIZE
+        value: '5'
+      - key: AUTH_JWKS_URL
+        sync: false
+      - key: AUTH_ISSUER
+        sync: false
+      - key: AUTH_AUDIENCE
+        value: authenticated
+      - key: AUTH_ROLES_SOURCE
+        value: app_metadata
+      - key: MAPBOX_ACCESS_TOKEN
+        sync: false
+      - key: PEDESTRIAN_ROUTER_URL
+        sync: false
+      - key: OVERPASS_URL
+        value: https://overpass-api.de/api/interpreter

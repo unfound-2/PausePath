@@ -17,15 +17,18 @@ def identity(credentials: HTTPAuthorizationCredentials = Depends(bearer)):
     if not credentials: raise HTTPException(401, 'Bearer authentication required')
     try:
         key = jwks().get_signing_key_from_jwt(credentials.credentials)
-        claims = jwt.decode(credentials.credentials, key.key, algorithms=['RS256'],
+        claims = jwt.decode(credentials.credentials, key.key, algorithms=['RS256', 'ES256'],
                             audience=os.environ['AUTH_AUDIENCE'], issuer=os.environ['AUTH_ISSUER'],
                             options={'require':['exp','iss','aud','sub']})
         if not isinstance(claims['sub'], str) or not 1 <= len(claims['sub']) <= 200:
             raise ValueError('Invalid subject')
-        roles = claims.get('roles', [])
+        # Supabase user_metadata is user-editable: never trust it for roles.
+        metadata = claims.get('app_metadata', {})
+        if not isinstance(metadata, dict): raise ValueError('Invalid app metadata')
+        roles = metadata.get('roles', []) if os.environ.get('AUTH_ROLES_SOURCE') == 'app_metadata' else claims.get('roles', [])
         if not isinstance(roles, list) or not all(isinstance(role, str) for role in roles):
             raise ValueError('Invalid roles')
-        return claims
+        return {**claims, 'roles': roles}
     except (jwt.PyJWTError, ValueError, KeyError):
         raise HTTPException(401, 'Invalid or expired token')
 

@@ -1,6 +1,6 @@
 # PausePath micro-amenity backend
 
-FastAPI + PostgreSQL 16/PostGIS 3.5, EPSG:4326. The service ingests baseline amenities, accepts authenticated community reports, curates breaks along a caller-supplied walking/running route, and queues independently reviewed OSM contributions. Hosting and commercial-provider credentials are deliberately unset pending the owner's choices. The Swift app is not yet wired to these endpoints.
+FastAPI + PostgreSQL 16/PostGIS 3.5, EPSG:4326. The service ingests baseline amenities, accepts authenticated community reports, curates breaks along a caller-supplied walking/running route, and queues independently reviewed OSM contributions. The selected deployment is Supabase PostGIS/Auth + Render, with request-scoped Mapbox Search metadata. Follow [DEPLOYMENT.md](DEPLOYMENT.md) to create and configure the services. The Swift app is not yet wired to these endpoints.
 
 ## Run locally
 
@@ -29,7 +29,7 @@ Interactive schema: `/docs`. Machine-readable schema: `/openapi.json`, with a ch
 
 ## Identity and endpoint contract
 
-Supply `Authorization: Bearer <JWT>` from your configured identity provider. RS256 signatures, expiry, issuer, audience and subject are checked against HTTPS JWKS. `user_id` comes exclusively from the verified subject, never from a request body. Signed `roles` is an array containing `reviewer` and/or `admin` for privileged workflows. There is no anonymous-write mode, token mint endpoint or development authentication bypass.
+Supply `Authorization: Bearer <JWT>` from your configured identity provider. RS256/ES256 signatures, expiry, issuer, audience and subject are checked against HTTPS JWKS. `user_id` comes exclusively from the verified subject, never from a request body. Privileged roles are read from server-managed `app_metadata.roles` in Supabase mode, or top-level `roles` for a generic identity provider. User-editable metadata never grants roles. There is no anonymous-write mode, token mint endpoint or development authentication bypass.
 
 | Endpoint | Role | Purpose |
 | --- | --- | --- |
@@ -40,8 +40,9 @@ Supply `Authorization: Bearer <JWT>` from your configured identity provider. RS2
 | `POST /api/v1/admin/ingest/osm` | admin | Bounded Overpass baseline upsert |
 | `POST /api/v1/suggestions/{id}/review` | reviewer | Approve/reject a suggestion from another user |
 | `PATCH /api/v1/pois/{id}/review` | reviewer | Reviewed activation, normalized hours and attributes |
-| `PUT /api/v1/pois/{id}/commercial-link` | reviewer | Store only a Google place ID association |
-| `GET /api/v1/commercial/google/{place_id}` | authenticated | Optional uncached live business status/hours |
+| `POST /api/v1/commercial/mapbox/category` | authenticated | Viewport café/food discovery |
+| `POST /api/v1/commercial/mapbox/suggest` | authenticated | Session-based business autocomplete |
+| `POST /api/v1/commercial/mapbox/retrieve` | authenticated | Selected business metadata |
 | `POST /api/v1/osm/queue`, `GET /api/v1/osm/queue` | reviewer | Queue/list independently verified edits |
 | `POST /api/v1/osm/queue/{id}/claim` | reviewer | Exclusive submission claim |
 | `PUT /api/v1/osm/queue/{id}/changeset/{changeset_id}` | reviewer | Record changeset before upload |
@@ -79,9 +80,7 @@ Weekdays use Monday=0. Overnight intervals such as 22:00–02:00 are supported. 
 
 Overpass ingests nodes, ways and relations for bench, toilets, drinking_water and cafe. IDs are namespaced (`node/123`, `way/123`) so object types cannot collide. Area centers are stored for discovery but excluded from break curation until a usable entrance is surveyed. Upserts preserve crowd confidence/inactivation and reviewed hours/attributes. No records are deleted merely because a partial Overpass response omits them; provider remarks reject the batch.
 
-The optional Google Places adapter returns live `businessStatus`, current/regular hours and attribution fields without storing that content. Only place IDs may be linked persistently. Enable it only after provider/account choices are confirmed. The endpoint requires `display_surface=google_map` or `no_map`, returns `Cache-Control: no-store`, and is **not integrated into Apple Maps or exported to OSM**. The current curation engine uses OSM/community hours; it does not pretend to apply unconfigured commercial live status. A future selected provider adapter can enrich curation under that provider's allowed display/storage terms.
-
-This separation follows [Google's storage/display policy](https://developers.google.com/maps/documentation/places/web-service/policies) and [place-ID exception](https://developers.google.com/maps/documentation/places/web-service/place-id). Do not display Google Places results on the existing Apple map. OSM provenance/attribution remains attached; review ODbL obligations before distributing combined databases.
+Mapbox Search Box supplies temporary category/search results and business metadata through authenticated endpoints. Results retain provider attribution and use no-store responses; no Mapbox data or identifiers enter the persistent POI store or OSM queue. Supported categories are `coffee` and `food_and_drink`; suggestions and selected detail retrieval use a shared UUIDv4 session token. Optional hours/status metadata remains provider data: active status never implies open at arrival. Curation still uses OSM/community records. See [deployment and provider details](DEPLOYMENT.md) for configuration, coverage, client handling and limits.
 
 ## Reporting trust model
 
@@ -95,7 +94,7 @@ Run `python scripts/maintenance.py` daily to refresh expiring vote scores and pr
 
 The [osm-client](osm-client/client.js) uses `osm-auth` 3.x OAuth 2.0. Configure an exact HTTPS redirect URI, `read_prefs write_api` scope and an independent reviewer login. A browser host needs bundling (`npm install && npm run build`) and same-origin serving with the API (no permissive CORS is enabled). OSM tokens stay in the browser; PausePath stores queue/changeset receipts, not OAuth tokens.
 
-Queueing requires reviewer evidence from an independent survey. Only active community additions and inactive existing OSM nodes are eligible. Reviewers must inspect for duplicates and confirm the final edit before calling `submitReviewedEdit`; there is no background publisher. Google data must never be used as OSM edit evidence.
+Queueing requires reviewer evidence from an independent survey. Only active community additions and inactive existing OSM nodes are eligible. Reviewers must inspect for duplicates and confirm the final edit before calling `submitReviewedEdit`; there is no background publisher. Commercial provider data must never be used as OSM edit evidence.
 
 The helper claims the queue item exclusively, fetches the current OSM node/version for removals, creates a survey changeset, records its ID before uploading, uploads the diff and closes the changeset. Removal retires the `amenity` tag to `disused:amenity`, preserving node geometry, topology and other tags; it does not indiscriminately delete nodes. Conflicting lifecycle tags/versions require manual review. Ways and relations require manual OSM editing.
 

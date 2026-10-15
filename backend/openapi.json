@@ -353,46 +353,31 @@
         }
       }
     },
-    "/api/v1/pois/{poi_id}/commercial-link": {
-      "put": {
+    "/api/v1/commercial/mapbox/category": {
+      "post": {
         "tags": [
           "commercial"
         ],
-        "summary": "Link Commercial",
-        "operationId": "link_commercial_api_v1_pois__poi_id__commercial_link_put",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "poi_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Poi Id"
-            }
-          }
-        ],
+        "summary": "Mapbox Category",
+        "operationId": "mapbox_category_api_v1_commercial_mapbox_category_post",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CommercialLink"
+                "$ref": "#/components/schemas/MapboxCategorySearch"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MapboxResponse"
+                }
               }
             }
           },
@@ -406,48 +391,39 @@
               }
             }
           }
-        }
-      }
-    },
-    "/api/v1/commercial/google/{place_id}": {
-      "get": {
-        "tags": [
-          "commercial"
-        ],
-        "summary": "Live Commercial",
-        "operationId": "live_commercial_api_v1_commercial_google__place_id__get",
+        },
         "security": [
           {
             "HTTPBearer": []
           }
+        ]
+      }
+    },
+    "/api/v1/commercial/mapbox/suggest": {
+      "post": {
+        "tags": [
+          "commercial"
         ],
-        "parameters": [
-          {
-            "name": "place_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Place Id"
+        "summary": "Mapbox Suggest",
+        "operationId": "mapbox_suggest_api_v1_commercial_mapbox_suggest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MapboxSuggest"
+              }
             }
           },
-          {
-            "name": "display_surface",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^(google_map|no_map)$",
-              "title": "Display Surface"
-            }
-          }
-        ],
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MapboxResponse"
+                }
               }
             }
           },
@@ -461,7 +437,58 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/commercial/mapbox/retrieve": {
+      "post": {
+        "tags": [
+          "commercial"
+        ],
+        "summary": "Mapbox Retrieve",
+        "operationId": "mapbox_retrieve_api_v1_commercial_mapbox_retrieve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MapboxRetrieve"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapboxResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/osm/queue": {
@@ -799,23 +826,6 @@
         ],
         "title": "BreakPoint"
       },
-      "CommercialLink": {
-        "properties": {
-          "google_place_id": {
-            "type": "string",
-            "maxLength": 255,
-            "minLength": 1,
-            "pattern": "^[A-Za-z0-9_-]+$",
-            "title": "Google Place Id"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "google_place_id"
-        ],
-        "title": "CommercialLink"
-      },
       "Connector": {
         "properties": {
           "outbound": {
@@ -1032,6 +1042,169 @@
           "coordinates"
         ],
         "title": "LineString"
+      },
+      "MapboxCategorySearch": {
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "coffee",
+              "food_and_drink"
+            ],
+            "title": "Category",
+            "default": "coffee"
+          },
+          "proximity": {
+            "$ref": "#/components/schemas/Point"
+          },
+          "bbox": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Bbox"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 25.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 10
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "minLength": 2,
+            "pattern": "^[A-Za-z-]+$",
+            "title": "Language",
+            "default": "en"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "proximity",
+          "bbox"
+        ],
+        "title": "MapboxCategorySearch"
+      },
+      "MapboxResponse": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "const": "mapbox",
+            "title": "Provider",
+            "default": "mapbox"
+          },
+          "storage": {
+            "type": "string",
+            "const": "temporary",
+            "title": "Storage",
+            "default": "temporary"
+          },
+          "arrival_hours_status": {
+            "type": "string",
+            "const": "unknown",
+            "title": "Arrival Hours Status",
+            "default": "unknown"
+          },
+          "data": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Data"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "MapboxResponse"
+      },
+      "MapboxRetrieve": {
+        "properties": {
+          "mapbox_id": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Mapbox Id"
+          },
+          "session_token": {
+            "type": "string",
+            "format": "uuid4",
+            "title": "Session Token"
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "minLength": 2,
+            "pattern": "^[A-Za-z-]+$",
+            "title": "Language",
+            "default": "en"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mapbox_id",
+          "session_token"
+        ],
+        "title": "MapboxRetrieve"
+      },
+      "MapboxSuggest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Query"
+          },
+          "proximity": {
+            "$ref": "#/components/schemas/Point"
+          },
+          "session_token": {
+            "type": "string",
+            "format": "uuid4",
+            "title": "Session Token"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 5
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "minLength": 2,
+            "pattern": "^[A-Za-z-]+$",
+            "title": "Language",
+            "default": "en"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "query",
+          "proximity",
+          "session_token"
+        ],
+        "title": "MapboxSuggest"
       },
       "POIReview": {
         "properties": {

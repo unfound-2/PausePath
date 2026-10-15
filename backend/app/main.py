@@ -3,15 +3,16 @@ import json
 import os
 from typing import Annotated, Union
 from uuid import UUID
-from fastapi import FastAPI, Body, Depends, HTTPException, Query, Response
+from fastapi import FastAPI, Body, Depends, HTTPException, Response
 from fastapi.encoders import jsonable_encoder
 from psycopg import errors
 from psycopg.types.json import Jsonb
 from .auth import identity,reviewer,admin
 from .db import transaction
 from .models import (ExistingReport,Suggestion,ReportReceipt,IngestRequest,CurateRequest,CuratedRoute,
-                     Review,POIReview,QueueEdit,QueueReceipt,CommercialLink)
-from .providers import baseline_osm,google_details
+                     Review,POIReview,QueueEdit,QueueReceipt,MapboxCategorySearch,MapboxSuggest,MapboxRetrieve,MapboxResponse)
+from .providers import baseline_osm
+from . import mapbox
 from .curation import curate
 
 app=FastAPI(title='PausePath Micro-Amenity API',version='1.0.0',
@@ -123,22 +124,25 @@ def review_poi(poi_id: UUID,body: POIReview,user=Depends(reviewer)):
         audit(conn,user,'poi_review',poi_id,body.evidence)
     return {'id':poi_id,'is_active':body.is_active}
 
-@app.put('/api/v1/pois/{poi_id}/commercial-link',tags=['commercial'])
-def link_commercial(poi_id: UUID,body: CommercialLink,user=Depends(reviewer)):
-    with transaction() as conn:
-        if not conn.execute('SELECT id FROM pois WHERE id=%s',(poi_id,)).fetchone(): raise HTTPException(404,'POI not found')
-        conn.execute('''INSERT INTO commercial_place_links(poi_id,google_place_id,linked_by) VALUES (%s,%s,%s)
-            ON CONFLICT(poi_id) DO UPDATE SET google_place_id=excluded.google_place_id,linked_by=excluded.linked_by''',
-            (poi_id,body.google_place_id,user['sub']))
-    return {'poi_id':poi_id,'google_place_id':body.google_place_id}
-
-@app.get('/api/v1/commercial/google/{place_id}',tags=['commercial'])
-def live_commercial(place_id: str,response: Response,display_surface: str=Query(pattern='^(google_map|no_map)$'),user=Depends(identity)):
-    rate_limit(user,'commercial',10)
-    response.headers['Cache-Control']='no-store'
+def commercial_response(response, user):
+    response.headers['Cache-Control']='private, no-store'
     response.headers['Vary']='Authorization'
-    return {'provider':'google','display_surface':display_surface,'attribution_required':True,
-            'place':google_details(place_id)}
+    rate_limit(user,'commercial',20)
+
+@app.post('/api/v1/commercial/mapbox/category',response_model=MapboxResponse,tags=['commercial'])
+def mapbox_category(body: MapboxCategorySearch,response: Response,user=Depends(identity)):
+    commercial_response(response,user)
+    return mapbox.category_search(body)
+
+@app.post('/api/v1/commercial/mapbox/suggest',response_model=MapboxResponse,tags=['commercial'])
+def mapbox_suggest(body: MapboxSuggest,response: Response,user=Depends(identity)):
+    commercial_response(response,user)
+    return mapbox.suggest(body)
+
+@app.post('/api/v1/commercial/mapbox/retrieve',response_model=MapboxResponse,tags=['commercial'])
+def mapbox_retrieve(body: MapboxRetrieve,response: Response,user=Depends(identity)):
+    commercial_response(response,user)
+    return mapbox.retrieve(body)
 
 @app.post('/api/v1/osm/queue',status_code=201,tags=['osm'])
 def queue_osm(body: QueueEdit,user=Depends(reviewer)):

@@ -1,5 +1,4 @@
 import os
-from urllib.parse import quote
 import httpx
 from fastapi import HTTPException
 from psycopg.types.json import Jsonb
@@ -40,17 +39,6 @@ def baseline_osm(conn, bbox):
             (str(item['type'])+'/'+str(item['id']),tags.get('name'),category,lon,lat,Jsonb(hours),Jsonb(attributes)))
         count += 1
     return count
-
-def google_details(place_id):
-    if os.environ.get('GOOGLE_PLACES_ENABLED','false').lower() != 'true' or not os.environ.get('GOOGLE_PLACES_API_KEY'):
-        raise HTTPException(503,'Commercial provider is not enabled')
-    try:
-        response = httpx.get('https://places.googleapis.com/v1/places/'+quote(place_id,safe=''),
-            headers={'X-Goog-Api-Key':os.environ['GOOGLE_PLACES_API_KEY'],
-                     'X-Goog-FieldMask':'id,displayName,location,businessStatus,currentOpeningHours,regularOpeningHours,utcOffsetMinutes,attributions,googleMapsUri'},timeout=8)
-        response.raise_for_status()
-        return response.json()
-    except (httpx.HTTPError,ValueError): raise HTTPException(502,'Commercial provider unavailable')
 
 def pedestrian_connector(start, end, max_meters):
     base = os.environ.get('PEDESTRIAN_ROUTER_URL','').rstrip('/')
