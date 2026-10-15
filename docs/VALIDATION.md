@@ -3,8 +3,9 @@
 ## Automated checks
 
 - Xcode 27: generic iOS Simulator build, unsigned; arm64 and x86_64. Passed.
-- Swift package: nine route-engine tests passed with zero failures.
-- Cases cover the final seating gap, exact allowed gap, unknown hours, hours at arrival rather than departure, unknown grade, speed-dependent ETA, missing requested facilities, closing-time boundary, and explicit-only preference adjustment.
+- Swift package: 17 core tests (nine route-engine and eight navigation-progress tests) passed with zero failures.
+- Navigation tests cover accurate/stale GPS, starting away from the route, off-route progress, overlapping out-and-back legs, nearby crossings, backtracking and empty geometry.
+- Route cases cover the final seating gap, exact allowed gap, unknown hours, hours at arrival rather than departure, unknown grade, speed-dependent ETA, missing requested facilities, closing-time boundary, and explicit-only preference adjustment.
 - Xcode emits an informational App Intents metadata warning because the app does not implement App Intents.
 
 ## Simulator smoke check
@@ -24,4 +25,36 @@ These are not implied by a successful build:
 - Save/delete feedback, relaunch persistence, optional activity linkage, explicit preference changes and weekly progress.
 - VoiceOver, largest Dynamic Type sizes, landscape and iPad, metric/imperial localization.
 
-HealthKit end-to-end behavior and worldwide data completeness cannot be established in a simulator smoke test. Real constrained routes are not implemented yet, so sample matches are not evidence of real-world route suitability.
+HealthKit end-to-end behavior and worldwide data completeness cannot be established in a simulator smoke test. Real distance-based walking routes and foreground guidance are implemented. Verified slope/seating/hour-constrained routes are not; no generated route is evidence of real-world accessibility or medical suitability.
+
+## Navigation-specific release checks
+
+- Actual outdoor walking: step timing, GPS drift, dense crossings, urban canyons, turnaround and final arrival. Unit/replay tests do not replace field testing.
+- Pause/resume, app background/lock, permission revocation and stale GPS; confirm no progress is credited while paused and no guidance is claimed in the background.
+- Recalculate after deviation, return early, return after multiple recalculations, failed network requests and cancel during a request. Verify original start stays fixed.
+- Recheck generated-route geometry and distances in multiple countries. Four bounded candidates do not constitute exhaustive route search.
+- Optional speech and VoiceOver interaction. Spoken directions require physical-device validation.
+
+Apple API references: [walking directions](https://developer.apple.com/documentation/mapkit/mkdirections), [route steps](https://developer.apple.com/documentation/mapkit/mkroute/step).
+
+## Live route integration check
+
+A real Apple Maps request from the public Millennium Park test coordinate produced three distance-matching out-and-back walks: 1,222 m (E Madison St), 1,470 m (N Michigan Ave), and 1,480 m (S Columbus Dr), each with written walking steps. Replaying each returned polyline in 10 m subdivisions advanced both legs and reached arrival. This validates the service and progress integration for those responses, not worldwide coverage or field GPS performance.
+
+To repeat (requires network access and macOS with Xcode):
+
+```sh
+mkdir -p .build-logs
+xcrun swiftc -parse-as-library PausePath/Core/RoutePlanning.swift \
+  PausePath/Core/NavigationProgress.swift PausePath/Services/WalkingRouteBuilder.swift \
+  scripts/LiveRoutingCheck.swift -o .build-logs/live-routing-check
+.build-logs/live-routing-check
+```
+
+This optional integration check depends on Apple Maps availability and is separate from deterministic unit tests.
+
+## Navigation simulator walkthrough
+
+On iPhone 18 Pro / iOS 27, searched Millennium Park in the Plan UI, generated two real candidate walks, opened the route review, and checked the unverified-requirements acknowledgment. With synthetic public-landmark GPS, Start showed a real walking instruction (“Take a right”), step distance, remaining distance/time and leg count. Pause and Resume changed state as expected. Moving the simulated location off route displayed the alert; explicit recalculation produced a revised route and distance. End navigation returned to the planner. Screenshot: `.build-logs/navigation.png` (local, ignored by Git).
+
+This walkthrough used simulated coordinates, not the user's real location. It did not validate outdoor accuracy, speech audio, full walked arrival, background behavior or Health recording. Arrival was verified by unit tests and replay of live route geometry.

@@ -11,6 +11,6 @@
 <key>UILaunchScreen</key><dict/>
 <key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
 <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
-<key>NSLocationWhenInUseUsageDescription</key><string>PausePath uses your location to find nearby walking areas and possible rest stops when you ask.</string>
+<key>NSLocationWhenInUseUsageDescription</key><string>PausePath uses your location to create nearby walks, find possible rest stops, and show your progress and directions during navigation.</string>
 <key>NSHealthShareUsageDescription</key><string>PausePath can read walking activities, walking speed and recorded heart rate to show your activity review and optional time estimates.</string>
 </dict></plist>

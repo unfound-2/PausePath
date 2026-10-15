@@ -12,6 +12,14 @@ Integrated live map and world-place search, optional location permission, facili
 
 Acceptance: compile for iOS Simulator, pass engine tests, launch in Simulator. Demonstration data must be clearly marked. Exact checks and remaining manual tests are in VALIDATION.md.
 
+## Route generation and navigation increment — delivered
+
+The Plan screen now replaces sample cards with real out-and-back route creation. Users choose a start by search or GPS; up to four candidate bearings are routed with independent outbound and return requests. Only candidates within ±25% of requested distance are offered. Disconnected or substantially displaced route endpoints are rejected. All paths and written instructions come from Apple walking directions.
+
+A foreground navigation screen tracks GPS against the current leg, shows current instructions and remaining distance/time, optionally speaks directions, supports pause/resume, and detects arrival. Each leg has independent progress so overlapping outbound/return paths do not cause immediate completion. Stale or inaccurate fixes cannot advance progress. Off-route users can explicitly recalculate the remaining waypoints or choose a return to their original start. Revised routes disclose changed distance and unverified requirements.
+
+Users must acknowledge unverified terrain, seating gaps and hours before starting. This does not modify their saved preferences or mark these routes as satisfying the full constraint engine. Navigation pauses in the background and is not a substitute for a field-tested, background-capable navigation release. Device/field validation remains required.
+
 ## Milestone 1 — facility and terrain data foundation
 
 Evaluate a global pedestrian graph/POI provider and elevation source; supplement with municipal and operator feeds without making those feeds a condition of app availability. OpenStreetMap-derived data is a candidate to evaluate, not an integrated or guaranteed source. Compare licensing/attribution, redistribution, freshness, coverage, cost, quotas, offline rights and timezone/hour parsing before choosing a provider. Do not send Health records to mapping providers.
@@ -30,13 +38,13 @@ Filter candidate routes using desired distance with a clearly disclosed toleranc
 
 Rank feasible routes by closeness to the user's chosen distance and goal, data confidence and detour burden. Fresh-air goals can favor green spaces; routine goals can favor repeatable familiar loops; exploration can favor variety. These are preferences, not health prescriptions. Show tradeoffs and explanations. If no candidate satisfies constraints, state that plainly and let the user explicitly change them; never silently loosen a seating limit.
 
-Replace sample Plan cards with provider-backed routes only once these conditions are met. Keep a separately labelled preview mode for development.
+Upgrade the current distance-based Plan routes to verified constrained routes only once these conditions are met. Do not label current live routes as verified matches.
 
 Acceptance: reproducible real walking paths, facility access verification, arrival-hour recomputation, rejection of unknown required data, and tests for no-route, sparse seating, steep segments, disconnected paths, slow pace and closed stops.
 
 ## Milestone 3 — walking session and review
 
-Build explicit start/pause/resume/end actions and foreground route progress. Ask separately before background location or workout writing. Persist session state with appropriate file protection; support interruption and permission revocation. Do not count a route preview as a completed activity.
+Extend the implemented start/pause/resume/end actions and foreground route progress with recording and durable session recovery. Ask separately before background location or workout writing. Persist session state with appropriate file protection; support interruption and permission revocation. Do not count a route preview as a completed activity.
 
 Keep Health integration opt-in. Support missing/denied/partial data without mislabelling the user as having denied read permission. Distinguish estimated distance, recorded distance, elapsed versus moving time and missing heart rate. Avoid double-counting imported activities and local recordings by stable identifiers. The first implementation reads workouts only, up to 30 in 30 days; remove pagination limits before representing complete historical progress.
 

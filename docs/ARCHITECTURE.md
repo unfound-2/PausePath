@@ -6,7 +6,11 @@ The native iOS target compiles App, Core and Services directly. The separate Swi
 
 Explore → `PlaceDiscovery` → MapKit place search / walking directions → map annotations and route overlay.
 
-Plan → `RoutePreferences` → `DemoRoutes` → `RoutePlanner.assess` → match/explanation → sample route map.
+Plan → `RoutePreferences` + searched/GPS start → `WalkingRouteBuilder` → outbound/return `MKDirections` → distance-filtered candidates → explicit unverified-data acknowledgment → `WalkingNavigator`.
+
+Navigation → CoreLocation fixes → `WalkProgress` → per-leg geometry projection → current MapKit instruction, remaining distance/time, optional speech and arrival. Off-route recalculation preserves remaining endpoints; return-to-start intentionally replaces them. Original origin remains stable across reroutes. Navigation pauses on background, stops location updates on pause/end, and keeps the display awake only during active guidance.
+
+`DemoRoutes` is retained as development data. The full `RoutePlanner.assess` engine is not used to certify live MapKit routes because required grade/seating/hour data is absent.
 
 My progress → explicit Health authorization → `HealthActivityStore` → recorded workout summaries. Feedback can reference an activity UUID. All three optional route adjustments require a button press and update preferences; heart rate is display-only.
 
@@ -42,4 +46,4 @@ Keep raw provider DTOs outside Core. Add input validation before accepting exter
 
 UI/service state is main-actor isolated. Map operations use generation tokens so older responses cannot replace a later query. The CLLocationManager is created on the main actor; its delegate conformance uses `@preconcurrency` for the legacy delegate API. Health queries resume async continuations and update UI on the main actor.
 
-Permission requests occur only after relevant user action. Read authorization completion does not establish which Health data was shared, so empty data uses neutral wording. There is no background tracking, location history store, Health writing or analytics SDK.
+Permission requests occur only after relevant user action. Read authorization completion does not establish which Health data was shared, so empty data uses neutral wording. There is no background tracking, location history store, Health writing or analytics SDK. Navigation requests continuous foreground GPS only after Start. Location quality thresholds (35 m accuracy, 15 s age) and the 40 m off-route threshold are engineering heuristics, not health thresholds. Projection is bounded to a 150 m forward window to limit jumps at crossings; movement during a long interruption may require explicit rerouting. Remaining distance rescales geometric progress to Apple’s reported distance; it is an estimate, not a recorded workout.

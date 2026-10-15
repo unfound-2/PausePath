@@ -7,7 +7,7 @@ struct ContentView: View {
     @State private var health = HealthActivityStore()
     var body: some View {
         TabView {
-            DiscoverView().tabItem { Label("Explore", systemImage: "map.fill") }
+            DiscoverView(preferences: preferences).tabItem { Label("Explore", systemImage: "map.fill") }
             PlannerView(preferences: $preferences, health: health).tabItem { Label("Plan", systemImage: "figure.walk") }
             ReviewView(preferences: $preferences, health: health).tabItem { Label("My progress", systemImage: "chart.bar.fill") }
         }.tint(Color(red: 0.12, green: 0.40, blue: 0.32))
@@ -22,6 +22,8 @@ struct ContentView: View {
 }
 
 struct DiscoverView: View {
+    let preferences: RoutePreferences
+    @State private var navigationWalk: GeneratedWalk?
     @State private var discovery = PlaceDiscovery()
     @State private var camera: MapCameraPosition = .automatic
     @State private var visibleRegion: MKCoordinateRegion?
@@ -73,6 +75,9 @@ struct DiscoverView: View {
                 Text(discovery.status).font(.caption).foregroundStyle(.secondary).padding(.horizontal).accessibilityIdentifier("discoveryStatus")
                 if let route = discovery.route {
                     Text("\(route.distance / 1000, specifier: "%.1f") km • Apple estimate \(Int(route.expectedTravelTime / 60)) min").font(.subheadline)
+                    Button("Navigate this route from map center") {
+                        navigationWalk = GeneratedWalk(name: route.name, legs: [route], preferences: preferences)
+                    }.buttonStyle(.bordered)
                 }
                 List(discovery.places) { place in
                     VStack(alignment: .leading, spacing: 6) {
@@ -84,6 +89,7 @@ struct DiscoverView: View {
                     }
                 }.listStyle(.plain).frame(maxHeight: 220)
             }.navigationTitle("Find your pause")
+                .fullScreenCover(item: $navigationWalk) { WalkingNavigationView(walk: $0) }
         }
     }
     private func search() { Task { await discovery.findArea(query) } }
@@ -93,9 +99,7 @@ struct DiscoverView: View {
 struct PlannerView: View {
     @Binding var preferences: RoutePreferences
     var health: HealthActivityStore
-    @State private var selectedRoute: WalkingRoute?
     @State private var useHealthSpeed = false
-    private var routes: [WalkingRoute] { DemoRoutes.make(departure: preferences.departure) }
     var body: some View {
         NavigationStack {
             Form {
@@ -125,58 +129,14 @@ struct PlannerView: View {
                             .onChange(of: useHealthSpeed) { if useHealthSpeed { preferences.speedMetersPerSecond = speed } }
                     } else { Text("Manual estimate. Optional Health walking speed can be connected in My progress.").font(.caption) }
                 }
-                Section("Route engine preview • sample data") {
-                    Text("Synthetic routes and stops illustrate preference matching. Use Explore for live discovery anywhere. These sample routes are not for navigation.").font(.caption).foregroundStyle(.secondary)
-                    ForEach(routes) { route in
-                        let result = RoutePlanner.assess(route, preferences: preferences)
-                        Button { selectedRoute = route } label: {
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack { Text(route.name).font(.headline); Spacer(); Image(systemName: result.matches ? "checkmark.circle.fill" : "exclamationmark.circle") }
-                                Text("\(route.meters / 1000, specifier: "%.1f") km • \(Int(result.durationSeconds / 60)) min • \(Int(result.maximumRestGapMeters)) m max rest gap").font(.caption)
-                                Text(result.matches ? "Matches using sample data" : result.reasons.joined(separator: " ")).font(.caption).foregroundStyle(.secondary)
-                            }.foregroundStyle(.primary)
-                        }
-                    }
-                    if !routes.contains(where: { RoutePlanner.assess($0, preferences: preferences).matches }) {
-                        Text("No sample route matches. Your constraints have not been relaxed.").font(.callout.bold())
-                    }
-                }
+                LiveRouteControls(preferences: preferences)
                 Section { Text("PausePath does not assess medical recovery readiness or safe exertion limits. Medical recovery decisions remain with your healthcare provider.").font(.footnote).foregroundStyle(.secondary) }
             }
             .navigationTitle("Plan your walk")
-            .sheet(item: $selectedRoute) { route in RouteDetailView(route: route, preferences: preferences) }
             .onChange(of: health.walkingSpeed) {
                 if useHealthSpeed, let speed = health.walkingSpeed { preferences.speedMetersPerSecond = speed }
                 if health.walkingSpeed == nil { useHealthSpeed = false; preferences.speedMetersPerSecond = 1 }
             }
-        }
-    }
-}
-
-struct RouteDetailView: View {
-    let route: WalkingRoute
-    let preferences: RoutePreferences
-    @Environment(\.dismiss) private var dismiss
-    var body: some View {
-        NavigationStack {
-            List {
-                Text("DEMONSTRATION ONLY • schematic geometry and invented facilities").font(.caption.bold()).foregroundStyle(.orange)
-                Map {
-                    MapPolyline(coordinates: route.coordinates.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }).stroke(.teal, lineWidth: 5)
-                    ForEach(route.facilities) { facility in
-                        Marker(facility.name, systemImage: facility.kind.symbol, coordinate: CLLocationCoordinate2D(latitude: facility.coordinate.latitude, longitude: facility.coordinate.longitude))
-                    }
-                }.frame(height: 260)
-                ForEach(route.facilities.sorted(by: { $0.metersFromStart < $1.metersFromStart })) { facility in
-                    let arrival = preferences.departure.addingTimeInterval(facility.metersFromStart / max(0.1, preferences.speedMetersPerSecond))
-                    VStack(alignment: .leading) {
-                        Label(facility.name, systemImage: facility.kind.symbol)
-                        Text("\(Int(facility.metersFromStart)) m • ETA \(arrival.formatted(date: .omitted, time: .shortened))").font(.caption)
-                        Text(facility.isOpen(at: arrival).map { $0 ? "Sample hours: open at ETA" : "Sample hours: closed at ETA" } ?? "Hours unknown").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }.navigationTitle(route.name).navigationBarTitleDisplayMode(.inline)
-                .toolbar { Button("Done") { dismiss() } }
         }
     }
 }
