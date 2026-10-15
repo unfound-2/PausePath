@@ -7,7 +7,7 @@ services:
     dockerContext: ./backend
     healthCheckPath: /ready
     preDeployCommand: python scripts/migrate.py
-    dockerCommand: sh -c 'exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log'
+    dockerCommand: uvicorn app.main:app --host 0.0.0.0 --port 10000 --no-access-log
     envVars:
       - key: DATABASE_URL
         sync: false
