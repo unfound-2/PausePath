@@ -60,6 +60,8 @@ struct WalkingNavigationView: View {
     @State private var navigator = WalkingNavigator()
     @State private var camera: MapCameraPosition = .automatic
     @State private var acknowledged = false
+    @State private var takingBreak = false
+    @State private var suggestedStops: [SharedPOI] = []
     @State private var showEndConfirmation = false
     @State private var showReturnConfirmation = false
     @Environment(\.dismiss) private var dismiss
@@ -73,6 +75,9 @@ struct WalkingNavigationView: View {
                         UserAnnotation()
                         ForEach(Array(plan.legs.enumerated()), id: \.offset) { index, leg in
                             MapPolyline(leg.polyline).stroke(index == navigator.progress.legIndex ? .teal : .blue.opacity(0.5), lineWidth: index == navigator.progress.legIndex ? 7 : 4)
+                        }
+                        ForEach(suggestedStops.filter { !$0.unavailable && $0.location.coordinates.count == 2 }) { poi in
+                            Marker(poi.name ?? "Break stop", systemImage: FacilityKind.fromAPI(poi.category)?.symbol ?? "mappin", coordinate: poi.coordinate).tint(.orange)
                         }
                         Marker("Start", coordinate: walk.start.mapCoordinate)
                         if let turn = walk.paths.first?.last { Marker(walk.legs.count > 1 ? "Turnaround" : "Destination", systemImage: "flag.fill", coordinate: turn.mapCoordinate) }
@@ -94,6 +99,10 @@ struct WalkingNavigationView: View {
                     } else {
                         navigationStatus
                     }
+                    RouteBreaksView(walk: plan, currentLocation: navigator.freshLocation() ? navigator.location?.coordinate : nil,
+                        onDetour: { takingBreak = true; navigator.pause() }, onReturn: { takingBreak = false },
+                        onStopsChanged: { suggestedStops = $0 })
+                        .id(plan.id)
                     Text(navigator.status).font(.callout).foregroundStyle(.secondary)
                     Toggle("Spoken directions", isOn: Binding(get: { navigator.voiceEnabled }, set: { navigator.setVoice($0) }))
                     DisclosureGroup("All walking directions") {
@@ -123,10 +132,10 @@ struct WalkingNavigationView: View {
                     Button("Return to start") { navigator.returnToStart() }
                 }
         }
-        .onAppear { navigator.prepare(walk) }
-        .onDisappear { navigator.stop() }
+        .onAppear { if navigator.plan == nil { navigator.prepare(walk) } }
+        .onDisappear { if !takingBreak { navigator.stop() } }
         .onChange(of: scenePhase) { if scenePhase == .background { navigator.pause() } }
-        .onChange(of: navigator.plan?.id) { camera = .automatic }
+        .onChange(of: navigator.plan?.id) { camera = .automatic; suggestedStops = [] }
     }
     private var navigationStatus: some View {
         VStack(alignment: .leading, spacing: 10) {

@@ -24,6 +24,10 @@ struct DiscoverView: View {
     @State private var showResults = false
     @State private var navigationWalk: GeneratedWalk?
     @State private var searched = false
+    @State private var showReport = false
+    @State private var reportPlace: DiscoveredPlace?
+    @State private var account = PausePathAccount.shared
+    @Environment(\.scenePhase) private var scenePhase
     @State private var areaRefreshTask: Task<Void, Never>?
     @State private var lastRequestedRegion: MKCoordinateRegion?
     @State private var isPreviewingRoute = false
@@ -72,7 +76,23 @@ struct DiscoverView: View {
         .toolbarBackground(.hidden, for: .tabBar)
         .task {
             camera = .region(discovery.region)
-            if !searched { await refresh() }
+            // Account task performs the initial load.
+        }
+        .task(id: account.userID) {
+            discovery.places = []; selectedID = nil; discovery.route = nil
+            await refresh()
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                guard scenePhase == .active, account.isSignedIn, !discovery.isLoading,
+                      discovery.route == nil, !showReport, !showResults, navigationWalk == nil else { continue }
+                await loadArea(visibleRegion ?? discovery.region)
+            }
+        }
+        .sheet(isPresented: $showReport) {
+            StopReportView(place: reportPlace,
+                coordinate: reportPlace?.item.placemark.coordinate ?? (visibleRegion ?? discovery.region).center) {
+                Task { await refresh() }
+            }
         }
         .onChange(of: discovery.region.center.latitude) { moveToDiscoveredArea() }
         .onChange(of: discovery.region.center.longitude) { moveToDiscoveredArea() }
@@ -172,13 +192,23 @@ struct DiscoverView: View {
                                 Image(systemName: "list.bullet").font(.title3).frame(width: 44, height: 44)
                             }.accessibilityLabel("Show stops as a list")
                         }
-                        if discovery.isLoading || discovery.places.isEmpty || discovery.status.contains("failed") || discovery.status.contains("unavailable") || discovery.status.hasPrefix("Could not") {
+                        if !discovery.status.isEmpty {
                             Text(discovery.status).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                         }
                     }
                 }.padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26))
                     .shadow(color: .black.opacity(0.12), radius: 16, y: 5)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            if account.isSignedIn {
+                Button("Suggest a stop at map center", systemImage: "plus.circle") { reportPlace = nil; showReport = true }
+                    .font(.caption).padding(8).background(.regularMaterial, in: Capsule())
+                HStack {
+                    Link("© OpenStreetMap", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
+                    Link("© Mapbox", destination: URL(string: "https://www.mapbox.com/about/maps/")!)
+                }.font(.caption2).padding(4).background(.regularMaterial, in: Capsule())
+            } else {
+                Text("Sign in in Account for shared stops and community updates.").font(.caption).padding(8).background(.regularMaterial, in: Capsule())
             }
         }.padding(.horizontal, 16).padding(.bottom, 12)
     }
@@ -193,8 +223,16 @@ struct DiscoverView: View {
                     Image(systemName: "xmark").font(.subheadline.bold()).frame(width: 44, height: 44).background(.quaternary, in: Circle())
                 }.accessibilityLabel("Close stop details")
             }
-            Text("Possible \(place.kind.rawValue.lowercased()) • Seating and hours unverified")
+            Text("\(place.provider) • \(place.kind.rawValue) • Seating and hours unverified")
                 .font(.caption).foregroundStyle(.secondary)
+            if let summary = place.businessSummary { Text(summary).font(.caption) }
+            if let website = place.website { Link("Business website", destination: website) }
+            if let poi = place.shared {
+                HStack {
+                    Text("Community confidence: \(Int(poi.confidence_score * 100))%").font(.caption)
+                    Button("Report status") { reportPlace = place; showReport = true }
+                }
+            }
             if let route = discovery.route {
                 HStack {
                     Text("\(route.distance / 1000, specifier: "%.1f") km • \(Int(route.expectedTravelTime / 60)) min").font(.subheadline.weight(.semibold))

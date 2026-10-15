@@ -110,4 +110,4 @@ python -m pytest tests
 TEST_DATABASE_URL=postgresql://.../pausepath_test python -m pytest tests
 ```
 
-Database tests roll back their schema and data and refuse database names that do not end in `_test`. GitHub Actions provisions PostGIS and runs both layers. Local unit/API results and limitations are recorded in [VALIDATION.md](VALIDATION.md). Neither deployment, paid-provider calls, OSM publication nor a Swift-client integration is implied by this backend delivery.
+Database tests roll back their schema and data and refuse database names that do not end in `_test`. GitHub Actions provisions PostGIS and runs both layers. Local unit/API results and limitations are recorded in [VALIDATION.md](VALIDATION.md). See [connected iOS systems](../docs/CONNECTED_SYSTEMS.md) for the Swift integration and its validation limits. No OSM publication or authenticated paid-provider acceptance test is implied by automated tests.

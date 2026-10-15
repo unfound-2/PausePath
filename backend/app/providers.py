@@ -42,12 +42,16 @@ def baseline_osm(conn, bbox):
 
 def pedestrian_connector(start, end, max_meters):
     base = os.environ.get('PEDESTRIAN_ROUTER_URL','').rstrip('/')
-    if not base: raise HTTPException(503,'Configure a pedestrian OSRM router to verify access')
+    token = os.environ.get('MAPBOX_ACCESS_TOKEN')
+    if not base and not token: raise HTTPException(503,'Configure pedestrian routing to verify access')
     result = {}
     with httpx.Client(timeout=4) as client:
         for name,a,b in [('outbound',start,end),('return',end,start)]:
             path = f'{a[0]},{a[1]};{b[0]},{b[1]}'
-            response = client.get(base+'/route/v1/foot/'+path,params={'overview':'full','geometries':'geojson','steps':'false'})
+            params = {'overview':'full','geometries':'geojson','steps':'false'}
+            url = base+'/route/v1/foot/'+path if base else 'https://api.mapbox.com/directions/v5/mapbox/walking/'+path
+            if not base: params['access_token'] = token
+            response = client.get(url,params=params)
             response.raise_for_status(); data=response.json()
             if data.get('code') != 'Ok' or not data.get('routes'): return None
             route=data['routes'][0]; waypoints=data.get('waypoints',[])

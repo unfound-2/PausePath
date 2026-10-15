@@ -10,6 +10,7 @@ struct ContentView: View {
             DiscoverView(preferences: preferences).tabItem { Label("Explore", systemImage: "map.fill") }
             PlannerView(preferences: $preferences, health: health).tabItem { Label("Plan", systemImage: "figure.walk") }
             ReviewView(preferences: $preferences, health: health).tabItem { Label("My progress", systemImage: "chart.bar.fill") }
+            AccountView().tabItem { Label("Account", systemImage: "person.crop.circle") }
         }.tint(Color(red: 0.12, green: 0.40, blue: 0.32))
         .onAppear {
             if var saved = try? JSONDecoder().decode(RoutePreferences.self, from: preferencesData) {

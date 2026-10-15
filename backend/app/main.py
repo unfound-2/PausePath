@@ -10,8 +10,9 @@ from psycopg.types.json import Jsonb
 from .auth import identity,reviewer,admin
 from .db import transaction
 from .models import (ExistingReport,Suggestion,ReportReceipt,IngestRequest,CurateRequest,CuratedRoute,
-                     Review,POIReview,QueueEdit,QueueReceipt,MapboxCategorySearch,MapboxSuggest,MapboxRetrieve,MapboxResponse)
+                     Review,POIReview,QueueEdit,QueueReceipt,MapboxCategorySearch,MapboxSuggest,MapboxRetrieve,MapboxResponse,DiscoveryResponse)
 from .providers import baseline_osm
+from .discovery import search_area
 from . import mapbox
 from .curation import curate
 
@@ -41,7 +42,7 @@ def ready():
 @app.post('/api/v1/routes/curate',response_model=CuratedRoute,tags=['routes'])
 def curate_route(body: CurateRequest,user=Depends(identity)):
     rate_limit(user,'curate',6)
-    if not os.environ.get('PEDESTRIAN_ROUTER_URL'): raise HTTPException(503,'Pedestrian routing provider must be configured')
+    if not (os.environ.get('PEDESTRIAN_ROUTER_URL') or os.environ.get('MAPBOX_ACCESS_TOKEN')): raise HTTPException(503,'Pedestrian routing provider must be configured')
     return curate(body)
 
 @app.post('/api/v1/reports',response_model=ReportReceipt,status_code=201,tags=['community'])
@@ -82,6 +83,12 @@ def ingest(body: IngestRequest,user=Depends(admin)):
     rate_limit(user,'ingest',2)
     with transaction() as conn: count=baseline_osm(conn,body)
     return {'upserted':count,'attribution':'© OpenStreetMap contributors, ODbL 1.0'}
+
+@app.post('/api/v1/pois/search',response_model=DiscoveryResponse,tags=['pois'])
+def discover_pois(body: IngestRequest,response: Response,user=Depends(identity)):
+    rate_limit(user,'discovery',20)
+    response.headers['Cache-Control']='private, no-store'
+    return search_area(body)
 
 @app.get('/api/v1/pois/{poi_id}',tags=['pois'])
 def get_poi(poi_id: UUID,user=Depends(identity)):

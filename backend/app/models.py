@@ -189,3 +189,16 @@ class CuratedRoute(StrictModel):
     type: Literal['Feature'] = 'Feature'
     geometry: LineString
     properties: RouteProperties
+
+
+class DiscoveryPOI(POISummary):
+    is_active: bool
+    operating_hours: Optional[Dict[str, Any]] = None
+    closed_until: Optional[datetime] = None
+    source_updated_at: Optional[datetime] = None
+
+class DiscoveryResponse(StrictModel):
+    pois: List[DiscoveryPOI]
+    truncated: bool
+    warning: Optional[str] = None
+    attribution: str

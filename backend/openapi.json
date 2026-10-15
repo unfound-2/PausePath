@@ -195,6 +195,52 @@
         ]
       }
     },
+    "/api/v1/pois/search": {
+      "post": {
+        "tags": [
+          "pois"
+        ],
+        "summary": "Discover Pois",
+        "operationId": "discover_pois_api_v1_pois_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscoveryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/pois/{poi_id}": {
       "get": {
         "tags": [
@@ -919,6 +965,152 @@
           "properties"
         ],
         "title": "CuratedRoute"
+      },
+      "DiscoveryPOI": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "bench",
+              "toilet",
+              "drinking_water",
+              "cafe"
+            ],
+            "title": "Category"
+          },
+          "confidence_score": {
+            "type": "number",
+            "title": "Confidence Score"
+          },
+          "location": {
+            "$ref": "#/components/schemas/Point"
+          },
+          "attributes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Attributes"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "osm",
+              "community"
+            ],
+            "title": "Source"
+          },
+          "external_id": {
+            "type": "string",
+            "title": "External Id"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "operating_hours": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operating Hours"
+          },
+          "closed_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed Until"
+          },
+          "source_updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "category",
+          "confidence_score",
+          "location",
+          "attributes",
+          "source",
+          "external_id",
+          "is_active"
+        ],
+        "title": "DiscoveryPOI"
+      },
+      "DiscoveryResponse": {
+        "properties": {
+          "pois": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoveryPOI"
+            },
+            "type": "array",
+            "title": "Pois"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning"
+          },
+          "attribution": {
+            "type": "string",
+            "title": "Attribution"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "pois",
+          "truncated",
+          "attribution"
+        ],
+        "title": "DiscoveryResponse"
       },
       "ExistingReport": {
         "properties": {

@@ -3,9 +3,17 @@ import CoreLocation
 import Observation
 
 struct DiscoveredPlace: Identifiable {
-    let id = UUID()
+    let id: UUID
+    init(id: UUID = UUID(), item: MKMapItem, kind: FacilityKind, shared: SharedPOI? = nil, provider: String = "Apple Maps", businessID: String? = nil, businessSummary: String? = nil, website: URL? = nil) {
+        self.id = id; self.item = item; self.kind = kind; self.shared = shared; self.provider = provider; self.businessID = businessID; self.businessSummary = businessSummary; self.website = website
+    }
     let item: MKMapItem
     let kind: FacilityKind
+    let shared: SharedPOI?
+    let provider: String
+    let businessID: String?
+    let businessSummary: String?
+    let website: URL?
 }
 
 @MainActor @Observable final class PlaceDiscovery: NSObject, @preconcurrency CLLocationManagerDelegate {
@@ -65,6 +73,31 @@ struct DiscoveredPlace: Identifiable {
         status = "Updating nearby stops…"
         defer { if generation == token { isLoading = false } }
         guard !kinds.isEmpty else { status = "Select at least one facility filter."; return false }
+        if PausePathAccount.shared.isSignedIn {
+            do {
+                let response = try await PausePathAPI.search(searchRegion)
+                guard token == generation, !Task.isCancelled else { return false }
+                var stops = response.pois.compactMap(\.place)
+                var commercialWarning = ""
+                do {
+                    let cafes = try await PausePathAPI.cafes(searchRegion)
+                    // Prefer reportable OSM/community records for duplicate cafés.
+                    stops += cafes.filter { cafe in !stops.contains { existing in
+                        existing.kind == .cafe && existing.item.name?.lowercased() == cafe.item.name?.lowercased() &&
+                        CLLocation(latitude: existing.item.placemark.coordinate.latitude, longitude: existing.item.placemark.coordinate.longitude)
+                            .distance(from: CLLocation(latitude: cafe.item.placemark.coordinate.latitude, longitude: cafe.item.placemark.coordinate.longitude)) < 50
+                    } }
+                } catch { commercialWarning = " Mapbox cafés unavailable; shared stops are shown." }
+                guard token == generation, !Task.isCancelled else { return false }
+                places = stops
+                status = "\(stops.count) shared/provider stops. Hours and seating need confirmation." + (response.warning.map { " " + $0 } ?? "") + commercialWarning + (response.truncated ? " Zoom in for all stops." : "")
+                return true
+            } catch {
+                guard token == generation, !Task.isCancelled else { return false }
+                places = []; status = error.localizedDescription
+                return false
+            }
+        }
         var found: [DiscoveredPlace] = []
         var failures = 0
         for kind in kinds.sorted(by: { $0.rawValue < $1.rawValue }) {

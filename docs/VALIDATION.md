@@ -70,3 +70,7 @@ The area search loads all four categories so subsequent filter changes are local
 Added a 650 ms debounce for user-driven map movement, small-movement filtering, stale-request cancellation, automatic refresh after location recentering, and retention of existing pins during loading. Programmatic route fitting does not trigger a new facility search. Pending refreshes stop when leaving Explore or opening the results/navigation view. Manual refresh remains available.
 
 Per the user's request, this increment has not been built, tested, or launched in the simulator.
+
+## Connected systems — October 15, 2026
+
+The completed connected-client implementation builds for the arm64 iOS simulator; all 17 existing Swift core tests pass. Backend tests: 27 passed, 5 database integration tests skipped locally because no isolated test database was supplied. Added tests cover auth rejection, bounding-box validation, no-store responses, hydration caching without caching community state, provider outages, result truncation, and Mapbox pedestrian outbound/return profiles. The live Supabase discovery SELECT succeeds and returns no records for the sampled area. See CONNECTED_SYSTEMS.md for remaining signed-in device acceptance work.
