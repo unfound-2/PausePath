@@ -58,3 +58,9 @@ This optional integration check depends on Apple Maps availability and is separa
 On iPhone 18 Pro / iOS 27, searched Millennium Park in the Plan UI, generated two real candidate walks, opened the route review, and checked the unverified-requirements acknowledgment. With synthetic public-landmark GPS, Start showed a real walking instruction (“Take a right”), step distance, remaining distance/time and leg count. Pause and Resume changed state as expected. Moving the simulated location off route displayed the alert; explicit recalculation produced a revised route and distance. End navigation returned to the planner. Screenshot: `.build-logs/navigation.png` (local, ignored by Git).
 
 This walkthrough used simulated coordinates, not the user's real location. It did not validate outdoor accuracy, speech audio, full walked arrival, background behavior or Health recording. Arrival was verified by unit tests and replay of live route geometry.
+
+## Explore map redesign
+
+Built for iOS Simulator and visually inspected on iPhone 18 Pro / iOS 27. The map fills the screen behind floating search, category chips and a compact bottom card. Each category has its own color and symbol. Toggling Bathrooms immediately removed its pins and changed the visible count from 50 to 34 without a search. Tapping a fountain selected the pin and opened its details; requesting a walk displayed the real route, distance, time and Navigate action. The separate results sheet provides a text alternative to map pins. Reduce Motion disables the custom selection/filter animation.
+
+The area search loads all four categories so subsequent filter changes are local. Incomplete map-provider coverage remains explicit.

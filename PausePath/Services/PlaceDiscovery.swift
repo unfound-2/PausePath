@@ -36,18 +36,21 @@ struct DiscoveredPlace: Identifiable {
     }
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { status = "Could not locate you. You can still search a place." }
 
-    func findArea(_ query: String) async {
-        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    func cancelPending() { generation = UUID(); isLoading = false }
+
+    @discardableResult func findArea(_ query: String) async -> Bool {
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         let token = UUID(); generation = token; isLoading = true; route = nil
         defer { if generation == token { isLoading = false } }
         let request = MKLocalSearch.Request(); request.naturalLanguageQuery = query
         do {
             let response = try await MKLocalSearch(request: request).start()
-            guard token == generation else { return }
-            guard let first = response.mapItems.first else { status = "No matching place found. Try a nearby city."; return }
+            guard token == generation else { return false }
+            guard let first = response.mapItems.first else { status = "No matching place found. Try a nearby city."; return false }
             region = MKCoordinateRegion(center: first.placemark.coordinate, span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02))
             places = []; status = "Area found. Tap Search this area to find facilities."
-        } catch { if token == generation { status = "Place search failed. Check your connection and try again." } }
+            return true
+        } catch { if token == generation { status = "Place search failed. Check your connection and try again." }; return false }
     }
 
     func discover(kinds: Set<FacilityKind>, region searchRegion: MKCoordinateRegion) async {
