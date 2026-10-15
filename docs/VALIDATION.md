@@ -64,3 +64,9 @@ This walkthrough used simulated coordinates, not the user's real location. It di
 Built for iOS Simulator and visually inspected on iPhone 18 Pro / iOS 27. The map fills the screen behind floating search, category chips and a compact bottom card. Each category has its own color and symbol. Toggling Bathrooms immediately removed its pins and changed the visible count from 50 to 34 without a search. Tapping a fountain selected the pin and opened its details; requesting a walk displayed the real route, distance, time and Navigate action. The separate results sheet provides a text alternative to map pins. Reduce Motion disables the custom selection/filter animation.
 
 The area search loads all four categories so subsequent filter changes are local. Incomplete map-provider coverage remains explicit.
+
+## Automatic Explore refresh — code only
+
+Added a 650 ms debounce for user-driven map movement, small-movement filtering, stale-request cancellation, automatic refresh after location recentering, and retention of existing pins during loading. Programmatic route fitting does not trigger a new facility search. Pending refreshes stop when leaving Explore or opening the results/navigation view. Manual refresh remains available.
+
+Per the user's request, this increment has not been built, tested, or launched in the simulator.

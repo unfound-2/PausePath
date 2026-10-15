@@ -24,6 +24,9 @@ struct DiscoverView: View {
     @State private var showResults = false
     @State private var navigationWalk: GeneratedWalk?
     @State private var searched = false
+    @State private var areaRefreshTask: Task<Void, Never>?
+    @State private var lastRequestedRegion: MKCoordinateRegion?
+    @State private var isPreviewingRoute = false
     @FocusState private var searchFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var visiblePlaces: [DiscoveredPlace] { discovery.places.filter { kinds.contains($0.kind) } }
@@ -55,7 +58,14 @@ struct DiscoverView: View {
         }
         .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
         .mapControls { MapCompass(); MapScaleView() }
-        .onMapCameraChange(frequency: .onEnd) { visibleRegion = $0.region }
+        .onMapCameraChange(frequency: .continuous) { context in
+            visibleRegion = context.region
+            // Programmatic camera changes (such as fitting a route) must not
+            // replace the selected stop or erase its directions.
+            guard camera.positionedByUser, !isPreviewingRoute,
+                  discovery.route == nil, !showResults, navigationWalk == nil else { return }
+            scheduleAreaRefresh(context.region)
+        }
         .ignoresSafeArea(edges: .top)
         .safeAreaInset(edge: .top, spacing: 0) { topControls }
         .safeAreaInset(edge: .bottom, spacing: 0) { bottomControls }
@@ -64,8 +74,11 @@ struct DiscoverView: View {
             camera = .region(discovery.region)
             if !searched { await refresh() }
         }
-        .onChange(of: discovery.region.center.latitude) { camera = .region(discovery.region) }
-        .onChange(of: discovery.region.center.longitude) { camera = .region(discovery.region) }
+        .onChange(of: discovery.region.center.latitude) { moveToDiscoveredArea() }
+        .onChange(of: discovery.region.center.longitude) { moveToDiscoveredArea() }
+        .onDisappear { cancelAreaRefresh(); discovery.cancelPending() }
+        .onChange(of: showResults) { if showResults { cancelAreaRefresh() } }
+        .onChange(of: navigationWalk?.id) { if navigationWalk != nil { cancelAreaRefresh() } }
         .sheet(isPresented: $showResults) { resultsSheet }
         .fullScreenCover(item: $navigationWalk) { WalkingNavigationView(walk: $0) }
     }
@@ -129,14 +142,14 @@ struct DiscoverView: View {
                     HStack(spacing: 8) {
                         if discovery.isLoading { ProgressView().controlSize(.small) }
                         else { Image(systemName: "arrow.clockwise") }
-                        Text(discovery.isLoading ? "Searching…" : "Search this area").font(.subheadline.weight(.semibold))
+                        Text(discovery.isLoading ? "Searching…" : "Refresh this area").font(.subheadline.weight(.semibold))
                     }.padding(.horizontal, 18).frame(minHeight: 44)
                         .background(.regularMaterial, in: Capsule())
                         .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
                 }.disabled(discovery.isLoading)
                 Spacer()
                 Button {
-                    searchFocused = false; discovery.cancelPending(); selectedID = nil; discovery.route = nil; discovery.useLocation()
+                    searchFocused = false; cancelAreaRefresh(); discovery.cancelPending(); selectedID = nil; discovery.route = nil; discovery.useLocation()
                 } label: {
                     Image(systemName: "location.fill").font(.title3).frame(width: 48, height: 48)
                         .background(.regularMaterial, in: Circle()).shadow(color: .black.opacity(0.12), radius: 8, y: 3)
@@ -232,27 +245,76 @@ struct DiscoverView: View {
     }
     private func select(_ place: DiscoveredPlace) {
         searchFocused = false
+        cancelAreaRefresh()
         discovery.cancelPending()
         animate { selectedID = place.id; discovery.route = nil }
     }
-    private func refresh() async {
+    private func cancelAreaRefresh() {
+        areaRefreshTask?.cancel()
+        areaRefreshTask = nil
+    }
+
+    private func areaChanged(_ region: MKCoordinateRegion) -> Bool {
+        guard let previous = lastRequestedRegion else { return true }
+        // Ignore small camera/layout adjustments and GPS jitter.
+        let latitudeShift = abs(region.center.latitude - previous.center.latitude)
+        let rawLongitudeShift = abs(region.center.longitude - previous.center.longitude)
+        let longitudeShift = min(rawLongitudeShift, 360 - rawLongitudeShift)
+        return latitudeShift > previous.span.latitudeDelta * 0.1 ||
+            longitudeShift > previous.span.longitudeDelta * 0.1 ||
+            abs(region.span.latitudeDelta - previous.span.latitudeDelta) > previous.span.latitudeDelta * 0.15 ||
+            abs(region.span.longitudeDelta - previous.span.longitudeDelta) > previous.span.longitudeDelta * 0.15
+    }
+
+    private func scheduleAreaRefresh(_ region: MKCoordinateRegion) {
+        cancelAreaRefresh()
+        guard areaChanged(region) else { return }
+        discovery.cancelPending()
+        areaRefreshTask = Task {
+            do { try await Task.sleep(for: .milliseconds(650)) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            await loadArea(region)
+        }
+    }
+
+    private func moveToDiscoveredArea() {
+        camera = .region(discovery.region)
+        // Also refresh after the user recenters on their location.
+        if selectedID == nil { scheduleAreaRefresh(discovery.region) }
+    }
+
+    private func loadArea(_ region: MKCoordinateRegion) async {
+        guard !Task.isCancelled else { return }
         searchFocused = false; selectedID = nil; searched = true
-        // Fetch all categories once for this area; chips filter locally without network flicker.
-        await discovery.discover(kinds: Set(FacilityKind.allCases), region: visibleRegion ?? discovery.region)
+        // Only remember a successfully completed area. A cancelled request
+        // must not suppress the next refresh for the same viewport.
+        if await discovery.discover(kinds: Set(FacilityKind.allCases), region: region) {
+            lastRequestedRegion = region
+        }
+    }
+
+    private func refresh() async {
+        cancelAreaRefresh()
+        await loadArea(visibleRegion ?? discovery.region)
     }
     private func search() {
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        cancelAreaRefresh()
         searchFocused = false; selectedID = nil
         Task {
             if await discovery.findArea(query) {
-                searched = true
-                await discovery.discover(kinds: Set(FacilityKind.allCases), region: discovery.region)
+                cancelAreaRefresh()
+                await loadArea(discovery.region)
             }
         }
     }
     private func preview(_ place: DiscoveredPlace) {
+        cancelAreaRefresh()
+        isPreviewingRoute = true
         let origin = visibleRegion?.center ?? discovery.region.center
         Task {
+            defer { isPreviewingRoute = false }
             await discovery.walkingDirections(to: place, from: origin)
             if let route = discovery.route { camera = .rect(route.polyline.boundingMapRect) }
         }
