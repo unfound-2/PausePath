@@ -1,11 +1,10 @@
 import SwiftUI
 import MapKit
+import AuthenticationServices
 
 struct AccountView: View {
     @State private var account = PausePathAccount.shared
-    @State private var email = ""
-    @State private var password = ""
-    @State private var create = false
+    @Environment(\.colorScheme) private var colorScheme
     var body: some View {
         NavigationStack {
             Form {
@@ -15,15 +14,17 @@ struct AccountView: View {
                         Text(account.email ?? "Connected")
                         Button("Sign out", role: .destructive) { Task { await account.signOut() } }
                     } else {
-                        TextField("Email", text: $email).textContentType(.username).keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        SecureField("Password", text: $password).textContentType(create ? .newPassword : .password)
-                        Toggle("Create a new account", isOn: $create)
-                        Button(account.busy ? "Connecting…" : (create ? "Create account" : "Sign in")) {
-                            Task {
-                                await account.signIn(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password, create: create)
-                                password = ""
-                            }
-                        }.disabled(account.busy || email.isEmpty || password.isEmpty)
+                        SignInWithAppleButton(.continue) { request in
+                            account.prepareAppleSignIn(request)
+                        } onCompletion: { result in
+                            Task { await account.completeAppleSignIn(result) }
+                        }
+                        .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+                        .frame(height: 50)
+                        .disabled(account.busy)
+                        if account.busy { ProgressView("Signing in…") }
+                        Text("Use your Apple Account. No PausePath password or confirmation email is needed. Apple may ask you to confirm with Face ID, Touch ID or your device passcode.").font(.caption)
+
                     }
                     Text(account.message).font(.callout)
                 }

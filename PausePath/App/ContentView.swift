@@ -1,7 +1,9 @@
 import SwiftUI
 import MapKit
+import AuthenticationServices
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var preferences = RoutePreferences()
     @AppStorage("pausepath.preferences") private var preferencesData = Data()
     @State private var health = HealthActivityStore()
@@ -17,6 +19,13 @@ struct ContentView: View {
                 saved.departure = Date()
                 preferences = saved
             }
+        }
+        .task { await PausePathAccount.shared.checkAppleCredential() }
+        .onChange(of: scenePhase) {
+            if scenePhase == .active { Task { await PausePathAccount.shared.checkAppleCredential() } }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ASAuthorizationAppleIDProvider.credentialRevokedNotification)) { _ in
+            Task { await PausePathAccount.shared.checkAppleCredential() }
         }
         .onChange(of: preferences) { preferencesData = (try? JSONEncoder().encode(preferences)) ?? Data() }
     }

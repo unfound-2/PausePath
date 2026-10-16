@@ -4,7 +4,7 @@ The Swift app uses the live Render API at `https://pausepath-api.onrender.com` a
 
 ## Available in the app
 
-- **Account:** email/password sign-in and account creation, confirmation-email instructions, device-only Keychain sessions, coordinated refresh, and local/server sign-out. All shared-stop exploration, route planning and Apple walking navigation are available signed out. Supabase email delivery and confirmation redirect settings must be configured for a public release; no email was sent during implementation.
+- **Account:** native Continue with Apple replaces email/password registration. Apple confirms the account on device; no PausePath email confirmation is needed. A fresh cryptographic nonce and state protect each exchange with Supabase. Sessions stay in device-only Keychain, refresh together, and clear when Apple authorization is revoked. Exploration and navigation remain available signed out.
 - **Explore:** public viewport requests load OSM/community records and temporary Mapbox café results. Filters operate locally on category pins. Panning is debounced, superseded results are discarded, and foreground Explore refreshes each minute unless the user is reviewing a route or reporting a stop. Zoomed-out or date-line-spanning areas ask the user to zoom in. This is polling, not a Supabase Realtime subscription.
 - **Reports:** submit observations on shared POIs, or suggest a new surveyed stop at map center. Retries retain the same request UUID; changing the report creates a new UUID. Suggestions require moderator review; Mapbox records cannot be reported into or copied into the OSM/community store. Existing moderation and OSM OAuth queue workflows remain operator tools.
 - **Route review/navigation:** explicitly request breaks for an Apple walking route. The API receives geometry, departure and facility/interval preferences. Unknown hours are excluded by default, with a user toggle to include them. Suggested stops appear on the route map and in an ordered list; unfilled intervals remain explicit. Stop status is refreshed each minute. Temporary closures and inactive records disable stop guidance.
@@ -25,8 +25,8 @@ Mapbox category metadata is displayed when present, and reported closed business
 
 - Simulator build and existing core tests, plus public discovery/area-bound/cache/failure/Mapbox walking-adapter tests, cover this integration.
 - The discovery spatial query was executed successfully against live Supabase; the queried area currently had no stored records.
-- A signed-in device walkthrough is still required: account confirmation, Explore hydration, report submission, expired-session refresh, and walking a detour. No real user credentials or fabricated community reports were used for testing.
-- Keep the existing daily confidence-maintenance job operational. Public distribution also needs email configuration, account recovery/deletion flows, a published privacy policy and accurate App Store privacy disclosures. The privacy manifest now declares connected email, account ID, location and report-content use; Health data remains undeclared as collected because it is not uploaded.
+- A signed-in device walkthrough is still required: Apple sign-in, Explore hydration, report submission, expired-session refresh, and walking a detour. No real user credentials or fabricated community reports were used for testing.
+- Keep the existing daily confidence-maintenance job operational. Public distribution also needs account recovery/deletion flows, a published privacy policy and accurate App Store privacy disclosures. The privacy manifest now declares connected email, account ID, location and report-content use; Health data remains undeclared as collected because it is not uploaded.
 
 Implementation references: [Supabase Auth REST contract](https://github.com/supabase/auth/blob/master/README.md), [Mapbox Search Box](https://docs.mapbox.com/api/search/search-box/), [Mapbox walking directions](https://docs.mapbox.com/api/navigation/directions/).
 
@@ -37,3 +37,9 @@ Read endpoints (POI discovery/details, route curation, Mapbox category/suggest/r
 Public calls use HMAC-derived peer buckets (raw IPs are not stored), plus a database-backed shared budget of five times each per-peer action limit. The HMAC salt is process-local, so a restart resets peer identity while the global budget persists. Forwarding headers are not parsed by application code; keep Uvicorn's proxy trust restricted to the known ingress, never arbitrary clients. Shared NAT/proxy addresses may share limits. These are conservative launch limits, not a complete distributed abuse defense.
 
 The iOS client sends no JWT for public reads, so an expired account cannot interrupt browsing. There is no signed-out Apple search substitution: everyone receives the same OSM/community and Mapbox sources. Apple Maps still supplies the basemap, address search and navigation.
+
+## Native Apple sign-in setup
+
+Supabase Apple provider is enabled for `com.unfound2.PausePath`. The native flow uses Apple's identity token and the original nonce at `/auth/v1/token?grant_type=id_token`. No web OAuth secret is configured or needed for this native-only flow. See [Supabase native Apple guidance](https://supabase.com/docs/guides/auth/social-login/auth-apple).
+
+The Xcode target includes the Sign in with Apple entitlement. Select your development team and enable automatic signing when building a fresh checkout. The local signed iPhone build succeeded with that entitlement; simulator builds also succeed. Users must still approve Apple's system prompt. Existing email sessions remain supported; choosing Hide My Email may result in a separate account, so account history is not silently merged. Email confirmation settings for legacy email accounts remain enabled.

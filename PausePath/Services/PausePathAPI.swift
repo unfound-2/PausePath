@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import Security
 import MapKit
+import AuthenticationServices
 
 // Public client configuration. Database credentials and Mapbox tokens stay on Render.
 enum ServiceConfiguration {
@@ -40,6 +41,7 @@ private struct AuthSession: Codable {
     let expires_at: Double?
     let expires_in: Double?
     let user: User
+    var appleUserID: String? = nil
     struct User: Codable { let id: String; let email: String? }
 }
 private enum SessionKeychain {
@@ -70,6 +72,7 @@ private enum SessionKeychain {
     private var expiration = Date.distantPast
     private var revision = UUID()
     private var refreshTask: Task<AuthSession, Error>?
+    private var appleChallenge: AppleSignInChallenge?
     var email: String? { session?.user.email }
     var isSignedIn: Bool { session != nil }
     var userID: String? { session?.user.id }
@@ -94,24 +97,69 @@ private enum SessionKeychain {
         // Normalize expiry so a restored session never extends the original lifetime.
         let expiry = value.expires_at ?? Date().timeIntervalSince1970 + (value.expires_in ?? 0)
         let saved = AuthSession(access_token: value.access_token, refresh_token: value.refresh_token,
-            expires_at: expiry, expires_in: value.expires_in, user: value.user)
+            expires_at: expiry, expires_in: value.expires_in, user: value.user, appleUserID: value.appleUserID)
         try SessionKeychain.write(JSONEncoder().encode(saved))
         session = saved; expiration = Date(timeIntervalSince1970: expiry)
     }
-    func signIn(email: String, password: String, create: Bool) async {
-        guard !busy else { return }; busy = true
-        revision = UUID(); let current = revision
-        refreshTask?.cancel(); refreshTask = nil
-        defer { busy = false }
+    func prepareAppleSignIn(_ request: ASAuthorizationAppleIDRequest) {
+        revision = UUID(); refreshTask?.cancel(); refreshTask = nil
+        appleChallenge = nil
         do {
-            let data = try await authRequest(create ? "signup" : "token?grant_type=password", body: ["email": email, "password": password])
-            guard revision == current else { return }
-            if let result = try? JSONDecoder().decode(AuthSession.self, from: data) {
-                try install(result); message = "Connected. Shared stops are available in Explore."
-            } else if create {
-                message = "Check your email to confirm your account, then return here and sign in."
-            } else { throw URLError(.cannotParseResponse) }
-        } catch { message = error.localizedDescription }
+            let challenge = try AppleSignInChallenge()
+            appleChallenge = challenge
+            request.requestedScopes = [.email]
+            request.nonce = challenge.hashedNonce
+            request.state = challenge.state
+            busy = true; message = "Confirm Sign in with Apple to continue."
+        } catch {
+            busy = false; message = "Could not securely start Apple sign-in. Please try again."
+        }
+    }
+    func completeAppleSignIn(_ result: Result<ASAuthorization, Error>) async {
+        let current = revision
+        let challenge = appleChallenge
+        appleChallenge = nil // Never reuse a challenge, including after a failed exchange.
+        defer { if current == revision { busy = false } }
+        do {
+            let authorization = try result.get()
+            guard let challenge,
+                  let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+                  challenge.accepts(state: credential.state),
+                  let bytes = credential.identityToken,
+                  let idToken = String(data: bytes, encoding: .utf8), !idToken.isEmpty else {
+                throw ServiceFailure(status: 400, message: "Apple sign-in expired or could not be verified. Please try again.")
+            }
+            let data = try await authRequest("token?grant_type=id_token", body: [
+                "provider": "apple", "id_token": idToken, "nonce": challenge.nonce])
+            guard current == revision else { return }
+            var value = try JSONDecoder().decode(AuthSession.self, from: data)
+            value.appleUserID = credential.user
+            try install(value)
+            message = "Signed in with Apple. You can now submit community reports."
+        } catch let error as ASAuthorizationError where error.code == .canceled {
+            if current == revision { message = "Sign-in cancelled. You can continue exploring without an account." }
+        } catch {
+            if current == revision { message = error.localizedDescription }
+        }
+    }
+    func checkAppleCredential() async {
+        guard let appleID = session?.appleUserID else { return }
+        let current = revision
+        do {
+            let state: ASAuthorizationAppleIDProvider.CredentialState = try await withCheckedThrowingContinuation { continuation in
+                ASAuthorizationAppleIDProvider().getCredentialState(forUserID: appleID) { state, error in
+                    if let error { continuation.resume(throwing: error) }
+                    else { continuation.resume(returning: state) }
+                }
+            }
+            guard current == revision else { return }
+            if state == .revoked || state == .notFound {
+                await signOut()
+                message = "Apple sign-in is no longer authorized. Sign in again to contribute."
+            }
+        } catch {
+            // A temporary Apple/network failure does not erase a valid session.
+        }
     }
     func accessToken(forceRefresh: Bool = false) async throws -> String {
         guard let session else { throw ServiceFailure(status: 401, message: "Sign in from the Account tab to submit a community report.") }
@@ -127,7 +175,8 @@ private enum SessionKeychain {
             refreshTask = task
         }
         do {
-            let value = try await task.value
+            var value = try await task.value
+            value.appleUserID = session.appleUserID
             guard revision == current else { throw CancellationError() }
             try install(value); refreshTask = nil
             return value.access_token
@@ -145,6 +194,7 @@ private enum SessionKeychain {
     func signOut() async {
         let old = session?.access_token
         revision = UUID(); refreshTask?.cancel(); refreshTask = nil
+        appleChallenge = nil; busy = false
         session = nil; SessionKeychain.clear()
         message = "Signed out on this device."
         if let old {

@@ -78,3 +78,7 @@ The completed connected-client implementation builds for the arm64 iOS simulator
 ## Optional sign-in
 
 Simulator build passes. Backend: 30 tests passed, 5 isolated-database tests skipped. New checks verify public read OpenAPI contracts, protected report/suggestion/admin/moderation/OSM routes, spoofed-header independence, and both per-peer and global request ceilings. Existing personal Xcode and Info.plist changes were preserved.
+
+## Native Apple sign-in — October 16, 2026
+
+All 19 Swift core tests pass, including nonce uniqueness/format and state/expiry rejection. Simulator and automatically provisioned signed iPhone builds succeed. The signed app contains `com.apple.developer.applesignin = [Default]`. Supabase's saved Apple provider configuration is enabled for `com.unfound2.PausePath`, with no web OAuth secret. Device-only Keychain persistence, refresh identity retention, cancellation, and revocation handling were reviewed. A full Apple account sign-in and authenticated report on a physical device still require the user's Apple confirmation and have not been claimed as tested. Local screenshot: `.build/apple-provider.png`.
