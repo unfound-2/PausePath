@@ -12,7 +12,7 @@ def baseline_osm(conn, bbox):
     # Independent public mirrors keep a single upstream outage from hiding node amenities.
     # An explicitly configured endpoint remains exclusive (for private deployments).
     configured = os.environ.get('OVERPASS_URL')
-    endpoints = [configured] if configured else [
+    endpoints = [configured] if configured and configured != "https://overpass-api.de/api/interpreter" else [
         'https://overpass-api.de/api/interpreter',
         'https://overpass.private.coffee/api/interpreter',
     ]
