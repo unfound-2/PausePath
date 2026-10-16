@@ -73,29 +73,70 @@ struct DiscoveredPlace: Identifiable {
         status = "Updating nearby stops…"
         defer { if generation == token { isLoading = false } }
         guard !kinds.isEmpty else { status = "Select at least one facility filter."; return false }
-        do {
-            let response = try await PausePathAPI.search(searchRegion)
-            guard token == generation, !Task.isCancelled else { return false }
-            var stops = response.pois.compactMap(\.place)
-            var commercialWarning = ""
-            do {
-                let cafes = try await PausePathAPI.cafes(searchRegion)
-                // Prefer reportable OSM/community records for duplicate cafés.
-                stops += cafes.filter { cafe in !stops.contains { existing in
-                    existing.kind == .cafe && existing.item.name?.lowercased() == cafe.item.name?.lowercased() &&
-                    CLLocation(latitude: existing.item.placemark.coordinate.latitude, longitude: existing.item.placemark.coordinate.longitude)
-                        .distance(from: CLLocation(latitude: cafe.item.placemark.coordinate.latitude, longitude: cafe.item.placemark.coordinate.longitude)) < 50
-                } }
-            } catch { commercialWarning = " Mapbox cafés unavailable; shared stops are shown." }
-            guard token == generation, !Task.isCancelled else { return false }
-            places = stops
-            status = "\(stops.count) shared/provider stops. Hours and seating need confirmation." + (response.warning.map { " " + $0 } ?? "") + commercialWarning + (response.truncated ? " Zoom in for all stops." : "")
-            return true
-        } catch {
-            guard token == generation, !Task.isCancelled else { return false }
-            places = []; status = error.localizedDescription
-            return false
+        // Start both sources together; publish each as soon as it finishes.
+        // Each task converts failures to values so one provider cannot cancel the other.
+        var sharedFinished = false
+        var cafeFinished = false
+        var sharedSucceeded = false
+        var cafeSucceeded = false
+        var sharedWarning = ""
+        var cafeWarning = ""
+        let sharedTask = Task { @MainActor in
+            let result = await sharedStops(in: searchRegion)
+            guard token == generation, !Task.isCancelled else { return }
+            sharedFinished = true
+            switch result {
+            case .success(let response):
+                sharedSucceeded = true
+                places.removeAll { $0.provider != "Mapbox" }
+                places.insert(contentsOf: response.pois.compactMap(\.place), at: 0)
+                sharedWarning = (response.warning ?? "") + (response.truncated ? " Zoom in for all stops." : "")
+            case .failure:
+                sharedWarning = "Shared stops could not refresh; existing pins may be outdated."
+            }
+            status = "Updating cafés… " + sharedWarning
         }
+        let cafeTask = Task { @MainActor in
+            let result = await commercialStops(in: searchRegion)
+            guard token == generation, !Task.isCancelled else { return }
+            cafeFinished = true
+            switch result {
+            case .success(let cafes):
+                cafeSucceeded = true
+                places.removeAll { $0.provider == "Mapbox" }
+                places += cafes
+            case .failure:
+                cafeWarning = "Cafés could not refresh; existing pins may be outdated."
+            }
+            status = "Updating shared stops… " + cafeWarning
+        }
+        await withTaskCancellationHandler {
+            await sharedTask.value
+            await cafeTask.value
+        } onCancel: {
+            sharedTask.cancel()
+            cafeTask.cancel()
+        }
+        guard token == generation, !Task.isCancelled, sharedFinished, cafeFinished else { return false }
+        let shared = places.filter { $0.provider != "Mapbox" }
+        places.removeAll { cafe in
+            cafe.provider == "Mapbox" && shared.contains { existing in
+                existing.kind == .cafe && existing.item.name?.lowercased() == cafe.item.name?.lowercased() &&
+                CLLocation(latitude: existing.item.placemark.coordinate.latitude, longitude: existing.item.placemark.coordinate.longitude)
+                    .distance(from: CLLocation(latitude: cafe.item.placemark.coordinate.latitude, longitude: cafe.item.placemark.coordinate.longitude)) < 50
+            }
+        }
+        status = "\(places.count) possible stops. " + sharedWarning + " " + cafeWarning
+        return sharedSucceeded && cafeSucceeded
+    }
+
+    private func sharedStops(in region: MKCoordinateRegion) async -> Result<SharedSearch, Error> {
+        do { return .success(try await PausePathAPI.search(region)) }
+        catch { return .failure(error) }
+    }
+    private func commercialStops(in region: MKCoordinateRegion) async -> Result<[DiscoveredPlace], Error> {
+        do { return .success(try await PausePathAPI.cafes(region)) }
+        catch { return .failure(error) }
     }
 
     func walkingDirections(to place: DiscoveredPlace, from origin: CLLocationCoordinate2D) async {

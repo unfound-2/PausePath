@@ -86,3 +86,7 @@ All 19 Swift core tests pass, including nonce uniqueness/format and state/expiry
 ## Archive bundle identifier repair — October 16, 2026
 
 A local Info.plist edit used `$(com.unfound2.PausePath)` and `$(PausePath)` as build-setting references. Both expanded to empty values in the 1:00 PM archive. Restored `$(PRODUCT_BUNDLE_IDENTIFIER)` and `$(PRODUCT_NAME)` while preserving the other local plist contents. A fresh Release device archive succeeded at `.build/PausePath-fixed.xcarchive`; both its application plist and archive metadata contain `com.unfound2.PausePath`. Xcode Organizer recognizes it as an iOS App Archive and enables Validate App and Distribute App. This verifies archive creation, not App Store validation or upload.
+
+## Explore refresh responsiveness — October 16, 2026
+
+Simulator build succeeds after changing map discovery to run OSM/community and Mapbox requests concurrently and publish each provider's results independently. Failed sources preserve their prior pins with an outdated-data notice. Superseded generations cannot publish; parent cancellation cancels both provider tasks. Camera refresh now uses movement-end events and a 300 ms debounce rather than continuous movement events and 650 ms. Periodic refresh skips selected-stop details, and map refresh skips report sheets. No field latency benchmark was performed; Render cold starts and OSM outages remain external limits.

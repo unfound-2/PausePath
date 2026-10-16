@@ -62,12 +62,12 @@ struct DiscoverView: View {
         }
         .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
         .mapControls { MapCompass(); MapScaleView() }
-        .onMapCameraChange(frequency: .continuous) { context in
+        .onMapCameraChange(frequency: .onEnd) { context in
             visibleRegion = context.region
             // Programmatic camera changes (such as fitting a route) must not
             // replace the selected stop or erase its directions.
             guard camera.positionedByUser, !isPreviewingRoute,
-                  discovery.route == nil, !showResults, navigationWalk == nil else { return }
+                  discovery.route == nil, !showReport, !showResults, navigationWalk == nil else { return }
             scheduleAreaRefresh(context.region)
         }
         .ignoresSafeArea(edges: .top)
@@ -84,7 +84,7 @@ struct DiscoverView: View {
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
                 guard scenePhase == .active, !discovery.isLoading,
-                      discovery.route == nil, !showReport, !showResults, navigationWalk == nil else { continue }
+                      discovery.route == nil, selectedID == nil, !showReport, !showResults, navigationWalk == nil else { continue }
                 await loadArea(visibleRegion ?? discovery.region)
             }
         }
@@ -320,9 +320,8 @@ struct DiscoverView: View {
     private func scheduleAreaRefresh(_ region: MKCoordinateRegion) {
         cancelAreaRefresh()
         guard areaChanged(region) else { return }
-        discovery.cancelPending()
         areaRefreshTask = Task {
-            do { try await Task.sleep(for: .milliseconds(650)) }
+            do { try await Task.sleep(for: .milliseconds(300)) }
             catch { return }
             guard !Task.isCancelled else { return }
             await loadArea(region)
