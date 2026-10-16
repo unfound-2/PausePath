@@ -8,7 +8,7 @@ AMENITIES = {'bench':'bench','toilets':'toilet','drinking_water':'drinking_water
 
 def baseline_osm(conn, bbox):
     bounds = ','.join(str(getattr(bbox,k)) for k in ('south','west','north','east'))
-    query = '[out:json][timeout:25];nwr["amenity"~"^(bench|toilets|drinking_water|cafe)$"]('+bounds+');out center tags;'
+    query = '[out:json][timeout:25];nwr["amenity"~"^(bench|toilets|drinking_water|cafe)$"]('+bounds+');out body center;'
     try:
         response = httpx.post(os.environ.get('OVERPASS_URL','https://overpass-api.de/api/interpreter'),
                               data={'data':query}, timeout=30, headers={'User-Agent':'PausePath/0.1'})

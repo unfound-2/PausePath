@@ -22,6 +22,7 @@ struct DiscoverView: View {
     @State private var kinds = Set(FacilityKind.allCases)
     @State private var selectedID: UUID?
     @State private var showResults = false
+    @State private var cardCollapsed = false
     @State private var navigationWalk: GeneratedWalk?
     @State private var searched = false
     @State private var showReport = false
@@ -175,7 +176,15 @@ struct DiscoverView: View {
                 }.accessibilityLabel("Center map on my location")
             }
             if !searchFocused {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Button { animate { cardCollapsed.toggle() } } label: {
+                        Image(systemName: cardCollapsed ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .frame(maxWidth: .infinity).frame(height: 32)
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                        .accessibilityLabel(cardCollapsed ? "Show stop card" : "Hide stop card")
+                    if !cardCollapsed {
                     if let place = selectedPlace { selectedCard(place) }
                     else {
                         HStack(spacing: 12) {
@@ -192,10 +201,17 @@ struct DiscoverView: View {
                             }.accessibilityLabel("Show stops as a list")
                         }
                         if !discovery.status.isEmpty {
-                            Text(discovery.status).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                            Text(discovery.status).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
-                }.padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26))
+                }
+                }.padding(.horizontal, 12).padding(.bottom, cardCollapsed ? 0 : 10)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+                    .simultaneousGesture(DragGesture(minimumDistance: 20).onEnded { value in
+                        guard abs(value.translation.height) > abs(value.translation.width) else { return }
+                        if value.translation.height > 25 { animate { cardCollapsed = true } }
+                        else if value.translation.height < -25 { animate { cardCollapsed = false } }
+                    })
                     .shadow(color: .black.opacity(0.12), radius: 16, y: 5)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -282,7 +298,7 @@ struct DiscoverView: View {
         searchFocused = false
         cancelAreaRefresh()
         discovery.cancelPending()
-        animate { selectedID = place.id; discovery.route = nil }
+        animate { cardCollapsed = false; selectedID = place.id; discovery.route = nil }
     }
     private func cancelAreaRefresh() {
         areaRefreshTask?.cancel()
