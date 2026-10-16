@@ -82,3 +82,7 @@ Simulator build passes. Backend: 30 tests passed, 5 isolated-database tests skip
 ## Native Apple sign-in — October 16, 2026
 
 All 19 Swift core tests pass, including nonce uniqueness/format and state/expiry rejection. Simulator and automatically provisioned signed iPhone builds succeed. The signed app contains `com.apple.developer.applesignin = [Default]`. Supabase's saved Apple provider configuration is enabled for `com.unfound2.PausePath`, with no web OAuth secret. Device-only Keychain persistence, refresh identity retention, cancellation, and revocation handling were reviewed. A full Apple account sign-in and authenticated report on a physical device still require the user's Apple confirmation and have not been claimed as tested. Local screenshot: `.build/apple-provider.png`.
+
+## Archive bundle identifier repair — October 16, 2026
+
+A local Info.plist edit used `$(com.unfound2.PausePath)` and `$(PausePath)` as build-setting references. Both expanded to empty values in the 1:00 PM archive. Restored `$(PRODUCT_BUNDLE_IDENTIFIER)` and `$(PRODUCT_NAME)` while preserving the other local plist contents. A fresh Release device archive succeeded at `.build/PausePath-fixed.xcarchive`; both its application plist and archive metadata contain `com.unfound2.PausePath`. Xcode Organizer recognizes it as an iOS App Archive and enables Validate App and Distribute App. This verifies archive creation, not App Store validation or upload.
