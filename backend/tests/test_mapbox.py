@@ -56,12 +56,10 @@ def test_configuration_missing(monkeypatch):
     with pytest.raises(HTTPException) as exc: mapbox.category_search(MapboxCategorySearch(**BODY))
     assert exc.value.status_code==503
 
-def test_endpoint_requires_auth_and_disables_storage(monkeypatch):
+def test_endpoint_is_public_and_disables_storage(monkeypatch):
     import app.main as main
     client=TestClient(app)
     url='/api/v1/commercial/mapbox/category'
-    assert client.post(url,json=BODY).status_code==401
-    app.dependency_overrides[identity]=lambda: {'sub':'test'}
     monkeypatch.setattr(main,'rate_limit',lambda *a: None)
     monkeypatch.setattr(mapbox,'category_search',lambda body: {'provider':'mapbox','storage':'temporary',
         'arrival_hours_status':'unknown','data':{'type':'FeatureCollection','features':[]}})

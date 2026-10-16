@@ -73,63 +73,29 @@ struct DiscoveredPlace: Identifiable {
         status = "Updating nearby stops…"
         defer { if generation == token { isLoading = false } }
         guard !kinds.isEmpty else { status = "Select at least one facility filter."; return false }
-        if PausePathAccount.shared.isSignedIn {
-            do {
-                let response = try await PausePathAPI.search(searchRegion)
-                guard token == generation, !Task.isCancelled else { return false }
-                var stops = response.pois.compactMap(\.place)
-                var commercialWarning = ""
-                do {
-                    let cafes = try await PausePathAPI.cafes(searchRegion)
-                    // Prefer reportable OSM/community records for duplicate cafés.
-                    stops += cafes.filter { cafe in !stops.contains { existing in
-                        existing.kind == .cafe && existing.item.name?.lowercased() == cafe.item.name?.lowercased() &&
-                        CLLocation(latitude: existing.item.placemark.coordinate.latitude, longitude: existing.item.placemark.coordinate.longitude)
-                            .distance(from: CLLocation(latitude: cafe.item.placemark.coordinate.latitude, longitude: cafe.item.placemark.coordinate.longitude)) < 50
-                    } }
-                } catch { commercialWarning = " Mapbox cafés unavailable; shared stops are shown." }
-                guard token == generation, !Task.isCancelled else { return false }
-                places = stops
-                status = "\(stops.count) shared/provider stops. Hours and seating need confirmation." + (response.warning.map { " " + $0 } ?? "") + commercialWarning + (response.truncated ? " Zoom in for all stops." : "")
-                return true
-            } catch {
-                guard token == generation, !Task.isCancelled else { return false }
-                places = []; status = error.localizedDescription
-                return false
-            }
-        }
-        var found: [DiscoveredPlace] = []
-        var failures = 0
-        for kind in kinds.sorted(by: { $0.rawValue < $1.rawValue }) {
+        do {
+            let response = try await PausePathAPI.search(searchRegion)
             guard token == generation, !Task.isCancelled else { return false }
-            let request = MKLocalSearch.Request()
-            request.region = searchRegion
-            switch kind {
-            case .bench: request.naturalLanguageQuery = "public benches seating"
-            case .bathroom: request.naturalLanguageQuery = "public restrooms"
-            case .fountain: request.naturalLanguageQuery = "drinking water fountains"
-            case .cafe: request.naturalLanguageQuery = "cafes"
-            }
+            var stops = response.pois.compactMap(\.place)
+            var commercialWarning = ""
             do {
-                let search = MKLocalSearch(request: request)
-                activeSearch = search
-                let response = try await search.start()
-                guard token == generation, !Task.isCancelled else { return false }
-                activeSearch = nil
-                found += response.mapItems.filter {
-                    let c = $0.placemark.coordinate
-                    return abs(c.latitude - searchRegion.center.latitude) <= searchRegion.span.latitudeDelta / 2 && abs(c.longitude - searchRegion.center.longitude) <= searchRegion.span.longitudeDelta / 2
-                }.map { DiscoveredPlace(item: $0, kind: kind) }
-            } catch {
-                guard token == generation, !Task.isCancelled else { return false }
-                activeSearch = nil
-                failures += 1
-            }
+                let cafes = try await PausePathAPI.cafes(searchRegion)
+                // Prefer reportable OSM/community records for duplicate cafés.
+                stops += cafes.filter { cafe in !stops.contains { existing in
+                    existing.kind == .cafe && existing.item.name?.lowercased() == cafe.item.name?.lowercased() &&
+                    CLLocation(latitude: existing.item.placemark.coordinate.latitude, longitude: existing.item.placemark.coordinate.longitude)
+                        .distance(from: CLLocation(latitude: cafe.item.placemark.coordinate.latitude, longitude: cafe.item.placemark.coordinate.longitude)) < 50
+                } }
+            } catch { commercialWarning = " Mapbox cafés unavailable; shared stops are shown." }
+            guard token == generation, !Task.isCancelled else { return false }
+            places = stops
+            status = "\(stops.count) shared/provider stops. Hours and seating need confirmation." + (response.warning.map { " " + $0 } ?? "") + commercialWarning + (response.truncated ? " Zoom in for all stops." : "")
+            return true
+        } catch {
+            guard token == generation, !Task.isCancelled else { return false }
+            places = []; status = error.localizedDescription
+            return false
         }
-        guard token == generation, !Task.isCancelled else { return false }
-        places = found
-        status = "\(found.count) possible stops. Facility type, seating and hours need confirmation.\(failures > 0 ? " Some searches failed; retry when connected." : "")"
-        return true
     }
 
     func walkingDirections(to place: DiscoveredPlace, from origin: CLLocationCoordinate2D) async {

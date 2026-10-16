@@ -74,3 +74,7 @@ Per the user's request, this increment has not been built, tested, or launched i
 ## Connected systems — October 15, 2026
 
 The completed connected-client implementation builds for the arm64 iOS simulator; all 17 existing Swift core tests pass. Backend tests: 27 passed, 5 database integration tests skipped locally because no isolated test database was supplied. Added tests cover auth rejection, bounding-box validation, no-store responses, hydration caching without caching community state, provider outages, result truncation, and Mapbox pedestrian outbound/return profiles. The live Supabase discovery SELECT succeeds and returns no records for the sampled area. See CONNECTED_SYSTEMS.md for remaining signed-in device acceptance work.
+
+## Optional sign-in
+
+Simulator build passes. Backend: 30 tests passed, 5 isolated-database tests skipped. New checks verify public read OpenAPI contracts, protected report/suggestion/admin/moderation/OSM routes, spoofed-header independence, and both per-peer and global request ceilings. Existing personal Xcode and Info.plist changes were preserved.

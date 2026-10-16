@@ -42,10 +42,8 @@ def test_provider_outage_and_result_cap(database,monkeypatch):
     assert 'unavailable' in result['warning']
     assert not discovery._cached
 
-def test_discovery_requires_login_and_small_bounds(monkeypatch):
+def test_discovery_is_public_and_requires_small_bounds(monkeypatch):
     client=TestClient(main.app)
-    assert client.post('/api/v1/pois/search',json=BOUNDS).status_code==401
-    main.app.dependency_overrides[identity]=lambda: {'sub':'test'}
     monkeypatch.setattr(main,'rate_limit',lambda *args: None)
     monkeypatch.setattr(main,'search_area',lambda bounds: dict(pois=[],truncated=False,warning=None,attribution='OSM'))
     try:

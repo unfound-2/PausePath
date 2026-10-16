@@ -73,7 +73,7 @@ private enum SessionKeychain {
     var email: String? { session?.user.email }
     var isSignedIn: Bool { session != nil }
     var userID: String? { session?.user.id }
-    var message = "Sign in to use shared stops and community reports."
+    var message = "Browse and plan without an account. Sign in only to contribute reports."
     var busy = false
     private init() {
         if let data = SessionKeychain.read(), let saved = try? JSONDecoder().decode(AuthSession.self, from: data) {
@@ -114,7 +114,7 @@ private enum SessionKeychain {
         } catch { message = error.localizedDescription }
     }
     func accessToken(forceRefresh: Bool = false) async throws -> String {
-        guard let session else { throw ServiceFailure(status: 401, message: "Sign in from the Account tab to use shared stops.") }
+        guard let session else { throw ServiceFailure(status: 401, message: "Sign in from the Account tab to submit a community report.") }
         if !forceRefresh, expiration.timeIntervalSinceNow > 60 { return session.access_token }
         let current = revision
         let task: Task<AuthSession, Error>
@@ -209,23 +209,23 @@ struct CuratedResponse: Decodable {
     }
 }
 @MainActor enum PausePathAPI {
-    static func request(_ path: String, body: [String: Any]? = nil, retry: Bool = true) async throws -> Data {
+    static func request(_ path: String, body: [String: Any]? = nil, retry: Bool = true, requiresAccount: Bool = false) async throws -> Data {
         let account = PausePathAccount.shared
         let user = account.userID
-        let token = try await account.accessToken()
+        let token = requiresAccount ? try await account.accessToken() : nil
         var request = URLRequest(url: ServiceConfiguration.api.appendingPathComponent(path))
         request.httpMethod = body == nil ? "GET" : "POST"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let body { request.httpBody = try JSONSerialization.data(withJSONObject: body) }
         do {
             let data = try await ServiceHTTP.send(request)
             try Task.checkCancellation()
-            guard account.userID == user else { throw CancellationError() }
+            guard !requiresAccount || account.userID == user else { throw CancellationError() }
             return data
-        } catch let error as ServiceFailure where error.status == 401 && retry && account.userID == user {
+        } catch let error as ServiceFailure where error.status == 401 && requiresAccount && retry && account.userID == user {
             _ = try await account.accessToken(forceRefresh: true)
-            return try await self.request(path, body: body, retry: false)
+            return try await self.request(path, body: body, retry: false, requiresAccount: requiresAccount)
         }
     }
     static func bounds(_ region: MKCoordinateRegion) throws -> [String: Double] {

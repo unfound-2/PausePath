@@ -9,7 +9,8 @@ struct AccountView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("PausePath community") {
+                Section("Optional community account") {
+                    Text("Explore stops, plan routes and navigate without signing in. An account is only needed to submit reports or suggest stops.").font(.callout)
                     if account.isSignedIn {
                         Text(account.email ?? "Connected")
                         Button("Sign out", role: .destructive) { Task { await account.signOut() } }
@@ -27,7 +28,7 @@ struct AccountView: View {
                     Text(account.message).font(.callout)
                 }
                 Section("How connected features work") {
-                    Text("While signed in, Explore shares the visible map area to load OSM, community stops and Mapbox cafés. It refreshes as you move the map and once a minute while Explore is open.")
+                    Text("Explore shares the visible map area to load OSM, community stops and Mapbox cafés. It refreshes as you move the map and once a minute while Explore is open.")
                     Text("Finding route breaks shares the planned path, departure time and stop preferences. Arrival estimates on the server use a standard walking speed. Health data, your recorded activities and personal reflections stay on this device.")
                     Text("Reports are linked to your account. New stops need review before appearing for others. Provider coverage and opening hours vary by location.")
                     Link("OpenStreetMap attribution", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
@@ -90,7 +91,7 @@ struct StopReportView: View {
             if !name.isEmpty { body["name"] = String(name.prefix(200)) }
         }
         do {
-            _ = try await PausePathAPI.request("api/v1/reports", body: body)
+            _ = try await PausePathAPI.request("api/v1/reports", body: body, requiresAccount: true)
             submitted = true
             message = place?.shared == nil ? "Suggestion sent for review." : "Report recorded. Shared stop status will update on refresh."
             onSaved()
@@ -119,8 +120,7 @@ struct RouteBreaksView: View {
                 .onChange(of: allowUnknown) { result = nil; latest = [:] }
             Text("Finding breaks shares this route and your stop preferences. Server arrival estimates use a standard walking speed; terrain and maximum seating gaps remain unverified.").font(.caption)
             Button(busy ? "Finding breaks…" : "Find / refresh break stops") { Task { await load() } }
-                .disabled(busy || !PausePathAccount.shared.isSignedIn)
-            if !PausePathAccount.shared.isSignedIn { Text("Sign in in Account to find shared stops.").font(.caption) }
+                .disabled(busy)
             if !message.isEmpty { Text(message).font(.caption) }
             if let result {
                 Text("\(result.properties.break_points.count) suggested stops • \(result.properties.unfilled_targets_meters.count) intervals without a match").font(.subheadline)
@@ -143,7 +143,6 @@ struct RouteBreaksView: View {
         }
         .fullScreenCover(item: $detour, onDismiss: onReturn) { WalkingNavigationView(walk: $0) }
         .sheet(item: $report) { place in StopReportView(place: place, coordinate: place.item.placemark.coordinate) { Task { await refreshStatuses() } } }
-        .onChange(of: PausePathAccount.shared.userID) { result = nil; latest = [:]; onStopsChanged([]) }
         .task(id: result?.properties.break_points.count) {
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
@@ -169,7 +168,7 @@ struct RouteBreaksView: View {
         } catch { message = error.localizedDescription }
     }
     private func refreshStatuses() async {
-        guard let result, PausePathAccount.shared.isSignedIn else { return }
+        guard let result else { return }
         do {
             for stop in result.properties.break_points.prefix(50) {
                 let data = try await PausePathAPI.request("api/v1/pois/\(stop.id.uuidString)")

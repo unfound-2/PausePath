@@ -26,7 +26,6 @@ struct DiscoverView: View {
     @State private var searched = false
     @State private var showReport = false
     @State private var reportPlace: DiscoveredPlace?
-    @State private var account = PausePathAccount.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var areaRefreshTask: Task<Void, Never>?
     @State private var lastRequestedRegion: MKCoordinateRegion?
@@ -78,12 +77,12 @@ struct DiscoverView: View {
             camera = .region(discovery.region)
             // Account task performs the initial load.
         }
-        .task(id: account.userID) {
+        .task {
             discovery.places = []; selectedID = nil; discovery.route = nil
             await refresh()
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
-                guard scenePhase == .active, account.isSignedIn, !discovery.isLoading,
+                guard scenePhase == .active, !discovery.isLoading,
                       discovery.route == nil, !showReport, !showResults, navigationWalk == nil else { continue }
                 await loadArea(visibleRegion ?? discovery.region)
             }
@@ -200,15 +199,13 @@ struct DiscoverView: View {
                     .shadow(color: .black.opacity(0.12), radius: 16, y: 5)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            if account.isSignedIn {
+            Group {
                 Button("Suggest a stop at map center", systemImage: "plus.circle") { reportPlace = nil; showReport = true }
                     .font(.caption).padding(8).background(.regularMaterial, in: Capsule())
                 HStack {
                     Link("© OpenStreetMap", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
                     Link("© Mapbox", destination: URL(string: "https://www.mapbox.com/about/maps/")!)
                 }.font(.caption2).padding(4).background(.regularMaterial, in: Capsule())
-            } else {
-                Text("Sign in in Account for shared stops and community updates.").font(.caption).padding(8).background(.regularMaterial, in: Capsule())
             }
         }.padding(.horizontal, 16).padding(.bottom, 12)
     }

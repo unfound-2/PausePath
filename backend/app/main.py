@@ -1,9 +1,11 @@
 import hashlib
+import hmac
+import secrets
 import json
 import os
 from typing import Annotated, Union
 from uuid import UUID
-from fastapi import FastAPI, Body, Depends, HTTPException, Response
+from fastapi import FastAPI, Body, Depends, HTTPException, Response, Request
 from fastapi.encoders import jsonable_encoder
 from psycopg import errors
 from psycopg.types.json import Jsonb
@@ -19,7 +21,20 @@ from .curation import curate
 app=FastAPI(title='PausePath Micro-Amenity API',version='1.0.0',
     description='PostGIS-backed walking/running break curation and community verification. No medical readiness or exertion inference.')
 
+# Public reads never grant a Supabase identity or database privileges. Raw IPs
+# are not persisted; client-controlled forwarding headers are not read here.
+_public_salt = secrets.token_bytes(32)
+
+def public_reader(request: Request):
+    peer = request.client.host if request.client else 'unknown'
+    digest = hmac.new(_public_salt, peer.encode(), hashlib.sha256).hexdigest()
+    return {'sub': 'guest:' + digest, 'public_read': True}
+
 def rate_limit(user, action, limit=30):
+    if user.get('public_read'):
+        # Shared global ceiling also bounds costs across replicas/restarts and
+        # clients behind proxies. Per-peer limits may be shared behind a NAT.
+        rate_limit({'sub':'public-read-budget'}, action, limit * 5)
     # Shared database counters work across API replicas. Prune old buckets in maintenance.
     with transaction() as conn:
         row=conn.execute('''INSERT INTO api_rate_buckets(user_id,action,window_start)
@@ -40,7 +55,7 @@ def ready():
     return {'status':'ready'}
 
 @app.post('/api/v1/routes/curate',response_model=CuratedRoute,tags=['routes'])
-def curate_route(body: CurateRequest,user=Depends(identity)):
+def curate_route(body: CurateRequest,user=Depends(public_reader)):
     rate_limit(user,'curate',6)
     if not (os.environ.get('PEDESTRIAN_ROUTER_URL') or os.environ.get('MAPBOX_ACCESS_TOKEN')): raise HTTPException(503,'Pedestrian routing provider must be configured')
     return curate(body)
@@ -85,13 +100,13 @@ def ingest(body: IngestRequest,user=Depends(admin)):
     return {'upserted':count,'attribution':'© OpenStreetMap contributors, ODbL 1.0'}
 
 @app.post('/api/v1/pois/search',response_model=DiscoveryResponse,tags=['pois'])
-def discover_pois(body: IngestRequest,response: Response,user=Depends(identity)):
+def discover_pois(body: IngestRequest,response: Response,user=Depends(public_reader)):
     rate_limit(user,'discovery',20)
     response.headers['Cache-Control']='private, no-store'
     return search_area(body)
 
 @app.get('/api/v1/pois/{poi_id}',tags=['pois'])
-def get_poi(poi_id: UUID,user=Depends(identity)):
+def get_poi(poi_id: UUID,user=Depends(public_reader)):
     rate_limit(user,'poi',60)
     with transaction() as conn:
         row=conn.execute('''SELECT id,source,external_id,name,category,ST_AsGeoJSON(geom)::jsonb AS location,
@@ -137,17 +152,17 @@ def commercial_response(response, user):
     rate_limit(user,'commercial',20)
 
 @app.post('/api/v1/commercial/mapbox/category',response_model=MapboxResponse,tags=['commercial'])
-def mapbox_category(body: MapboxCategorySearch,response: Response,user=Depends(identity)):
+def mapbox_category(body: MapboxCategorySearch,response: Response,user=Depends(public_reader)):
     commercial_response(response,user)
     return mapbox.category_search(body)
 
 @app.post('/api/v1/commercial/mapbox/suggest',response_model=MapboxResponse,tags=['commercial'])
-def mapbox_suggest(body: MapboxSuggest,response: Response,user=Depends(identity)):
+def mapbox_suggest(body: MapboxSuggest,response: Response,user=Depends(public_reader)):
     commercial_response(response,user)
     return mapbox.suggest(body)
 
 @app.post('/api/v1/commercial/mapbox/retrieve',response_model=MapboxResponse,tags=['commercial'])
-def mapbox_retrieve(body: MapboxRetrieve,response: Response,user=Depends(identity)):
+def mapbox_retrieve(body: MapboxRetrieve,response: Response,user=Depends(public_reader)):
     commercial_response(response,user)
     return mapbox.retrieve(body)
 
