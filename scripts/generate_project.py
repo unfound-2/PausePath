@@ -14,16 +14,19 @@ for i,path in enumerate(files):
 add(50, 'isa = PBXFileReference; explicitFileType = wrapper.application; path = PausePath.app; sourceTree = BUILT_PRODUCTS_DIR;')
 add(51, 'isa = PBXFileReference; lastKnownFileType = text.xml; path = PausePath/Resources/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT;')
 add(52, f'isa = PBXBuildFile; fileRef = {uid(51)};')
-add(2, f'isa = PBXGroup; children = ({",".join(refs+[uid(51),uid(3)])}); sourceTree = "<group>";')
+add(54, 'isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = PausePath/Resources/Assets.xcassets; sourceTree = SOURCE_ROOT;')
+add(53, f'isa = PBXBuildFile; fileRef = {uid(54)};')
+add(2, f'isa = PBXGroup; children = ({",".join(refs+[uid(51),uid(54),uid(3)])}); sourceTree = "<group>";')
 add(3, f'isa = PBXGroup; children = ({uid(50)}); name = Products; sourceTree = "<group>";')
 add(4, f'isa = PBXNativeTarget; buildConfigurationList = {uid(8)}; buildPhases = ({uid(5)},{uid(6)},{uid(7)}); buildRules = (); dependencies = (); name = PausePath; productName = PausePath; productReference = {uid(50)}; productType = "com.apple.product-type.application";')
 add(5, f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({",".join(builds)}); runOnlyForDeploymentPostprocessing = 0;')
 add(6, 'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;')
-add(7, f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({uid(52)}); runOnlyForDeploymentPostprocessing = 0;')
+add(7, f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({uid(52)},{uid(53)}); runOnlyForDeploymentPostprocessing = 0;')
 for n,configs in [(8,[10,11]),(9,[12,13])]:
     add(n, f'isa = XCConfigurationList; buildConfigurations = ({",".join(uid(c) for c in configs)}); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;')
 for n,name in [(10,'Debug'),(11,'Release')]:
     add(n, f'''isa = XCBuildConfiguration; name = {name}; buildSettings = {{
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 CODE_SIGN_STYLE = Automatic; CODE_SIGN_ENTITLEMENTS = PausePath/Resources/PausePath.entitlements;
 PRODUCT_BUNDLE_IDENTIFIER = "com.unfound2.PausePath"; PRODUCT_NAME = "$(TARGET_NAME)";
 INFOPLIST_FILE = PausePath/Resources/Info.plist; GENERATE_INFOPLIST_FILE = NO;
