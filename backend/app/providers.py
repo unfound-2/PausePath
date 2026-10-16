@@ -9,13 +9,28 @@ AMENITIES = {'bench':'bench','toilets':'toilet','drinking_water':'drinking_water
 def baseline_osm(conn, bbox):
     bounds = ','.join(str(getattr(bbox,k)) for k in ('south','west','north','east'))
     query = '[out:json][timeout:25];nwr["amenity"~"^(bench|toilets|drinking_water|cafe)$"]('+bounds+');out body center;'
-    try:
-        response = httpx.post(os.environ.get('OVERPASS_URL','https://overpass-api.de/api/interpreter'),
-                              data={'data':query}, timeout=30, headers={'User-Agent':'PausePath/0.1'})
-        response.raise_for_status()
-        payload = response.json()
-    except (httpx.HTTPError, ValueError): raise HTTPException(502,'OSM baseline provider unavailable')
-    if payload.get('remark'): raise HTTPException(502,'Overpass returned incomplete data; ingestion not applied')
+    # Independent public mirrors keep a single upstream outage from hiding node amenities.
+    # An explicitly configured endpoint remains exclusive (for private deployments).
+    configured = os.environ.get('OVERPASS_URL')
+    endpoints = [configured] if configured else [
+        'https://overpass-api.de/api/interpreter',
+        'https://overpass.private.coffee/api/interpreter',
+    ]
+    payload = None
+    for endpoint in endpoints:
+        try:
+            response = httpx.post(endpoint, data={'data': query}, timeout=30,
+                                  headers={'User-Agent': 'PausePath/0.1'})
+            response.raise_for_status()
+            candidate = response.json()
+            if not isinstance(candidate, dict) or candidate.get('remark'):
+                continue  # Never persist partial responses as a complete area refresh.
+            payload = candidate
+            break
+        except (httpx.HTTPError, ValueError):
+            continue
+    if payload is None:
+        raise HTTPException(502, 'OSM baseline provider unavailable')
     elements = payload.get('elements',[])
     if len(elements) > 20000: raise HTTPException(413,'Too many POIs; use a smaller bounding box')
     count = 0
