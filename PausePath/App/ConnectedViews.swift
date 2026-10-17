@@ -4,6 +4,8 @@ import AuthenticationServices
 
 struct AccountView: View {
     @State private var account = PausePathAccount.shared
+    @AppStorage("pausepath.weather.guidance.enabled") private var weatherGuidanceEnabled = false
+    @AppStorage("pausepath.weather.walkUpdates.enabled") private var weatherWalkUpdatesEnabled = false
     @Environment(\.colorScheme) private var colorScheme
     var body: some View {
         NavigationStack {
@@ -44,6 +46,15 @@ struct AccountView: View {
                     Link("© OpenStreetMap contributors", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
                     Link("© Mapbox", destination: URL(string: "https://www.mapbox.com/about/maps/")!)
                 }.font(.footnote)
+                Section("Weather guidance") {
+                    Toggle("Show weather on route previews", isOn: $weatherGuidanceEnabled)
+                    Toggle("Show meaningful updates while walking", isOn: $weatherWalkUpdatesEnabled)
+                        .disabled(!weatherGuidanceEnabled)
+                    Text("When enabled, up to three route points and the planned walk time are sent from your device to Apple WeatherKit. If you also enable walking updates, your current location is sent for a check about every 15 minutes while navigation is active and PausePath is open. PausePath does not save these requests.")
+                        .font(.footnote)
+                    Text("Forecasts are estimates and can be unavailable or out of date. Shade and water-stop information is incomplete.")
+                        .font(.footnote)
+                }
             }.navigationTitle("Account")
         }
     }

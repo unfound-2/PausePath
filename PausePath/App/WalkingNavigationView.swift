@@ -58,12 +58,15 @@ struct LiveRouteControls: View {
 struct WalkingNavigationView: View {
     let walk: GeneratedWalk
     @State private var navigator = WalkingNavigator()
+    @State private var weatherGuidance = WeatherGuidanceStore()
     @State private var camera: MapCameraPosition = .automatic
     @State private var acknowledged = false
     @State private var takingBreak = false
     @State private var suggestedStops: [SharedPOI] = []
     @State private var showEndConfirmation = false
     @State private var showReturnConfirmation = false
+    @AppStorage("pausepath.weather.guidance.enabled") private var weatherGuidanceEnabled = false
+    @AppStorage("pausepath.weather.walkUpdates.enabled") private var weatherWalkUpdatesEnabled = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     private var plan: GeneratedWalk { navigator.plan ?? walk }
@@ -91,6 +94,19 @@ struct WalkingNavigationView: View {
                         Text("\(plan.distance / 1000, specifier: "%.1f") km • about \(Int(plan.duration / 60)) min").font(.title2.bold())
                         Text(plan.requirements).font(.subheadline)
                         Text("This route follows Apple walking directions. Terrain, distance between seats, and facility opening hours are unverified; it is not a confirmed match for those requirements.").font(.callout)
+                        if weatherGuidanceEnabled {
+                            WeatherGuidanceCard(store: weatherGuidance)
+                        } else {
+                            Button("Check weather for this route", systemImage: "cloud.sun.fill") {
+                                weatherGuidanceEnabled = true
+                            }.buttonStyle(.bordered)
+                            Text("Checking sends up to three points along this route and your planned time to Apple WeatherKit. PausePath does not save weather requests.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Toggle("Show weather updates during this walk", isOn: $weatherWalkUpdatesEnabled)
+                            .disabled(!weatherGuidanceEnabled)
+                        Text("Updates appear in PausePath while navigation is active and the app is open.")
+                            .font(.caption).foregroundStyle(.secondary)
                         Toggle("Use this route with those details unverified", isOn: $acknowledged)
                         Text("Navigation works while PausePath is open. It pauses when the app goes into the background. Your screen stays on during guidance.").font(.caption).foregroundStyle(.secondary)
                         Button("Start navigation", systemImage: "figure.walk") {
@@ -98,6 +114,15 @@ struct WalkingNavigationView: View {
                         }.buttonStyle(.borderedProminent).disabled(!acknowledged)
                     } else {
                         navigationStatus
+                        if weatherGuidanceEnabled {
+                            WeatherGuidanceCard(store: weatherGuidance)
+                            if let update = weatherGuidance.updateMessage {
+                                Label(update, systemImage: "cloud.sun.fill")
+                                    .font(.callout)
+                                    .padding()
+                                    .background(.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                            }
+                        }
                     }
                     RouteBreaksView(walk: plan, currentLocation: navigator.freshLocation() ? navigator.location?.coordinate : nil,
                         onDetour: { takingBreak = true; navigator.pause() }, onReturn: { takingBreak = false },
@@ -133,6 +158,22 @@ struct WalkingNavigationView: View {
                 }
         }
         .onAppear { if navigator.plan == nil { navigator.prepare(walk) } }
+        .task(id: "\(plan.id)-\(weatherGuidanceEnabled)") {
+            guard weatherGuidanceEnabled else { weatherGuidance.clear(); return }
+            await weatherGuidance.load(for: plan)
+        }
+        .task(id: weatherGuidanceEnabled && weatherWalkUpdatesEnabled && navigator.state == .walking && scenePhase == .active) {
+            guard weatherGuidanceEnabled, weatherWalkUpdatesEnabled, navigator.state == .walking, scenePhase == .active else { return }
+            if let coordinate = navigator.location?.coordinate {
+                await weatherGuidance.checkForMeaningfulChange(at: coordinate)
+            }
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(15 * 60)) } catch { return }
+                guard !Task.isCancelled, navigator.state == .walking, scenePhase == .active,
+                      let coordinate = navigator.location?.coordinate else { continue }
+                await weatherGuidance.checkForMeaningfulChange(at: coordinate)
+            }
+        }
         .onDisappear { if !takingBreak { navigator.stop() } }
         .onChange(of: scenePhase) { if scenePhase == .background { navigator.pause() } }
         .onChange(of: navigator.plan?.id) { camera = .automatic; suggestedStops = [] }
