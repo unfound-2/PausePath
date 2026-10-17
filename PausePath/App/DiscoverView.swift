@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import UIKit
 
 extension FacilityKind {
     var mapColor: Color {
@@ -26,7 +27,20 @@ struct DiscoverView: View {
     @State private var discovery = PlaceDiscovery()
     @State private var camera: MapCameraPosition = .automatic
     @State private var visibleRegion: MKCoordinateRegion?
-    @State private var query = ""
+    @State private var usesCurrentRouteStart = true
+    @State private var routeStartQuery = ""
+    @State private var routeStartMatches: [MKMapItem] = []
+    @State private var routeStart: MKMapItem?
+    @State private var routeStartSearchTask: Task<Void, Never>?
+    @State private var routeStartSearchInProgress = false
+    @State private var routeDestinationQuery = ""
+    @State private var routeDestinationMatches: [MKMapItem] = []
+    @State private var routeDestination: MKMapItem?
+    @State private var routeSearchTask: Task<Void, Never>?
+    @State private var routeSearchInProgress = false
+    @State private var routeDifficultyFilter = RoutePlannerDifficultyFilter.all
+    @State private var mandatoryRouteStops = Set<FacilityKind>()
+    @State private var routeRequestID = UUID()
     @State private var kinds = Set(FacilityKind.allCases)
     @State private var selectedID: UUID?
     @State private var selectedStopIDs: [UUID] = []
@@ -38,6 +52,7 @@ struct DiscoverView: View {
     @State private var showReport = false
     @State private var reportPlace: DiscoveredPlace?
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @State private var areaRefreshTask: Task<Void, Never>?
     @State private var lastRequestedRegion: MKCoordinateRegion?
     @State private var isPreviewingRoute = false
@@ -45,6 +60,17 @@ struct DiscoverView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var visiblePlaces: [DiscoveredPlace] { discovery.places.filter { kinds.contains($0.kind) } }
     private var selectedPlace: DiscoveredPlace? { visiblePlaces.first { $0.id == selectedID } }
+    private var routeStartLocation: CLLocation? {
+        if usesCurrentRouteStart { return isFresh(discovery.currentLocation) ? discovery.currentLocation : nil }
+        guard let routeStart else { return nil }
+        return routeStart.placemark.location ?? CLLocation(latitude: routeStart.placemark.coordinate.latitude, longitude: routeStart.placemark.coordinate.longitude)
+    }
+    private var routeStartCoordinate: CLLocationCoordinate2D? { routeStartLocation?.coordinate }
+    private var routeStartTitle: String {
+        if usesCurrentRouteStart { return "Current location" }
+        if let name = routeStart?.name { return name }
+        return routeStartQuery.isEmpty ? "Set my own" : routeStartQuery
+    }
 
     var body: some View {
         Map(position: $camera) {
@@ -86,19 +112,36 @@ struct DiscoverView: View {
         }
         .ignoresSafeArea(edges: .top)
         .safeAreaInset(edge: .top, spacing: 0) { topControls }
-        .safeAreaInset(edge: .bottom, spacing: 0) { bottomControls }
+        .overlay(alignment: .bottom) {
+            if showRoutePlanner {
+                ExploreRoutePlannerView(discovery: discovery, preferences: preferences, initialDestination: selectedPlace,
+                    destinationQuery: $routeDestinationQuery, destination: $routeDestination,
+                    mandatoryKinds: $mandatoryRouteStops, difficultyFilter: $routeDifficultyFilter,
+                    routeRequestID: $routeRequestID, usesCurrentLocation: usesCurrentRouteStart,
+                    customOrigin: routeStartCoordinate, customOriginName: routeStartTitle,
+                    onNavigate: { navigationWalk = $0 }, onClose: { showRoutePlanner = false })
+                    .padding(.horizontal, 10).padding(.bottom, 6)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else {
+                bottomControls
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.25), value: showRoutePlanner)
         .toolbarBackground(.hidden, for: .tabBar)
         .task {
-            camera = .region(discovery.region)
-            // Account task performs the initial load.
+            camera = .automatic
+            // Ask in context: Explore uses location to show nearby places and
+            // make routes from the user's actual position.
+            discovery.useLocation()
         }
         .task {
             discovery.places = []; selectedID = nil; discovery.route = nil
-            await refresh()
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
                 guard scenePhase == .active, !discovery.isLoading,
                       discovery.route == nil, selectedID == nil, !showReport, !showResults, !showRoutePlanner, navigationWalk == nil else { continue }
+                guard let location = discovery.currentLocation, isFresh(location) else { continue }
                 await loadArea(visibleRegion ?? discovery.region)
             }
         }
@@ -108,13 +151,13 @@ struct DiscoverView: View {
                 Task { await refresh() }
             }
         }
-        .sheet(isPresented: $showRoutePlanner) {
-            ExploreRoutePlannerView(discovery: discovery, preferences: preferences, initialDestination: selectedPlace) { walk in
-                navigationWalk = walk
-            }
-        }
         .onChange(of: [discovery.region.center.latitude, discovery.region.center.longitude]) { moveToDiscoveredArea() }
-        .onDisappear { cancelAreaRefresh(); discovery.cancelPending() }
+        .onDisappear {
+            cancelAreaRefresh()
+            routeStartSearchTask?.cancel()
+            routeSearchTask?.cancel()
+            discovery.cancelPending()
+        }
         .onChange(of: showResults) { if showResults { cancelAreaRefresh() } }
         .onChange(of: showRoutePlanner) { if showRoutePlanner { cancelAreaRefresh() } }
         .onChange(of: navigationWalk?.id) { if navigationWalk != nil { cancelAreaRefresh() } }
@@ -124,54 +167,283 @@ struct DiscoverView: View {
     }
 
     private var topControls: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                Image(systemName: "magnifyingglass").font(.title3).foregroundStyle(.secondary)
-                TextField("Search an area, then choose a destination", text: $query)
-                    .focused($searchFocused).submitLabel(.search).onSubmit(search)
-                    .accessibilityLabel("Search an area, then choose an end destination")
-                if !query.isEmpty {
-                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                        .accessibilityLabel("Clear search")
-                }
-                if searchFocused {
-                    Button(action: search) { Image(systemName: "arrow.right.circle.fill").font(.title2) }
-                        .accessibilityLabel("Find area").disabled(discovery.isLoading)
-                }
-            }.padding(16)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
-                .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.45), lineWidth: 1))
-                .shadow(color: .black.opacity(0.1), radius: 12, y: 4)
-                .padding(.horizontal, 16)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(FacilityKind.allCases, id: \.self) { kind in
-                        let enabled = kinds.contains(kind)
-                        Button {
-                            animate {
-                                if enabled { kinds.remove(kind) } else { kinds.insert(kind) }
-                                if selectedID != nil, !visiblePlaces.contains(where: { $0.id == selectedID }) { discovery.cancelPending(); selectedID = nil; discovery.route = nil }
-                            }
-                        } label: {
-                            HStack(spacing: 7) {
-                                Image(systemName: kind.symbol)
-                                Text("\(kind.chipTitle) \(discovery.places.filter { $0.kind == kind }.count)")
-                                if enabled { Image(systemName: "checkmark").font(.caption.bold()) }
-                            }.font(.subheadline.weight(.semibold))
-                                .padding(.horizontal, 14).frame(minHeight: 44)
-                                .foregroundStyle(enabled ? .white : kind.mapColor)
-                                .background {
-                                    if enabled { Capsule().fill(kind.mapColor) }
-                                    else { Capsule().fill(.regularMaterial) }
-                                }
-                                .shadow(color: .black.opacity(0.1), radius: 5, y: 2)
-                        }.buttonStyle(.plain)
-                            .accessibilityLabel(kind.rawValue)
-                            .accessibilityValue(enabled ? "Selected" : "Not selected")
-                    }
-                }.padding(.horizontal, 16).padding(.bottom, 5)
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Label("Start", systemImage: "location.fill").font(.subheadline.weight(.semibold))
+                Spacer()
+                Menu {
+                    Button { setRouteStartToCurrentLocation() } label: { Label("Current location", systemImage: "location.fill") }
+                    Button { setRouteStartToCustomPlace() } label: { Label("Set my own", systemImage: "magnifyingglass") }
+                } label: {
+                    Label(routeStartTitle, systemImage: "chevron.down")
+                        .font(.subheadline.weight(.semibold)).lineLimit(1)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(.thinMaterial, in: Capsule())
+                }.accessibilityLabel("Starting location: \(routeStartTitle). Choose Current location or Set my own.")
             }
-        }.padding(.top, 12).padding(.bottom, 8)
+
+            if !usesCurrentRouteStart {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Search starting address or place", text: $routeStartQuery)
+                        .submitLabel(.search)
+                        .onSubmit { Task { await searchRouteStarts(routeStartQuery) } }
+                        .onChange(of: routeStartQuery) { _, value in
+                            if routeStart?.name != value { routeStart = nil }
+                            routeStartSearchTask?.cancel()
+                            guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { routeStartMatches = []; return }
+                            routeStartSearchTask = Task {
+                                do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+                                await searchRouteStarts(value)
+                            }
+                        }
+                    if routeStartSearchInProgress { ProgressView().controlSize(.small) }
+                    if !routeStartQuery.isEmpty {
+                        Button { routeStartQuery = ""; routeStart = nil; routeStartMatches = [] } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }.accessibilityLabel("Clear starting location")
+                    }
+                }.padding(12).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+
+                if !routeStartMatches.isEmpty && routeStart == nil {
+                    destinationSuggestions(routeStartMatches, selecting: selectRouteStart)
+                } else if routeStart != nil {
+                    Label("Start: \(routeStartTitle)", systemImage: "checkmark.circle.fill")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                }
+            } else {
+                Label(isFresh(discovery.currentLocation) ? "Using this device’s location" : "Getting current location…", systemImage: "location.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass").font(.title3).foregroundStyle(.secondary)
+                TextField("Search a destination", text: $routeDestinationQuery)
+                    .focused($searchFocused).submitLabel(.search)
+                    .onSubmit { Task { await searchRouteDestinations(routeDestinationQuery) } }
+                    .onChange(of: routeDestinationQuery) { _, value in
+                        if routeDestination?.name != value {
+                            routeDestination = nil
+                            routeDestinationMatches = []
+                            discovery.routeOptions = []
+                            discovery.selectedRouteOptionID = nil
+                        }
+                        routeSearchTask?.cancel()
+                        guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                        routeSearchTask = Task {
+                            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+                            await searchRouteDestinations(value)
+                        }
+                    }
+                if !routeDestinationQuery.isEmpty {
+                    Button { routeDestinationQuery = ""; routeDestinationMatches = []; routeDestination = nil } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }.accessibilityLabel("Clear destination search")
+                }
+                Menu {
+                    ForEach(FacilityKind.allCases, id: \.self) { kind in
+                        Toggle(kind.chipTitle, isOn: Binding(get: { kinds.contains(kind) }, set: { selected in
+                            if selected { kinds.insert(kind) } else { kinds.remove(kind) }
+                            if let selectedID, let selectedKind = discovery.places.first(where: { $0.id == selectedID })?.kind,
+                               !kinds.contains(selectedKind) { self.selectedID = nil; discovery.route = nil }
+                        }))
+                    }
+                } label: { Image(systemName: "checklist").font(.title3).frame(width: 40, height: 40) }
+                    .accessibilityLabel("Choose which stop categories appear on the map")
+            }.padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+
+            HStack(spacing: 8) {
+                Menu {
+                    ForEach(RoutePlannerDifficultyFilter.allCases) { filter in
+                        Button { routeDifficultyFilter = filter } label: {
+                            if filter == routeDifficultyFilter { Label(filter.rawValue, systemImage: "checkmark") } else { Text(filter.rawValue) }
+                        }
+                    }
+                } label: { topFilterPill("Difficulty: \(routeDifficultyFilter.rawValue)", icon: "figure.walk") }
+                Menu {
+                    ForEach(FacilityKind.allCases, id: \.self) { kind in
+                        Toggle(kind.chipTitle, isOn: Binding(get: { mandatoryRouteStops.contains(kind) }, set: { selected in
+                            if selected { mandatoryRouteStops.insert(kind) } else { mandatoryRouteStops.remove(kind) }
+                            clearRoutePreview()
+                        }))
+                    }
+                } label: {
+                    topFilterPill(mandatoryRouteStops.isEmpty ? "Must include: Any" : "Must include: \(mandatoryRouteStops.map(\.chipTitle).sorted().joined(separator: ", "))", icon: "mappin.and.ellipse")
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if !routeDestinationMatches.isEmpty && routeDestination == nil {
+                destinationSuggestions(routeDestinationMatches, selecting: selectRouteDestination)
+            } else if routeSearchInProgress {
+                ProgressView("Finding nearby destinations…").font(.caption).padding(.vertical, 3)
+            } else if let routeDestination {
+                Label("End: \(routeDestination.name ?? routeDestinationQuery)", systemImage: "mappin.and.ellipse")
+                    .font(.caption.weight(.semibold)).padding(.horizontal, 8)
+            }
+
+            if !usesCurrentRouteStart && routeStart == nil {
+                Text("Choose a starting place before searching nearby destinations.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.45), lineWidth: 1))
+        .shadow(color: .black.opacity(0.1), radius: 12, y: 4)
+        .padding(.horizontal, 12).padding(.top, 8)
+    }
+
+    private func destinationSuggestions(_ matches: [MKMapItem], selecting: @escaping (MKMapItem) -> Void) -> some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(Array(matches.enumerated()), id: \.offset) { index, item in
+                    Button { selecting(item) } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(item.name ?? "Place").font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                            Text(address(of: item)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            if let location = routeStartLocation {
+                                Text(distanceText(from: location.coordinate, to: item.placemark.coordinate))
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                        }.frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+                            .contentShape(Rectangle()).padding(.horizontal, 12).padding(.vertical, 4)
+                    }.buttonStyle(.plain)
+                        .accessibilityLabel("\(item.name ?? "Place"), \(address(of: item))")
+                        .accessibilityHint("Select this location")
+                    if index < matches.count - 1 { Divider() }
+                }
+            }
+        }
+        .frame(maxHeight: 198)
+        .scrollIndicators(.visible)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func topFilterPill(_ title: String, icon: String) -> some View {
+        Label(title, systemImage: icon).font(.caption.weight(.semibold)).lineLimit(1)
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .background(.thinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(.quaternary, lineWidth: 1))
+    }
+
+    private func requestLocationAccess() {
+        if discovery.authorizationStatus == .denied || discovery.authorizationStatus == .restricted,
+           let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+            openURL(settingsURL)
+        } else {
+            discovery.requestAlwaysPreciseLocation()
+        }
+    }
+
+    private func setRouteStartToCurrentLocation() {
+        usesCurrentRouteStart = true
+        routeStart = nil
+        routeStartQuery = ""
+        routeStartMatches = []
+        discovery.useLocation()
+        clearRoutePreview()
+        if !routeDestinationQuery.isEmpty { Task { await searchRouteDestinations(routeDestinationQuery) } }
+    }
+
+    private func setRouteStartToCustomPlace() {
+        usesCurrentRouteStart = false
+        routeStart = nil
+        routeStartQuery = ""
+        routeStartMatches = []
+        routeDestinationMatches = []
+        clearRoutePreview()
+    }
+
+    private func searchRouteStarts(_ query: String) async {
+        let cleaned = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty, let currentLocation = discovery.currentLocation, isFresh(currentLocation) else {
+            routeStartMatches = []
+            if !cleaned.isEmpty { discovery.useLocation() }
+            return
+        }
+        routeStartSearchInProgress = true
+        defer { routeStartSearchInProgress = false }
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = cleaned
+        request.resultTypes = [.pointOfInterest, .address]
+        request.region = MKCoordinateRegion(center: currentLocation.coordinate, latitudinalMeters: 30_000, longitudinalMeters: 30_000)
+        do {
+            let response = try await MKLocalSearch(request: request).start()
+            guard routeStartQuery.trimmingCharacters(in: .whitespacesAndNewlines) == cleaned else { return }
+            routeStartMatches = response.mapItems.sorted {
+                CLLocation(latitude: $0.placemark.coordinate.latitude, longitude: $0.placemark.coordinate.longitude).distance(from: currentLocation) <
+                    CLLocation(latitude: $1.placemark.coordinate.latitude, longitude: $1.placemark.coordinate.longitude).distance(from: currentLocation)
+            }
+        } catch {
+            guard routeStartQuery.trimmingCharacters(in: .whitespacesAndNewlines) == cleaned else { return }
+            routeStartMatches = []
+            discovery.status = "Starting place search is unavailable. Check your connection and try again."
+        }
+    }
+
+    private func selectRouteStart(_ item: MKMapItem) {
+        routeStart = item
+        routeStartQuery = item.name ?? address(of: item)
+        routeStartMatches = []
+        clearRoutePreview()
+        if !routeDestinationQuery.isEmpty { Task { await searchRouteDestinations(routeDestinationQuery) } }
+    }
+
+    private func clearRoutePreview() {
+        discovery.route = nil
+        discovery.itinerary = []
+        discovery.routeOptions = []
+        discovery.selectedRouteOptionID = nil
+        if showRoutePlanner && routeDestination != nil { routeRequestID = UUID() }
+    }
+
+    private func searchRouteDestinations(_ query: String) async {
+        let cleaned = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty, let location = routeStartLocation else {
+            routeDestinationMatches = []
+            if !cleaned.isEmpty && usesCurrentRouteStart { discovery.requestAlwaysPreciseLocation() }
+            return
+        }
+        routeSearchInProgress = true
+        defer { routeSearchInProgress = false }
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = cleaned
+        request.resultTypes = [.pointOfInterest, .address]
+        request.region = MKCoordinateRegion(center: location.coordinate, latitudinalMeters: 30_000, longitudinalMeters: 30_000)
+        do {
+            let response = try await MKLocalSearch(request: request).start()
+            guard routeDestinationQuery.trimmingCharacters(in: .whitespacesAndNewlines) == cleaned else { return }
+            routeDestinationMatches = response.mapItems.sorted {
+                CLLocation(latitude: $0.placemark.coordinate.latitude, longitude: $0.placemark.coordinate.longitude).distance(from: location) <
+                    CLLocation(latitude: $1.placemark.coordinate.latitude, longitude: $1.placemark.coordinate.longitude).distance(from: location)
+            }
+            if routeDestinationMatches.isEmpty { discovery.status = "No nearby matches. Try a more specific destination." }
+        } catch {
+            guard routeDestinationQuery.trimmingCharacters(in: .whitespacesAndNewlines) == cleaned else { return }
+            routeDestinationMatches = []
+            discovery.status = "Destination search is unavailable. Check your connection and try again."
+        }
+    }
+
+    private func selectRouteDestination(_ item: MKMapItem) {
+        routeDestination = item
+        routeDestinationQuery = item.name ?? address(of: item)
+        routeDestinationMatches = []
+        clearRoutePreview()
+        searchFocused = false
+    }
+
+    private func address(of item: MKMapItem) -> String {
+        let place = item.placemark
+        return [place.subThoroughfare, place.thoroughfare, place.locality, place.administrativeArea]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    private func distanceText(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) -> String {
+        let meters = CLLocation(latitude: start.latitude, longitude: start.longitude)
+            .distance(from: CLLocation(latitude: end.latitude, longitude: end.longitude))
+        return meters < 1000 ? String(format: "%.0f m away", meters) : String(format: "%.1f km away", meters / 1000)
     }
 
     private var bottomControls: some View {
@@ -189,7 +461,7 @@ struct DiscoverView: View {
                 }.disabled(discovery.isLoading)
                 Spacer()
                 Button {
-                    searchFocused = false; cancelAreaRefresh(); discovery.cancelPending(); selectedID = nil; discovery.route = nil; discovery.useLocation()
+                    searchFocused = false; cancelAreaRefresh(); discovery.cancelPending(); selectedID = nil; discovery.route = nil; requestLocationAccess()
                 } label: {
                     Image(systemName: "location.fill").font(.title3).frame(width: 48, height: 48)
                         .background(.regularMaterial, in: Circle()).shadow(color: .black.opacity(0.12), radius: 8, y: 3)
@@ -215,12 +487,6 @@ struct DiscoverView: View {
                     }.buttonStyle(.plain)
                         .accessibilityLabel(cardCollapsed ? "Show stop card" : "Hide stop card")
                     if !cardCollapsed {
-                    Button {
-                        showRoutePlanner = true
-                    } label: {
-                        Label("Plan a route", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
-                            .font(.headline).frame(maxWidth: .infinity, minHeight: 48)
-                    }.buttonStyle(.borderedProminent)
                     if let place = selectedPlace { selectedCard(place) }
                     else if let option = discovery.routeOptions.first(where: { $0.id == discovery.selectedRouteOptionID }) {
                         VStack(alignment: .leading, spacing: 8) {
@@ -262,7 +528,33 @@ struct DiscoverView: View {
                     .shadow(color: .black.opacity(0.12), radius: 16, y: 5)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-
+            Button {
+                searchFocused = false
+                routeStartSearchTask?.cancel()
+                routeSearchTask?.cancel()
+                routeRequestID = UUID()
+                showRoutePlanner = true
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
+                    Text(discovery.isLoading ? "Finding routes…" : "Search routes")
+                    Spacer()
+                    Image(systemName: "chevron.up")
+                }
+                .font(.headline.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 54)
+                .padding(.horizontal, 18)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(((routeDestination == nil && selectedPlace == nil) || routeStartCoordinate == nil) || discovery.isLoading)
+            .accessibilityHint("Expand route choices from the selected starting point")
+            .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded { value in
+                guard value.translation.height < -40, routeStartCoordinate != nil,
+                      routeDestination != nil || selectedPlace != nil else { return }
+                searchFocused = false
+                routeRequestID = UUID()
+                showRoutePlanner = true
+            })
         }.padding(.horizontal, 16).padding(.bottom, 12)
     }
 
@@ -446,19 +738,12 @@ struct DiscoverView: View {
 
     private func refresh() async {
         cancelAreaRefresh()
-        await loadArea(visibleRegion ?? discovery.region)
-    }
-    private func search() {
-        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        cancelAreaRefresh()
-        searchFocused = false; selectedID = nil
-        Task {
-            if await discovery.findArea(query) {
-                // Use the same debounced path as location changes, not a competing load.
-                lastRequestedRegion = nil
-                moveToDiscoveredArea()
-            }
+        guard let location = discovery.currentLocation, isFresh(location) else {
+            discovery.status = "Waiting for your device location. Allow location access or search for an area."
+            discovery.useLocation()
+            return
         }
+        await loadArea(visibleRegion ?? discovery.region)
     }
     private func buildRoute(to place: DiscoveredPlace) {
         cancelAreaRefresh()

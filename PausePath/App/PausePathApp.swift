@@ -1,4 +1,6 @@
 import SwiftUI
+import AuthenticationServices
+import UIKit
 
 @main struct PausePathApp: App {
     var body: some Scene { WindowGroup { LaunchExperienceView() } }
@@ -11,6 +13,9 @@ private struct LaunchExperienceView: View {
     @State private var trailProgress: CGFloat = 0
     @State private var showsPause = false
     @State private var exiting = false
+    @State private var health = HealthActivityStore()
+    @State private var account = PausePathAccount.shared
+    @AppStorage("pausepath.onboarding.permissions-gate.complete") private var onboardingComplete = false
 
     private let mint = Color(red: 0.92, green: 0.99, blue: 0.96)
     private let teal = Color(red: 0.01, green: 0.30, blue: 0.35)
@@ -19,8 +24,16 @@ private struct LaunchExperienceView: View {
     var body: some View {
         ZStack {
             if finished || exiting {
-                ContentView()
-                    .transition(.opacity)
+                Group {
+                    if onboardingComplete {
+                        ContentView(health: health)
+                    } else {
+                        WelcomeSetupView(account: account, health: health) {
+                            onboardingComplete = true
+                        }
+                    }
+                }
+                .transition(.opacity)
             }
             if !finished {
                 mint.ignoresSafeArea()
@@ -106,6 +119,124 @@ private struct LaunchExperienceView: View {
             // A cancelled launch must never leave an opaque overlay stuck onscreen.
             finished = true
         }
+    }
+}
+
+@MainActor
+private struct WelcomeSetupView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
+    @State var account: PausePathAccount
+    let health: HealthActivityStore
+    let onContinue: () -> Void
+    @State private var locationDiscovery = PlaceDiscovery()
+    @State private var healthRequested = false
+
+    private var locationReady: Bool {
+        locationDiscovery.authorizationStatus == .authorizedAlways && locationDiscovery.accuracyAuthorization == .fullAccuracy
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Image("PausePathLogo").resizable().scaledToFit().frame(height: 88)
+                        .frame(maxWidth: .infinity)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Welcome to PausePath").font(.largeTitle.bold())
+                        Text("Connect your account and enable precise location before exploring. You control Health access.")
+                            .font(.body).foregroundStyle(.secondary)
+                    }
+
+                    setupCard(title: "Sign in with Apple", subtitle: "Required to continue. PausePath uses your account for community features and to keep your settings connected.", icon: "person.crop.circle") {
+                        if account.isSignedIn {
+                            Label("Signed in with Apple", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                        } else {
+                            SignInWithAppleButton(.continue) { request in
+                                account.prepareAppleSignIn(request)
+                            } onCompletion: { result in
+                                Task { await account.completeAppleSignIn(result) }
+                            }
+                            .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+                            .frame(height: 48)
+                            .disabled(account.busy)
+                            if account.busy { ProgressView("Signing in…") }
+                            Text(account.message).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+
+                    setupCard(title: "Connect Apple Health", subtitle: "PausePath can read walking workouts, walking speed, and recorded heart rate for progress summaries. It never writes to Health. You can choose what to share in Apple’s prompt.", icon: "heart.text.square") {
+                        if health.isLoading {
+                            ProgressView("Requesting Health access…")
+                        } else {
+                            Button(healthRequested ? "Review Health access" : "Connect Apple Health", systemImage: "heart") {
+                                healthRequested = true
+                                Task { await health.connect() }
+                            }.buttonStyle(.bordered)
+                            Text(health.status).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+
+                    setupCard(title: "Always + Precise location", subtitle: "Required for nearby routes and live GPS while a walk is active. PausePath stops location tracking when you pause or end the walk.", icon: "location") {
+                        if locationReady {
+                            Label("Always and Precise are enabled", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                        } else {
+                            Button(locationNeedsSettings ? "Open Location Settings" : "Enable Always + Precise", systemImage: "location.fill") {
+                                if locationNeedsSettings {
+                                    if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                                } else {
+                                    locationDiscovery.requestAlwaysPreciseLocation()
+                                }
+                            }.buttonStyle(.bordered)
+                            if locationDiscovery.authorizationStatus == .authorizedWhenInUse ||
+                                (locationDiscovery.authorizationStatus == .authorizedAlways && locationDiscovery.accuracyAuthorization == .reducedAccuracy) {
+                                Button("Open Settings") {
+                                    if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                                }.font(.caption.weight(.semibold))
+                            }
+                            Text(locationDiscovery.status).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Button(action: onContinue) {
+                        Text("Continue to Explore").fontWeight(.semibold).frame(maxWidth: .infinity).padding(.vertical, 6)
+                    }.buttonStyle(.borderedProminent)
+                        .disabled(!account.isSignedIn || !locationReady)
+                    if !account.isSignedIn {
+                        Text("Sign in with Apple to continue.").font(.caption).foregroundStyle(.secondary)
+                    } else if !locationReady {
+                        Text("Turn on Always and Precise location to continue. If iOS has already asked, open Settings to change it.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text("Health access is optional. Apple controls these permissions; PausePath cannot enable access for you.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }.padding(20).frame(maxWidth: 560)
+                    .frame(maxWidth: .infinity, minHeight: 0, alignment: .top)
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
+            .toolbar(.hidden, for: .navigationBar)
+        }
+        .task { await account.checkAppleCredential() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, locationDiscovery.authorizationStatus == .authorizedAlways,
+               locationDiscovery.accuracyAuthorization == .reducedAccuracy {
+                locationDiscovery.requestAlwaysPreciseLocation()
+            }
+        }
+    }
+
+    private var locationNeedsSettings: Bool {
+        locationDiscovery.authorizationStatus == .denied || locationDiscovery.authorizationStatus == .restricted
+    }
+
+    private func setupCard<Content: View>(title: String, subtitle: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: icon).font(.headline)
+            Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+            content()
+        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            .background(.background, in: RoundedRectangle(cornerRadius: 18))
     }
 }
 

@@ -28,7 +28,8 @@ struct WalkingRouteOption: Identifiable {
 }
 
 @MainActor @Observable final class PlaceDiscovery: NSObject, @preconcurrency CLLocationManagerDelegate {
-    var region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 41.8826, longitude: -87.6226), span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02))
+    // A neutral map region for first launch; never imply this is the user's location.
+    var region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 0, longitude: 0), span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02))
     var places: [DiscoveredPlace] = []
     var status = "Search any city or neighborhood to begin."
     var isLoading = false
@@ -37,6 +38,8 @@ struct WalkingRouteOption: Identifiable {
     var routeOptions: [WalkingRouteOption] = []
     var selectedRouteOptionID: UUID?
     var currentLocation: CLLocation?
+    private(set) var authorizationStatus: CLAuthorizationStatus = .notDetermined
+    private(set) var accuracyAuthorization: CLAccuracyAuthorization = .reducedAccuracy
     private let locationManager = CLLocationManager()
     private var generation = UUID()
     private var activeSearch: MKLocalSearch?
@@ -50,16 +53,48 @@ struct WalkingRouteOption: Identifiable {
         [region.center.latitude, region.center.longitude, region.span.latitudeDelta, region.span.longitudeDelta]
             .map { String(format: "%.4f", $0) }.joined(separator: ":")
     }
-    override init() { super.init(); locationManager.delegate = self }
+    override init() {
+        super.init()
+        locationManager.delegate = self
+        authorizationStatus = locationManager.authorizationStatus
+        accuracyAuthorization = locationManager.accuracyAuthorization
+    }
+
+    func requestAlwaysPreciseLocation() {
+        switch locationManager.authorizationStatus {
+        case .notDetermined:
+            status = "Requesting Always location access…"
+            locationManager.requestAlwaysAuthorization()
+        case .authorizedWhenInUse:
+            status = "Allow Always access to keep route guidance available during an active walk."
+            locationManager.requestAlwaysAuthorization()
+        case .authorizedAlways:
+            if locationManager.accuracyAuthorization == .reducedAccuracy {
+                locationManager.requestTemporaryFullAccuracyAuthorization(withPurposeKey: "ActiveWalk")
+            }
+            status = "Checking your precise location…"
+            locationManager.requestLocation()
+        case .denied, .restricted:
+            status = "Enable Always and Precise location in Settings to continue."
+        @unknown default:
+            status = "Location access is unavailable. Check Settings."
+        }
+    }
 
     func useLocation() {
         switch locationManager.authorizationStatus {
-        case .notDetermined: locationManager.requestWhenInUseAuthorization()
-        case .authorizedWhenInUse, .authorizedAlways: locationManager.requestLocation()
-        default: status = "Location access is unavailable. Search a place instead, or enable access in Settings."
+        case .notDetermined:
+            status = "Requesting permission to use your location…"
+            locationManager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse, .authorizedAlways:
+            status = "Finding your device location…"
+            locationManager.requestLocation()
+        default: status = "Location access is unavailable. Enable it in Settings or enter a starting address."
         }
     }
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        authorizationStatus = manager.authorizationStatus
+        accuracyAuthorization = manager.accuracyAuthorization
         if manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways { manager.requestLocation() }
     }
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
@@ -67,9 +102,12 @@ struct WalkingRouteOption: Identifiable {
         generation = UUID(); route = nil; itinerary = []; routeOptions = []; selectedRouteOptionID = nil; isLoading = false
         currentLocation = location
         region.center = location.coordinate
-        status = "Location found. Tap Search this area to find facilities."
+        status = "Location found. Explore nearby places or plan a route from here."
     }
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { status = "Could not locate you. You can still search a place." }
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        currentLocation = nil
+        status = "Could not get your device location. Check Location Services or choose a starting address."
+    }
 
     func cancelPending() {
         generation = UUID()

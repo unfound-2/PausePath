@@ -2,52 +2,72 @@ import SwiftUI
 import MapKit
 import CoreLocation
 
+enum RoutePlannerDifficultyFilter: String, CaseIterable, Identifiable {
+    case all = "Any"
+    case easy = "Easy"
+    case moderate = "Moderate"
+    case hard = "Hard"
+    var id: String { rawValue }
+    var level: RouteDifficultyLevel? {
+        switch self {
+        case .all: nil
+        case .easy: .easy
+        case .moderate: .moderate
+        case .hard: .hard
+        }
+    }
+}
+
 @MainActor
 struct ExploreRoutePlannerView: View {
     let discovery: PlaceDiscovery
     let preferences: RoutePreferences
     let initialDestination: DiscoveredPlace?
+    @Binding var destinationQuery: String
+    @Binding var destination: MKMapItem?
+    @Binding var mandatoryKinds: Set<FacilityKind>
+    @Binding var difficultyFilter: RoutePlannerDifficultyFilter
+    @Binding var routeRequestID: UUID
+    let usesCurrentLocation: Bool
+    let customOrigin: CLLocationCoordinate2D?
+    let customOriginName: String
     let onNavigate: (GeneratedWalk) -> Void
 
-    @Environment(\.dismiss) private var dismiss
-    @State private var useCurrentLocation = true
-    @State private var originQuery = ""
-    @State private var customOrigin: CLLocationCoordinate2D?
-    @State private var customOriginName = ""
-    @State private var destinationQuery = ""
-    @State private var destination: MKMapItem?
-    @State private var selectedDestinationName = ""
-    @State private var mandatoryKinds = Set<FacilityKind>()
-    @State private var difficultyFilter: DifficultyFilter = .all
+    let onClose: () -> Void
     @State private var status = "Choose an end destination to find walking routes."
-    @State private var isSearching = false
     @State private var savedRouteCount = SavedRouteStore.load().count
+    @State private var showHelp = false
+    @State private var sortOrder: RouteSortOrder = .recommended
+    @State private var lastBuiltRequestID: UUID?
     @AppStorage(RouteDifficultyPreferences.storageKey)
     private var factorSelection = RouteDifficultyPreferences.defaultStorageValue
 
-    private enum DifficultyFilter: String, CaseIterable, Identifiable {
-        case all = "All"
-        case easy = "Easy"
-        case moderate = "Moderate"
-        case hard = "Hard"
+    private enum RouteSortOrder: String, CaseIterable, Identifiable {
+        case recommended = "Recommended"
+        case easiest = "Easiest first"
+        case hardest = "Hardest first"
+        case fewestStops = "Fewest stops"
+        case mostStops = "Most stops"
         var id: String { rawValue }
-        var level: RouteDifficultyLevel? {
-            switch self {
-            case .all: nil
-            case .easy: .easy
-            case .moderate: .moderate
-            case .hard: .hard
-            }
-        }
     }
 
     private var originCoordinate: CLLocationCoordinate2D? {
-        useCurrentLocation ? (isFresh(discovery.currentLocation) ? discovery.currentLocation?.coordinate : nil) : customOrigin
+        usesCurrentLocation ? (isFresh(discovery.currentLocation) ? discovery.currentLocation?.coordinate : nil) : customOrigin
     }
 
+    private var originTitle: String { usesCurrentLocation ? "Current location" : customOriginName }
+
     private var visibleOptions: [WalkingRouteOption] {
-        guard let level = difficultyFilter.level else { return discovery.routeOptions }
-        return discovery.routeOptions.filter { difficulty(of: $0) == level }
+        let filtered = difficultyFilter.level.map { level in discovery.routeOptions.filter { difficulty(of: $0) == level } } ?? discovery.routeOptions
+        return filtered.sorted { left, right in
+            switch sortOrder {
+            case .recommended: return left.duration < right.duration
+            case .easiest: return (sortRank(difficulty(of: left)), left.duration) < (sortRank(difficulty(of: right)), right.duration)
+            case .hardest: return (sortRank(difficulty(of: left)), left.duration) > (sortRank(difficulty(of: right)), right.duration)
+            case .fewestStops: return left.stops.count == right.stops.count ? left.duration < right.duration : left.stops.count < right.stops.count
+            case .mostStops: return left.stops.count == right.stops.count ? left.duration < right.duration : left.stops.count > right.stops.count
+            }
+        }
     }
 
     private var requiredOptions: [WalkingRouteOption] {
@@ -59,143 +79,123 @@ struct ExploreRoutePlannerView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Toggle("Start at my current location", isOn: $useCurrentLocation)
-                        .onChange(of: useCurrentLocation) { if useCurrentLocation { discovery.useLocation() } }
-                        .disabled(discovery.isLoading || isSearching)
-                    if useCurrentLocation {
-                        Text(originCoordinate == nil ? "Waiting for a current location. Allow location access or choose a start address." : "Starting point: your current location")
-                            .font(.caption).foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            Capsule().fill(.secondary.opacity(0.45)).frame(width: 38, height: 5).padding(.top, 8).padding(.bottom, 3)
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Route options").font(.headline)
+                    Text("From \(originTitle)").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(action: onClose) {
+                    Image(systemName: "chevron.down").font(.subheadline.weight(.semibold))
+                        .frame(width: 40, height: 40).background(.quaternary, in: Circle())
+                }.accessibilityLabel("Collapse route options and return to map")
+            }.padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 8)
+                .contentShape(Rectangle())
+                .simultaneousGesture(DragGesture(minimumDistance: 25).onEnded { value in
+                    if value.translation.height > 65 { onClose() }
+                })
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if usesCurrentLocation {
                         if originCoordinate == nil {
-                            Button("Update my location", systemImage: "location.fill") { discovery.useLocation() }
-                                .disabled(discovery.isLoading)
+                            Label("Getting your location…", systemImage: "location.slash").font(.caption).foregroundStyle(.secondary)
+                            Button("Try location again", systemImage: "location.fill") { discovery.useLocation() }.buttonStyle(.bordered)
+                        } else {
+                            Label("Using your current device location", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.secondary)
                         }
                     } else {
-                        TextField("Starting address or place", text: $originQuery)
-                            .textContentType(.fullStreetAddress)
-                            .submitLabel(.search)
-                            .onChange(of: originQuery) {
-                                if customOrigin != nil && originQuery != customOriginName {
-                                    customOrigin = nil
-                                    clearRouteOptions()
-                                }
-                            }
-                            .onSubmit { Task { await findPlace(originQuery, isOrigin: true) } }
-                            .disabled(discovery.isLoading || isSearching)
-                        Button(isSearching ? "Searching…" : "Set starting point", systemImage: "magnifyingglass") {
-                            Task { await findPlace(originQuery, isOrigin: true) }
-                        }.disabled(originQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSearching || discovery.isLoading)
-                        if customOrigin != nil { Label("Start set", systemImage: "checkmark.circle.fill").foregroundStyle(.secondary) }
+                        Label(customOriginName.isEmpty ? "Choose a starting place above" : "Starting at \(customOriginName)", systemImage: "location.circle")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                } header: { Text("Starting point") }
 
-                Section {
-                    TextField("Address or place", text: $destinationQuery)
-                        .textContentType(.fullStreetAddress)
-                        .submitLabel(.search)
-                        .onSubmit { Task { await findPlace(destinationQuery, isOrigin: false) } }
-                        .onChange(of: destinationQuery) {
-                            if selectedDestinationName != destinationQuery { destination = nil; selectedDestinationName = ""; clearRouteOptions() }
-                        }
-                        .disabled(discovery.isLoading || isSearching)
-                    Button(isSearching ? "Searching…" : "Find destination", systemImage: "magnifyingglass") {
-                        Task { await findPlace(destinationQuery, isOrigin: false) }
-                    }.disabled(destinationQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSearching || discovery.isLoading)
-                    if let destination {
-                        Label("End: \(destination.name ?? destinationQuery)", systemImage: "mappin.and.ellipse")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    if let initialDestination {
-                        Button("Use \(initialDestination.item.name ?? "selected map place")") {
-                            destination = initialDestination.item
-                            destinationQuery = initialDestination.item.name ?? "Selected place"
-                            selectedDestinationName = destinationQuery
-                        }
-                    }
-                } header: { Text("Destination") }
-
-                Section {
-                    Text("Optional: routes with every selected stop type appear first. Other routes remain available below with the missing stop types named.")
-                        .font(.callout).foregroundStyle(.secondary)
-                    ForEach(FacilityKind.allCases, id: \.self) { kind in
-                        Toggle(kind.chipTitle, isOn: Binding(
-                            get: { mandatoryKinds.contains(kind) },
-                            set: { isOn in
-                                if isOn {
-                                    guard mandatoryKinds.count < 3 else { status = "Choose up to three required stop types."; return }
-                                    mandatoryKinds.insert(kind)
-                                } else { mandatoryKinds.remove(kind) }
-                                clearRouteOptions()
-                            }
-                        )).disabled(discovery.isLoading)
-                    }
-                    Text("Mapped stops and opening hours may be incomplete. A listed stop is not a guarantee that it is open or accessible.")
-                        .font(.caption).foregroundStyle(.secondary)
-                } header: { Text("Stops to include") }
-
-                Section {
-                    Picker("Difficulty", selection: $difficultyFilter) {
-                        ForEach(DifficultyFilter.allCases) { filter in Text(filter.rawValue).tag(filter) }
-                    }.pickerStyle(.segmented)
-                    Button {
-                        Task { await buildRoutes() }
-                    } label: {
+                    if !status.isEmpty { Text(status).font(.callout).foregroundStyle(.secondary) }
+                    if !discovery.routeOptions.isEmpty {
                         HStack {
-                            if discovery.isLoading { ProgressView().controlSize(.small) }
-                            Text(discovery.isLoading ? "Finding routes…" : "Find routes")
-                        }.frame(maxWidth: .infinity)
-                    }.buttonStyle(.borderedProminent)
-                        .disabled(discovery.isLoading || isSearching || originCoordinate == nil || destination == nil)
-                    Text("Routes use walking directions from Apple Maps. Estimated time can change with your pace and breaks.")
-                        .font(.caption).foregroundStyle(.secondary)
-                } header: { Text("Route choices") }
-
-                if !discovery.routeOptions.isEmpty {
-                    if !mandatoryKinds.isEmpty {
-                        Section("Routes with required stops") {
+                            Text("Routes").font(.headline)
+                            Spacer()
+                            Menu {
+                                ForEach(RouteSortOrder.allCases) { order in
+                                    Button { sortOrder = order } label: {
+                                        if order == sortOrder { Label(order.rawValue, systemImage: "checkmark") } else { Text(order.rawValue) }
+                                    }
+                                }
+                            } label: {
+                                Label("Filter", systemImage: "line.3.horizontal.decrease")
+                                    .font(.subheadline.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
+                                    .background(.thinMaterial, in: Capsule())
+                            }
+                        }
+                        if !mandatoryKinds.isEmpty {
+                            Text("Routes with required stops").font(.subheadline.weight(.semibold))
                             if requiredOptions.isEmpty {
-                                Text("No route found with every selected stop type. Check the other routes or change your selections.")
-                                    .foregroundStyle(.secondary)
+                                Text("No route includes all selected stop types. The other routes are listed below.")
+                                    .font(.caption).foregroundStyle(.secondary)
                             }
                             ForEach(requiredOptions) { routeRow($0) }
-                        }
-                        Section {
-                            Text("These options do not include every stop type you selected. Each route lists what it misses.")
-                                .font(.caption).foregroundStyle(.secondary)
+                            Text("Other routes without \(mandatoryKinds.map(\.chipTitle).sorted().joined(separator: ", "))")
+                                .font(.subheadline.weight(.semibold))
+                            Text("These routes may still work for you; each one names the stop types it misses.").font(.caption).foregroundStyle(.secondary)
                             ForEach(otherOptions) { routeRow($0) }
-                        } header: { Text("Other routes") }
-                    } else {
-                        Section("Suggested routes") {
+                        } else {
                             ForEach(visibleOptions) { routeRow($0) }
                         }
+                        Text("Route choices are saved on this device for future comparison. \(savedRouteCount) saved.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else if let destination {
+                        Text("Destination: \(destination.name ?? destinationQuery)").font(.subheadline.weight(.semibold))
+                        if discovery.isLoading { ProgressView("Finding routes…") }
+                        else {
+                            Text("Choose a starting point and review route options for this destination.")
+                                .font(.callout).foregroundStyle(.secondary)
+                            Button("Find routes", systemImage: "point.topleft.down.to.point.bottomright.curvepath") {
+                                Task { await buildRoutes() }
+                            }.buttonStyle(.borderedProminent)
+                                .disabled(originCoordinate == nil)
+                        }
+                    } else {
+                        Label("Search for a destination in the bar above to get started.", systemImage: "magnifyingglass")
+                            .font(.callout).foregroundStyle(.secondary)
                     }
-                    Text("Route choices are saved on this device for future route history and comparison features. \(savedRouteCount) saved.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-
-                if !status.isEmpty { Section { Text(status).font(.callout).foregroundStyle(.secondary) } }
-            }
-            .navigationTitle("Plan a route")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                }.padding()
             }
             .onAppear {
-                if let initialDestination {
+                if destination == nil, let initialDestination {
                     destination = initialDestination.item
                     destinationQuery = initialDestination.item.name ?? "Selected place"
-                    selectedDestinationName = destinationQuery
                 }
-                if useCurrentLocation && !isFresh(discovery.currentLocation) { discovery.useLocation() }
+                if usesCurrentLocation && !isFresh(discovery.currentLocation) { discovery.useLocation() }
+                if destination != nil { requestRoutes(for: routeRequestID) }
+            }
+            .onChange(of: routeRequestID) { _, requestID in requestRoutes(for: requestID) }
+            .onChange(of: destination?.name) {
+                if destination != nil { Task { await buildRoutes() } }
+            }
+            .sheet(isPresented: $showHelp) {
+                NavigationStack {
+                    List {
+                        Section("Location and privacy") {
+                            Text("PausePath uses your current location to find nearby destinations and possible stops, calculate walking routes, and show live progress while you navigate. Location is not used for advertising or community tracking. Route details are saved on this device. Weather checks share approximate route points only when you turn weather guidance on.")
+                            Text("Live GPS can continue while an active walk is in the background. iOS controls location permission and Precise Location; you can change both in Settings. Turning off location limits nearby search and live progress.")
+                        }
+                        Section("Route choices") {
+                            Text("Difficulty is a planning estimate based on route details that are available, such as distance and estimated time. It is not a judgment of your fitness.")
+                            Text("Required stops appear first when mapped options include them. Place and amenity data can be incomplete, and opening or accessibility details may be out of date.")
+                        }
+                    }.navigationTitle("About route planning")
+                        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showHelp = false } } }
+                }.presentationDetents([.medium, .large])
             }
             .onChange(of: discovery.currentLocation?.timestamp) {
                 if isFresh(discovery.currentLocation) { status = "Starting point: your current location." }
             }
         }
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
+        .frame(maxWidth: .infinity)
+        .frame(maxHeight: 520)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.5), lineWidth: 1))
+        .shadow(color: .black.opacity(0.15), radius: 16, y: 6)
     }
 
     @ViewBuilder private func routeRow(_ option: WalkingRouteOption) -> some View {
@@ -223,42 +223,13 @@ struct ExploreRoutePlannerView: View {
             RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: option.distance, durationSeconds: option.duration))
             Button("Navigate this route", systemImage: "figure.walk") {
                 let walk = GeneratedWalk(name: "Walk to \(option.destinationName)", legs: option.legs, preferences: preferences)
-                dismiss()
+                onClose()
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(250))
                     onNavigate(walk)
                 }
             }.buttonStyle(.bordered)
         }.padding(.vertical, 6)
-    }
-
-    private func findPlace(_ query: String, isOrigin: Bool) async {
-        let cleaned = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { return }
-        isSearching = true
-        defer { isSearching = false }
-        let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = cleaned
-        if let coordinate = originCoordinate {
-            request.region = MKCoordinateRegion(center: coordinate, latitudinalMeters: 20_000, longitudinalMeters: 20_000)
-        }
-        do {
-            let response = try await MKLocalSearch(request: request).start()
-            guard let match = response.mapItems.first else { status = "No matching place found. Try a nearby street or landmark."; return }
-            if isOrigin {
-                originQuery = match.name ?? cleaned
-                customOriginName = originQuery
-                customOrigin = match.placemark.coordinate
-            } else {
-                destination = match
-                destinationQuery = match.name ?? cleaned
-                selectedDestinationName = destinationQuery
-            }
-            clearRouteOptions()
-            status = "Place found. Review the route options before starting."
-        } catch {
-            status = "Place search is unavailable. Check your connection or try a different name."
-        }
     }
 
     private func buildRoutes() async {
@@ -302,11 +273,26 @@ struct ExploreRoutePlannerView: View {
         savedRouteCount = SavedRouteStore.load().count
     }
 
+    private func requestRoutes(for requestID: UUID) {
+        guard lastBuiltRequestID != requestID else { return }
+        lastBuiltRequestID = requestID
+        Task { await buildRoutes() }
+    }
+
     private func difficulty(of option: WalkingRouteOption) -> RouteDifficultyLevel? {
         RouteDifficultyCalculator.assess(
             RouteDifficultyInput(distanceMeters: option.distance, durationSeconds: option.duration),
             preferences: RouteDifficultyPreferences(storageValue: factorSelection)
         ).rating
+    }
+
+    private func sortRank(_ level: RouteDifficultyLevel?) -> Int {
+        switch level {
+        case .easy: 0
+        case .moderate: 1
+        case .hard: 2
+        case nil: 3
+        }
     }
 
     private func clearRouteOptions() {

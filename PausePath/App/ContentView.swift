@@ -6,7 +6,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var preferences = RoutePreferences()
     @AppStorage("pausepath.preferences") private var preferencesData = Data()
-    @State private var health = HealthActivityStore()
+    let health: HealthActivityStore
     var body: some View {
         TabView {
             DiscoverView(preferences: preferences).tabItem { Label("Explore", systemImage: "map.fill") }

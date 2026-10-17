@@ -67,7 +67,7 @@ struct WalkingNavigationView: View {
                         Text("Updates appear in PausePath while navigation is active and the app is open.")
                             .font(.caption).foregroundStyle(.secondary)
                         Toggle("Use this route with those details unverified", isOn: $acknowledged)
-                        Text("Navigation works while PausePath is open. It pauses when the app goes into the background. Your screen stays on during guidance.").font(.caption).foregroundStyle(.secondary)
+                        Text("Live GPS continues during an active walk, including when PausePath is in the background. Pause or end the walk to stop tracking. iOS may require Always and Precise Location for reliable background progress; you can change access in Settings.").font(.caption).foregroundStyle(.secondary)
                         Button("Start navigation", systemImage: "figure.walk") {
                             navigator.start(); camera = .userLocation(followsHeading: true, fallback: .automatic)
                         }.buttonStyle(.borderedProminent).disabled(!acknowledged)
@@ -134,7 +134,6 @@ struct WalkingNavigationView: View {
             }
         }
         .onDisappear { if !takingBreak { navigator.stop() } }
-        .onChange(of: scenePhase) { if scenePhase == .background { navigator.pause() } }
         .onChange(of: navigator.plan?.id) { camera = .automatic; suggestedStops = [] }
     }
     private var navigationStatus: some View {

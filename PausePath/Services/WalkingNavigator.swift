@@ -18,6 +18,8 @@ import UIKit
     private var lastSpoken = ""
     private var wantsNavigation = false
     private var wantsPosition = false
+    private var requestedAlwaysAuthorization = false
+    private var requestedPreciseAccuracy = false
     private var routeTask: Task<Void, Never>?
     private var token = UUID()
     override init() {
@@ -25,6 +27,8 @@ import UIKit
         manager.desiredAccuracy = kCLLocationAccuracyBest
         manager.distanceFilter = 5
         manager.activityType = .fitness
+        manager.allowsBackgroundLocationUpdates = true
+        manager.showsBackgroundLocationIndicator = true
     }
     func prepare(_ plan: GeneratedWalk) {
         stop(); self.plan = plan; returnOrigin = plan.start; progress = WalkProgress(paths: plan.paths)
@@ -33,13 +37,30 @@ import UIKit
     func locate() { wantsNavigation = false; wantsPosition = true; requestLocation() }
     func start() {
         guard plan != nil else { return }
-        wantsNavigation = true; state = .locating; requestLocation()
+        wantsNavigation = true; state = .locating
+        requestLocation()
     }
     private func requestLocation() {
         switch manager.authorizationStatus {
-        case .notDetermined: manager.requestWhenInUseAuthorization()
+        case .notDetermined:
+            if wantsNavigation { manager.requestAlwaysAuthorization() }
+            else { manager.requestWhenInUseAuthorization() }
         case .authorizedAlways, .authorizedWhenInUse:
-            if wantsNavigation { manager.startUpdatingLocation(); status = "Waiting for an accurate GPS location…" }
+            if wantsNavigation, manager.accuracyAuthorization == .reducedAccuracy, !requestedPreciseAccuracy {
+                requestedPreciseAccuracy = true
+                manager.requestTemporaryFullAccuracyAuthorization(withPurposeKey: "ActiveWalk")
+            }
+            if wantsNavigation, manager.authorizationStatus == .authorizedWhenInUse, !requestedAlwaysAuthorization {
+                requestedAlwaysAuthorization = true
+                manager.requestAlwaysAuthorization()
+            }
+            if wantsNavigation {
+                manager.allowsBackgroundLocationUpdates = true
+                manager.startUpdatingLocation()
+                status = manager.accuracyAuthorization == .fullAccuracy
+                    ? "Waiting for an accurate GPS location…"
+                    : "GPS is approximate. Enable Precise Location for reliable route progress."
+            }
             else { manager.requestLocation(); status = "Finding your location…" }
         default:
             state = plan == nil ? .ready : .paused
@@ -47,7 +68,11 @@ import UIKit
         }
     }
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        if manager.accuracyAuthorization == .fullAccuracy { requestedPreciseAccuracy = false }
         if manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways {
+            if manager.accuracyAuthorization == .reducedAccuracy {
+                status = "Location is approximate. Turn on Precise Location for live route progress."
+            }
             if wantsNavigation || wantsPosition { requestLocation() }
         } else if manager.authorizationStatus == .denied || manager.authorizationStatus == .restricted {
             pause(); status = "Location access is unavailable. Enable it in Settings to navigate."
@@ -67,6 +92,7 @@ import UIKit
         state = .walking; UIApplication.shared.isIdleTimerDisabled = true
         if progress.arrived {
             state = .arrived; wantsNavigation = false; manager.stopUpdatingLocation()
+            manager.allowsBackgroundLocationUpdates = false
             UIApplication.shared.isIdleTimerDisabled = false; status = "You’ve arrived. Your walk is complete."
         } else if progress.offRoute {
             status = progress.hasStarted ? "You appear to be off route. Return to the path or recalculate the remaining walk." : "Go to the start marker, or recalculate from your location."
@@ -77,8 +103,9 @@ import UIKit
     func pause() {
         token = UUID(); routeTask?.cancel(); isRecalculating = false
         wantsNavigation = false; wantsPosition = false; manager.stopUpdatingLocation(); speech.stopSpeaking(at: .immediate)
+        manager.allowsBackgroundLocationUpdates = false
         UIApplication.shared.isIdleTimerDisabled = false
-        if state != .arrived { state = .paused; status = "Walk paused. Resume when ready. Guidance works while PausePath is open." }
+        if state != .arrived { state = .paused; status = "Walk paused. Resume when ready. Location tracking stops while paused." }
     }
     func stop() { pause(); state = .ready }
     var remainingMeters: Double {
