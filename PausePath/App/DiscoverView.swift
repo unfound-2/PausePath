@@ -94,8 +94,7 @@ struct DiscoverView: View {
                 Task { await refresh() }
             }
         }
-        .onChange(of: discovery.region.center.latitude) { moveToDiscoveredArea() }
-        .onChange(of: discovery.region.center.longitude) { moveToDiscoveredArea() }
+        .onChange(of: [discovery.region.center.latitude, discovery.region.center.longitude]) { moveToDiscoveredArea() }
         .onDisappear { cancelAreaRefresh(); discovery.cancelPending() }
         .onChange(of: showResults) { if showResults { cancelAreaRefresh() } }
         .onChange(of: navigationWalk?.id) { if navigationWalk != nil { cancelAreaRefresh() } }
@@ -340,6 +339,7 @@ struct DiscoverView: View {
     private func loadArea(_ region: MKCoordinateRegion) async {
         guard !Task.isCancelled else { return }
         searchFocused = false; selectedID = nil; searched = true
+        lastRequestedRegion = nil
         // Only remember a successfully completed area. A cancelled request
         // must not suppress the next refresh for the same viewport.
         if await discovery.discover(kinds: Set(FacilityKind.allCases), region: region) {
@@ -357,8 +357,9 @@ struct DiscoverView: View {
         searchFocused = false; selectedID = nil
         Task {
             if await discovery.findArea(query) {
-                cancelAreaRefresh()
-                await loadArea(discovery.region)
+                // Use the same debounced path as location changes, not a competing load.
+                lastRequestedRegion = nil
+                moveToDiscoveredArea()
             }
         }
     }

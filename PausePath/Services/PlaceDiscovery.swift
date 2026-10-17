@@ -25,6 +25,16 @@ struct DiscoveredPlace: Identifiable {
     private let locationManager = CLLocationManager()
     private var generation = UUID()
     private var activeSearch: MKLocalSearch?
+    private struct AreaSnapshot {
+        let key: String
+        let places: [DiscoveredPlace]
+        let savedAt: Date
+    }
+    private var recentAreas: [AreaSnapshot] = []
+    private func areaKey(_ region: MKCoordinateRegion) -> String {
+        [region.center.latitude, region.center.longitude, region.span.latitudeDelta, region.span.longitudeDelta]
+            .map { String(format: "%.4f", $0) }.joined(separator: ":")
+    }
     override init() { super.init(); locationManager.delegate = self }
 
     func useLocation() {
@@ -70,7 +80,14 @@ struct DiscoveredPlace: Identifiable {
     @discardableResult func discover(kinds: Set<FacilityKind>, region searchRegion: MKCoordinateRegion) async -> Bool {
         cancelPending()
         let token = UUID(); generation = token; isLoading = true; route = nil
-        status = "Updating nearby stops…"
+        let key = areaKey(searchRegion)
+        let cached = recentAreas.first { $0.key == key && Date().timeIntervalSince($0.savedAt) < 300 }
+        places = cached?.places ?? places.filter { place in
+            let point = place.item.placemark.coordinate
+            return abs(point.latitude - searchRegion.center.latitude) <= searchRegion.span.latitudeDelta / 2 &&
+                abs(point.longitude - searchRegion.center.longitude) <= searchRegion.span.longitudeDelta / 2
+        }
+        status = cached == nil ? "Updating nearby stops…" : "Showing recent stops while checking for updates…"
         defer { if generation == token { isLoading = false } }
         guard !kinds.isEmpty else { status = "Select at least one facility filter."; return false }
         // Start both sources together; publish each as soon as it finishes.
@@ -78,18 +95,37 @@ struct DiscoveredPlace: Identifiable {
         var sharedFinished = false
         var cafeFinished = false
         var sharedSucceeded = false
+        var receivedSharedPins = false
         var cafeSucceeded = false
         var sharedWarning = ""
         var cafeWarning = ""
         let sharedTask = Task { @MainActor in
-            let result = await sharedStops(in: searchRegion)
+            var result = await sharedStops(in: searchRegion)
+            // A busy ingestion response is not an authoritative empty area.
+            for delay in [2, 6, 15] {
+                guard token == generation, !Task.isCancelled else { return }
+                guard case .success(let response) = result, response.warning != nil else { break }
+                let updates = response.pois.compactMap(\.place)
+                receivedSharedPins = receivedSharedPins || !updates.isEmpty
+                let incomingIDs = Set(updates.map(\.id))
+                places.removeAll { incomingIDs.contains($0.id) }
+                places += updates
+                status = "Loading facilities in this area… " + (response.warning ?? "")
+                do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                guard token == generation else { return }
+                result = await sharedStops(in: searchRegion)
+            }
             guard token == generation, !Task.isCancelled else { return }
             sharedFinished = true
             switch result {
             case .success(let response):
-                sharedSucceeded = true
-                places.removeAll { $0.provider != "Mapbox" }
-                places.insert(contentsOf: response.pois.compactMap(\.place), at: 0)
+                sharedSucceeded = response.warning == nil
+                let updates = response.pois.compactMap(\.place)
+                receivedSharedPins = receivedSharedPins || !updates.isEmpty
+                let incomingIDs = Set(updates.map(\.id))
+                if sharedSucceeded { places.removeAll { $0.provider != "Mapbox" } }
+                else { places.removeAll { incomingIDs.contains($0.id) } }
+                places.insert(contentsOf: updates, at: 0)
                 sharedWarning = (response.warning ?? "") + (response.truncated ? " Zoom in for all stops." : "")
             case .failure:
                 sharedWarning = "Shared stops could not refresh; existing pins may be outdated."
@@ -125,6 +161,11 @@ struct DiscoveredPlace: Identifiable {
                 CLLocation(latitude: existing.item.placemark.coordinate.latitude, longitude: existing.item.placemark.coordinate.longitude)
                     .distance(from: CLLocation(latitude: cafe.item.placemark.coordinate.latitude, longitude: cafe.item.placemark.coordinate.longitude)) < 50
             }
+        }
+        if sharedSucceeded || receivedSharedPins {
+            recentAreas.removeAll { $0.key == key }
+            recentAreas.insert(AreaSnapshot(key: key, places: places, savedAt: Date()), at: 0)
+            recentAreas = Array(recentAreas.prefix(8))
         }
         status = "\(places.count) possible stops. " + sharedWarning + " " + cafeWarning
         return sharedSucceeded && cafeSucceeded
