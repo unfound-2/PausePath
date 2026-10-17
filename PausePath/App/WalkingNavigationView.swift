@@ -82,11 +82,23 @@ struct WalkingNavigationView: View {
                         ForEach(Array(plan.legs.enumerated()), id: \.offset) { index, leg in
                             MapPolyline(leg.polyline).stroke(index == navigator.progress.legIndex ? .teal : .blue.opacity(0.5), lineWidth: index == navigator.progress.legIndex ? 7 : 4)
                         }
+                        let endsNearStart = plan.paths.last?.last.map { WalkingGeometry.distance(plan.start, $0) <= 40 } ?? false
+                        if endsNearStart, let turnaround = plan.paths.first?.last {
+                            Marker("Turnaround", systemImage: "arrow.uturn.down", coordinate: turnaround.mapCoordinate).tint(.orange)
+                        } else {
+                            ForEach(Array(plan.legs.dropLast().enumerated()), id: \.offset) { index, leg in
+                                if let coordinate = leg.polyline.walkingCoordinates.last?.mapCoordinate {
+                                    Marker("Stop \(index + 1)", systemImage: "mappin.and.ellipse", coordinate: coordinate).tint(.orange)
+                                }
+                            }
+                        }
                         ForEach(suggestedStops.filter { !$0.unavailable && $0.location.coordinates.count == 2 }) { poi in
                             Marker(poi.name ?? "Break stop", systemImage: FacilityKind.fromAPI(poi.category)?.symbol ?? "mappin", coordinate: poi.coordinate).tint(.orange)
                         }
-                        Marker("Start", coordinate: walk.start.mapCoordinate)
-                        if let turn = walk.paths.first?.last { Marker(walk.legs.count > 1 ? "Turnaround" : "Destination", systemImage: "flag.fill", coordinate: turn.mapCoordinate) }
+                        Marker("Start", coordinate: plan.start.mapCoordinate)
+                        if let end = plan.paths.last?.last {
+                            Marker(endsNearStart ? "Finish" : "Destination", systemImage: "flag.fill", coordinate: end.mapCoordinate)
+                        }
                     }.mapControls { MapCompass(); MapScaleView() }.frame(height: 300)
                     HStack {
                         Button("Follow me", systemImage: "location.fill") { camera = .userLocation(followsHeading: true, fallback: .automatic) }

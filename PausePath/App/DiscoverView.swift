@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+import CoreLocation
 
 extension FacilityKind {
     var mapColor: Color {
@@ -21,6 +22,7 @@ struct DiscoverView: View {
     @State private var query = ""
     @State private var kinds = Set(FacilityKind.allCases)
     @State private var selectedID: UUID?
+    @State private var selectedStopIDs: [UUID] = []
     @State private var showResults = false
     @State private var cardCollapsed = false
     @State private var navigationWalk: GeneratedWalk?
@@ -58,7 +60,11 @@ struct DiscoverView: View {
                         .accessibilityAddTraits(selectedID == place.id ? [.isSelected] : [])
                 }.annotationTitles(.hidden)
             }
-            if let route = discovery.route { MapPolyline(route.polyline).stroke(.teal, lineWidth: 6) }
+            if discovery.route != nil {
+                ForEach(Array(discovery.itinerary.enumerated()), id: \.offset) { index, leg in
+                    MapPolyline(leg.polyline).stroke(index == 0 ? .teal : .blue, lineWidth: 6)
+                }
+            }
         }
         .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
         .mapControls { MapCompass(); MapScaleView() }
@@ -98,6 +104,7 @@ struct DiscoverView: View {
         .onDisappear { cancelAreaRefresh(); discovery.cancelPending() }
         .onChange(of: showResults) { if showResults { cancelAreaRefresh() } }
         .onChange(of: navigationWalk?.id) { if navigationWalk != nil { cancelAreaRefresh() } }
+        .onChange(of: discovery.selectedRouteOptionID) { fitRouteInMap() }
         .sheet(isPresented: $showResults) { resultsSheet }
         .fullScreenCover(item: $navigationWalk) { WalkingNavigationView(walk: $0) }
     }
@@ -106,9 +113,9 @@ struct DiscoverView: View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
                 Image(systemName: "magnifyingglass").font(.title3).foregroundStyle(.secondary)
-                TextField("Where would you like to walk?", text: $query)
+                TextField("Search an area, then choose a destination", text: $query)
                     .focused($searchFocused).submitLabel(.search).onSubmit(search)
-                    .accessibilityLabel("Search a city, neighborhood or address")
+                    .accessibilityLabel("Search an area, then choose an end destination")
                 if !query.isEmpty {
                     Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                         .accessibilityLabel("Clear search")
@@ -201,7 +208,7 @@ struct DiscoverView: View {
                                 .frame(width: 44, height: 44).background(.teal.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(kinds.isEmpty ? "Choose a filter" : "Find your next pause").font(.headline)
-                                Text(kinds.isEmpty ? "Turn on a category to show its pins." : "\(visiblePlaces.count) possible stops • tap a pin to explore")
+                                Text(kinds.isEmpty ? "Turn on a category to show its pins." : "\(visiblePlaces.count) possible stops • choose a destination or route stop")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 0)
@@ -249,20 +256,78 @@ struct DiscoverView: View {
                 }
             }
             if let route = discovery.route {
+                let legs = discovery.itinerary.isEmpty ? [route] : discovery.itinerary
+                let distance = legs.reduce(0) { $0 + $1.distance }
+                let duration = legs.reduce(0) { $0 + $1.expectedTravelTime }
+                let activeStops = discovery.routeOptions.first { $0.id == discovery.selectedRouteOptionID }?.stops
                 HStack {
-                    Text("\(route.distance / 1000, specifier: "%.1f") km • \(Int(route.expectedTravelTime / 60)) min").font(.subheadline.weight(.semibold))
+                    Text("\(distance / 1000, specifier: "%.1f") km • about \(Int(duration / 60)) min").font(.subheadline.weight(.semibold))
                     Spacer()
                     Button("Navigate", systemImage: "figure.walk") {
-                        navigationWalk = GeneratedWalk(name: route.name, legs: [route], preferences: preferences)
+                        navigationWalk = GeneratedWalk(name: "Walk to \(place.item.name ?? "destination")", legs: legs, preferences: preferences)
                     }.buttonStyle(.borderedProminent)
                 }
-                RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: route.distance, durationSeconds: route.expectedTravelTime))
-                Text("Starts at the map center used for the preview.").font(.caption2).foregroundStyle(.secondary)
+                RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: distance, durationSeconds: duration))
+                Text("Start: your current location • End: \(place.item.name ?? "selected destination")")
+                    .font(.caption2).foregroundStyle(.secondary)
+                if let activeStops, !activeStops.isEmpty {
+                    let names = activeStops.compactMap { $0.item.name }
+                    Text("Stops: \(names.joined(separator: " → "))").font(.caption).foregroundStyle(.secondary)
+                }
+                if discovery.routeOptions.count > 1 {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Choose a route").font(.subheadline.weight(.semibold))
+                        ForEach(discovery.routeOptions) { option in
+                            Button { discovery.selectRouteOption(option.id) } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: option.id == discovery.selectedRouteOptionID ? "largecircle.fill.circle" : "circle")
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(option.title).font(.subheadline.weight(.semibold))
+                                        Text("\(option.distance / 1000, specifier: "%.1f") km • about \(Int(option.duration / 60)) min")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer(minLength: 0)
+                                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            }.buttonStyle(.plain).frame(minHeight: 44)
+                        }
+                    }
+                }
+                Button("Change stops") {
+                    discovery.route = nil; discovery.itinerary = []; discovery.routeOptions = []; discovery.selectedRouteOptionID = nil
+                }
+                    .font(.subheadline).buttonStyle(.plain)
             } else {
-                Button { preview(place) } label: {
-                    Label(discovery.isLoading ? "Finding a path…" : "Walk here from map center", systemImage: "figure.walk")
+                Text("End destination: \(place.item.name ?? "selected place")")
+                    .font(.subheadline.weight(.semibold))
+                if !selectedStopIDs.isEmpty {
+                    Text("Stops are visited in the order you select them.").font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(visiblePlaces.filter { $0.id != place.id }) { stop in
+                    Button {
+                        if let index = selectedStopIDs.firstIndex(of: stop.id) {
+                            selectedStopIDs.remove(at: index)
+                        } else if selectedStopIDs.count < 3 {
+                            selectedStopIDs.append(stop.id)
+                        } else {
+                            discovery.status = "Choose up to three optional stops for one route."
+                        }
+                    } label: {
+                        Label("\(selectedStopIDs.contains(stop.id) ? "Remove" : "Add") stop: \(stop.item.name ?? stop.kind.rawValue)",
+                              systemImage: selectedStopIDs.contains(stop.id) ? "checkmark.circle.fill" : stop.kind.symbol)
+                            .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    }.buttonStyle(.plain).frame(minHeight: 40)
+                }
+                if discovery.currentLocation == nil || !isFresh(discovery.currentLocation) {
+                    Button { discovery.useLocation() } label: {
+                        Label("Use my current location", systemImage: "location.fill")
+                            .frame(maxWidth: .infinity).padding(.vertical, 5)
+                    }.buttonStyle(.bordered)
+                } else {
+                    Button { buildRoute(to: place) } label: {
+                    Label(discovery.isLoading ? "Building route…" : "Build route from my location", systemImage: "figure.walk")
                         .frame(maxWidth: .infinity).padding(.vertical, 5)
-                }.buttonStyle(.borderedProminent).disabled(discovery.isLoading)
+                    }.buttonStyle(.borderedProminent).disabled(discovery.isLoading)
+                }
                 if discovery.status.hasPrefix("Walking directions unavailable") || discovery.status.hasPrefix("No walking route") { Text(discovery.status).font(.caption).foregroundStyle(.secondary) }
             }
         }
@@ -301,7 +366,7 @@ struct DiscoverView: View {
         searchFocused = false
         cancelAreaRefresh()
         discovery.cancelPending()
-        animate { cardCollapsed = false; selectedID = place.id; discovery.route = nil }
+        animate { cardCollapsed = false; selectedID = place.id; selectedStopIDs = []; discovery.route = nil; discovery.itinerary = []; discovery.routeOptions = []; discovery.selectedRouteOptionID = nil }
     }
     private func cancelAreaRefresh() {
         areaRefreshTask?.cancel()
@@ -364,14 +429,30 @@ struct DiscoverView: View {
             }
         }
     }
-    private func preview(_ place: DiscoveredPlace) {
+    private func buildRoute(to place: DiscoveredPlace) {
         cancelAreaRefresh()
         isPreviewingRoute = true
-        let origin = visibleRegion?.center ?? discovery.region.center
+        guard let location = discovery.currentLocation, isFresh(location) else {
+            discovery.status = "A fresh location is needed. Tap Use my current location and allow location access."
+            isPreviewingRoute = false
+            return
+        }
+        let origin = location.coordinate
+        let stops = selectedStopIDs.compactMap { id in visiblePlaces.first { $0.id == id } }
         Task {
             defer { isPreviewingRoute = false }
-            await discovery.walkingDirections(to: place, from: origin)
-            if let route = discovery.route { camera = .rect(route.polyline.boundingMapRect) }
+            await discovery.walkingDirections(to: place, from: origin, via: stops)
+            fitRouteInMap()
         }
+    }
+
+    private func fitRouteInMap() {
+        let rect = discovery.itinerary.reduce(MKMapRect.null) { $0.union($1.polyline.boundingMapRect) }
+        if !rect.isNull { camera = .rect(rect) }
+    }
+
+    private func isFresh(_ location: CLLocation?) -> Bool {
+        guard let location else { return false }
+        return location.horizontalAccuracy >= 0 && location.horizontalAccuracy <= 100 && Date().timeIntervalSince(location.timestamp) <= 60
     }
 }

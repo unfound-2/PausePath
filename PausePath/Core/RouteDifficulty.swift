@@ -25,13 +25,13 @@ public enum RouteDifficultyFactor: String, CaseIterable, Codable, Hashable, Send
 public enum RouteDifficultyLevel: String, CaseIterable, Codable, Sendable, Comparable {
     case easy = "Easy"
     case moderate = "Moderate"
-    case challenging = "Challenging"
+    case hard = "Hard"
 
     fileprivate var severity: Int {
         switch self {
         case .easy: 1
         case .moderate: 2
-        case .challenging: 3
+        case .hard: 3
         }
     }
 
@@ -39,7 +39,7 @@ public enum RouteDifficultyLevel: String, CaseIterable, Codable, Sendable, Compa
         switch severity {
         case ...1: .easy
         case 2: .moderate
-        default: .challenging
+        default: .hard
         }
     }
 
@@ -61,7 +61,7 @@ public enum RouteSurface: String, Codable, Sendable {
         switch self {
         case .paved: .easy
         case .mixed: .moderate
-        case .uneven: .challenging
+        case .uneven: .hard
         }
     }
 
@@ -139,8 +139,12 @@ public struct RouteDifficultyAssessment: Sendable {
     public let rating: RouteDifficultyLevel?
     public let factors: [RouteDifficultyFactorResult]
 
-    public var label: String { rating?.rawValue ?? "Limited route information" }
-    public var hasSelectedMissingData: Bool { rating == nil }
+    public var label: String { rating?.rawValue ?? "Rating unavailable" }
+    public var hasSelectedMissingData: Bool {
+        !factors.contains(where: \.isIncluded) || factors.contains {
+            $0.isIncluded && ($0.status != .complete || $0.level == nil)
+        }
+    }
     public var hasIncompleteData: Bool { factors.contains { $0.status == .incomplete } }
 
     public var limitedInformationMessage: String? {
@@ -148,12 +152,16 @@ public struct RouteDifficultyAssessment: Sendable {
         if factors.allSatisfy({ !$0.isIncluded }) {
             return "Choose at least one factor in Plan to get a route rating."
         }
-        return "Some factors you selected have incomplete or unavailable data, so PausePath can’t give a reliable overall rating."
+        if rating != nil {
+            return "This rating uses the route details available. Some selected factors are missing or incomplete, so comparisons with routes that have different data coverage may be unreliable."
+        }
+        return "There isn’t enough verified route information to rate this route yet."
     }
 }
 
 /// Deterministic, UI-independent rating rules. Factors use broad planning bands;
-/// the most demanding known factor sets a floor so an average cannot hide it.
+/// known factors can produce a rating when other data is missing, and the most
+/// demanding known factor sets a floor so an average cannot hide it.
 public enum RouteDifficultyCalculator {
     public static func assess(
         _ input: RouteDifficultyInput,
@@ -163,13 +171,13 @@ public enum RouteDifficultyCalculator {
             result(for: factor, input: input, included: preferences.includedFactors.contains(factor))
         }
         let selected = factors.filter(\.isIncluded)
-        let selectedIsComplete = !selected.isEmpty && selected.allSatisfy { $0.status == .complete && $0.level != nil }
-        guard selectedIsComplete else {
+        let selectedKnown = selected.compactMap(\.level)
+        guard !selectedKnown.isEmpty else {
             return RouteDifficultyAssessment(rating: nil, factors: factors)
         }
 
-        let averageSeverity = Double(selected.compactMap(\.level).reduce(0) { $0 + $1.severity }) / Double(selected.count)
-        let averageLevel: RouteDifficultyLevel = averageSeverity < 1.5 ? .easy : (averageSeverity < 2.5 ? .moderate : .challenging)
+        let averageSeverity = Double(selectedKnown.reduce(0) { $0 + $1.severity }) / Double(selectedKnown.count)
+        let averageLevel: RouteDifficultyLevel = averageSeverity < 1.5 ? .easy : (averageSeverity < 2.5 ? .moderate : .hard)
         let mostDemandingKnown = factors.compactMap(\.level).max() ?? .easy
         return RouteDifficultyAssessment(rating: max(averageLevel, mostDemandingKnown), factors: factors)
     }
@@ -183,22 +191,22 @@ public enum RouteDifficultyCalculator {
         switch factor {
         case .distance:
             if let meters = input.distanceMeters, meters.isFinite, meters >= 0 {
-                let level: RouteDifficultyLevel = meters <= 1_500 ? .easy : (meters <= 4_000 ? .moderate : .challenging)
+                let level: RouteDifficultyLevel = meters <= 1_500 ? .easy : (meters <= 4_000 ? .moderate : .hard)
                 let range = switch level {
                 case .easy: "≤ 1.5 km"
                 case .moderate: "1.5–4 km"
-                case .challenging: "> 4 km"
+                case .hard: "> 4 km"
                 }
                 measured = (String(format: "%.1f km · %@ range", meters / 1_000, range), level)
             } else { measured = nil }
         case .duration:
             if let seconds = input.durationSeconds, seconds.isFinite, seconds >= 0 {
                 let minutes = Int((seconds / 60).rounded())
-                let level: RouteDifficultyLevel = minutes <= 30 ? .easy : (minutes <= 60 ? .moderate : .challenging)
+                let level: RouteDifficultyLevel = minutes <= 30 ? .easy : (minutes <= 60 ? .moderate : .hard)
                 let range = switch level {
                 case .easy: "≤ 30 min"
                 case .moderate: "31–60 min"
-                case .challenging: "> 60 min"
+                case .hard: "> 60 min"
                 }
                 measured = ("\(minutes) min estimated · \(range)", level)
             } else { measured = nil }
@@ -209,21 +217,21 @@ public enum RouteDifficultyCalculator {
                 var details: [String] = []
                 var levels: [RouteDifficultyLevel] = []
                 if let gain {
-                    let level: RouteDifficultyLevel = gain <= 50 ? .easy : (gain <= 200 ? .moderate : .challenging)
+                    let level: RouteDifficultyLevel = gain <= 50 ? .easy : (gain <= 200 ? .moderate : .hard)
                     let range = switch level {
                     case .easy: "≤ 50 m ascent"
                     case .moderate: "51–200 m ascent"
-                    case .challenging: "> 200 m ascent"
+                    case .hard: "> 200 m ascent"
                     }
                     details.append("\(Int(gain.rounded())) m ascent (\(range))")
                     levels.append(level)
                 }
                 if let grade {
-                    let level: RouteDifficultyLevel = grade <= 3 ? .easy : (grade <= 6 ? .moderate : .challenging)
+                    let level: RouteDifficultyLevel = grade <= 3 ? .easy : (grade <= 6 ? .moderate : .hard)
                     let range = switch level {
                     case .easy: "≤ 3%"
                     case .moderate: "3–6%"
-                    case .challenging: "> 6%"
+                    case .hard: "> 6%"
                     }
                     details.append(String(format: "max grade %.1f%% (%@)", grade, range))
                     levels.append(level)
@@ -237,21 +245,21 @@ public enum RouteDifficultyCalculator {
             } else { measured = nil }
         case .stairs:
             if let flights = input.stairFlights, flights >= 0 {
-                let level: RouteDifficultyLevel = flights == 0 ? .easy : (flights <= 3 ? .moderate : .challenging)
+                let level: RouteDifficultyLevel = flights == 0 ? .easy : (flights <= 3 ? .moderate : .hard)
                 let range = switch level {
                 case .easy: "0 flights"
                 case .moderate: "1–3 flights"
-                case .challenging: "> 3 flights"
+                case .hard: "> 3 flights"
                 }
                 measured = ("\(flights) stair flights · \(range)", level)
             } else { measured = nil }
         case .restStops:
             if let gap = input.maximumRestStopGapMeters, gap.isFinite, gap >= 0 {
-                let level: RouteDifficultyLevel = gap <= 500 ? .easy : (gap <= 1_000 ? .moderate : .challenging)
+                let level: RouteDifficultyLevel = gap <= 500 ? .easy : (gap <= 1_000 ? .moderate : .hard)
                 let range = switch level {
                 case .easy: "≤ 500 m gap"
                 case .moderate: "501–1,000 m gap"
-                case .challenging: "> 1,000 m gap"
+                case .hard: "> 1,000 m gap"
                 }
                 measured = ("Up to \(Int(gap.rounded())) m between confirmed rest stops · \(range)", level)
             } else { measured = nil }

@@ -25,6 +25,9 @@ struct RouteDifficultyPreview: View {
             Text("A planning aid, not a measure of your fitness or ability.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if let message = assessment.limitedInformationMessage {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+            }
         }
         .sheet(isPresented: $showingDetails) {
             RouteDifficultyDetailView(input: input)
@@ -42,7 +45,7 @@ struct RouteDifficultyFactorSettings: View {
 
     var body: some View {
         Section("Route difficulty factors") {
-            Text("Choose which factors should have data for your rating. A known demanding factor can still raise the overall label so it isn’t hidden. If a selected factor has missing data, the route is marked as limited.")
+            Text("Choose which factors matter to your rating. PausePath uses available selected factors when some route data is missing. A known demanding factor can still raise the overall label so it isn’t hidden.")
                 .font(.callout)
             ForEach(RouteDifficultyFactor.allCases) { factor in
                 Toggle(factor.title, isOn: Binding(
@@ -116,7 +119,7 @@ private struct RouteDifficultyDetailView: View {
                 }
 
                 Section("How the label is set") {
-                    Text("The selected, available factors are averaged across broad planning ranges. The most demanding known factor sets a minimum label, even if you did not select it, so a low average cannot hide a demanding route factor. A selected factor with incomplete or unavailable data changes the label to Limited route information.")
+                    Text("Available selected factors are averaged across broad planning ranges. The most demanding known factor sets a minimum label, even if you did not select it, so a low average cannot hide a demanding route factor. When some selected factors are missing, the label still uses known route details and this view identifies the gaps; comparisons may be unreliable when data coverage differs.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -148,7 +151,7 @@ private struct RouteDifficultyDetailView: View {
         switch result.level {
         case .some(.easy): return .green
         case .some(.moderate): return .orange
-        case .some(.challenging): return .red
+        case .some(.hard): return .red
         case .none: return .secondary
         }
     }

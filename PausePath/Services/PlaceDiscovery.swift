@@ -16,12 +16,26 @@ struct DiscoveredPlace: Identifiable {
     let website: URL?
 }
 
+struct WalkingRouteOption: Identifiable {
+    let id: UUID
+    let title: String
+    let stops: [DiscoveredPlace]
+    let legs: [MKRoute]
+
+    var distance: Double { legs.reduce(0) { $0 + $1.distance } }
+    var duration: TimeInterval { legs.reduce(0) { $0 + $1.expectedTravelTime } }
+}
+
 @MainActor @Observable final class PlaceDiscovery: NSObject, @preconcurrency CLLocationManagerDelegate {
     var region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 41.8826, longitude: -87.6226), span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02))
     var places: [DiscoveredPlace] = []
     var status = "Search any city or neighborhood to begin."
     var isLoading = false
     var route: MKRoute?
+    var itinerary: [MKRoute] = []
+    var routeOptions: [WalkingRouteOption] = []
+    var selectedRouteOptionID: UUID?
+    var currentLocation: CLLocation?
     private let locationManager = CLLocationManager()
     private var generation = UUID()
     private var activeSearch: MKLocalSearch?
@@ -49,7 +63,8 @@ struct DiscoveredPlace: Identifiable {
     }
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
-        generation = UUID(); places = []; route = nil; isLoading = false
+        generation = UUID(); route = nil; itinerary = []; routeOptions = []; selectedRouteOptionID = nil; isLoading = false
+        currentLocation = location
         region.center = location.coordinate
         status = "Location found. Tap Search this area to find facilities."
     }
@@ -182,17 +197,67 @@ struct DiscoveredPlace: Identifiable {
         catch { return .failure(error) }
     }
 
-    func walkingDirections(to place: DiscoveredPlace, from origin: CLLocationCoordinate2D) async {
-        let token = UUID(); generation = token; route = nil; isLoading = true
+    func walkingDirections(to place: DiscoveredPlace, from origin: CLLocationCoordinate2D, via stops: [DiscoveredPlace] = []) async {
+        let token = UUID(); generation = token; route = nil; itinerary = []; routeOptions = []; selectedRouteOptionID = nil; isLoading = true
         defer { if token == generation { isLoading = false } }
-        let request = MKDirections.Request()
-        request.source = MKMapItem(placemark: MKPlacemark(coordinate: origin))
-        request.destination = place.item; request.transportType = .walking
-        do {
-            let response = try await MKDirections(request: request).calculate()
-            guard token == generation else { return }
-            route = response.routes.first
-            status = route == nil ? "No walking route available here." : "Walking directions from map center. Slope, seating gaps and opening hours are unverified."
-        } catch { if token == generation { status = "Walking directions unavailable here. Try another stop." } }
+        var options: [WalkingRouteOption] = []
+        var stopSets: [[DiscoveredPlace]] = [[]]
+        for stop in stops { stopSets.append([stop]) }
+        if stops.count >= 2 {
+            for first in stops.indices {
+                for second in stops.indices where second > first {
+                    stopSets.append([stops[first], stops[second]])
+                }
+            }
+        }
+        if stops.count == 3 { stopSets.append(stops) }
+
+        var directDistance: Double?
+        for stopSet in stopSets {
+            guard token == generation, !Task.isCancelled else { return }
+            do {
+                var legs: [MKRoute] = []
+                var start = origin
+                for waypoint in stopSet + [place] {
+                    let request = MKDirections.Request()
+                    request.source = MKMapItem(placemark: MKPlacemark(coordinate: start))
+                    request.destination = waypoint.item
+                    request.transportType = .walking
+                    let response = try await MKDirections(request: request).calculate()
+                    guard let leg = response.routes.first else { throw RouteBuildError.noRoute }
+                    legs.append(leg)
+                    start = leg.polyline.walkingCoordinates.last?.mapCoordinate ?? waypoint.item.placemark.coordinate
+                }
+                let option = WalkingRouteOption(id: UUID(), title: stopSet.isEmpty ? "Direct" : "Via " + stopSet.compactMap { $0.item.name }.joined(separator: " + "), stops: stopSet, legs: legs)
+                if stopSet.isEmpty { directDistance = option.distance }
+                if let directDistance, option.distance > directDistance * 2.25 { continue }
+                options.append(option)
+            } catch {
+                // Keep successful alternatives if one stop combination cannot be routed.
+                continue
+            }
+        }
+        guard token == generation else { return }
+        routeOptions = options.sorted { $0.distance < $1.distance }
+        if let direct = routeOptions.first(where: { $0.stops.isEmpty }) {
+            selectRouteOption(direct.id)
+        } else if let first = routeOptions.first {
+            selectRouteOption(first.id)
+        } else {
+            status = "No walking route was found for this destination and stop combination. Try another destination or fewer stops."
+            return
+        }
+        status = routeOptions.count == 1
+            ? "One walking route is available. Stop access and opening hours are unverified."
+            : "\(routeOptions.count) walking route options found. Compare time and distance before choosing. Stop access and opening hours are unverified."
     }
+
+    func selectRouteOption(_ id: UUID) {
+        guard let option = routeOptions.first(where: { $0.id == id }) else { return }
+        selectedRouteOptionID = option.id
+        itinerary = option.legs
+        route = option.legs.first
+    }
+
+    private enum RouteBuildError: Error { case noRoute }
 }
