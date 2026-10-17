@@ -8,8 +8,8 @@ private struct LaunchExperienceView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var finished = false
     @State private var appeared = false
-    @State private var pathArrived = false
-    @State private var playing = false
+    @State private var trailProgress: CGFloat = 0
+    @State private var showsPause = false
     @State private var exiting = false
 
     private let mint = Color(red: 0.92, green: 0.99, blue: 0.96)
@@ -36,7 +36,7 @@ private struct LaunchExperienceView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.5)
                     }
-                    .scaleEffect(exiting && !reduceMotion ? 0.72 : 1)
+                    .scaleEffect(exiting && !reduceMotion ? 0.55 : 1)
                     .opacity(appeared && !exiting ? 1 : 0)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -53,9 +53,7 @@ private struct LaunchExperienceView: View {
             let height = geometry.size.height
             ZStack(alignment: .top) {
                 LaunchMarker().fill(teal)
-                LaunchTrail().fill(lime)
-                    .offset(y: pathArrived ? 0 : height)
-                    .opacity(pathArrived ? 1 : 0)
+                LaunchTrail(progress: trailProgress).fill(lime)
                     .clipShape(LaunchMarker())
                 ZStack {
                     HStack(spacing: width * 0.05) {
@@ -64,12 +62,12 @@ private struct LaunchExperienceView: View {
                                 .frame(width: width * 0.117, height: height * 0.25)
                         }
                     }
-                    .opacity(playing ? 0 : 1)
-                    .scaleEffect(playing && !reduceMotion ? 0.65 : 1)
+                    .opacity(showsPause ? 1 : 0)
+                    .scaleEffect(showsPause || reduceMotion ? 1 : 0.65)
                     Image(systemName: "play.fill")
                         .font(.system(size: width * 0.29, weight: .black))
-                        .opacity(playing ? 1 : 0)
-                        .scaleEffect(playing || reduceMotion ? 1 : 0.65)
+                        .opacity(showsPause ? 0 : 1)
+                        .scaleEffect(showsPause && !reduceMotion ? 0.65 : 1)
                 }
                 .foregroundStyle(lime)
                 .frame(width: width, height: height * 0.25)
@@ -84,20 +82,21 @@ private struct LaunchExperienceView: View {
         guard !finished else { return }
         // Reset if SwiftUI cancels and restarts this view's task.
         appeared = false
-        pathArrived = false
-        playing = false
+        trailProgress = 0
+        showsPause = false
         exiting = false
         do {
             if reduceMotion {
-                pathArrived = true
+                showsPause = true
+                trailProgress = 1
                 withAnimation(.easeOut(duration: 0.2)) { appeared = true }
                 try await Task.sleep(for: .milliseconds(650))
             } else {
                 withAnimation(.easeOut(duration: 0.45)) { appeared = true }
                 try await Task.sleep(for: .milliseconds(500))
-                withAnimation(.spring(response: 0.85, dampingFraction: 0.85)) { pathArrived = true }
-                try await Task.sleep(for: .milliseconds(1000))
-                withAnimation(.easeInOut(duration: 0.35)) { playing = true }
+                withAnimation(.easeInOut(duration: 1.35)) { trailProgress = 1 }
+                try await Task.sleep(for: .milliseconds(1450))
+                withAnimation(.easeInOut(duration: 0.35)) { showsPause = true }
                 try await Task.sleep(for: .milliseconds(650))
             }
             withAnimation(.easeInOut(duration: reduceMotion ? 0.2 : 0.6)) { exiting = true }
@@ -110,7 +109,7 @@ private struct LaunchExperienceView: View {
     }
 }
 
-// Separate vector layers let the trail move independently of the marker.
+// Separate vector layers let the trail draw independently of the marker.
 // Coordinates follow the supplied logo and scale to every device size.
 private struct LaunchMarker: Shape {
     func path(in rect: CGRect) -> Path {
@@ -130,23 +129,60 @@ private struct LaunchMarker: Shape {
 }
 
 private struct LaunchTrail: Shape {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    // Paired edges run from the marker tip to the top of the winding trail.
+    // Drawing both edges together preserves the logo's changing ribbon width.
+    private let outer: [[CGPoint]] = [
+        [.init(x: 0.49, y: 1), .init(x: 0.572, y: 0.933), .init(x: 0.653, y: 0.867), .init(x: 0.735, y: 0.80)],
+        [.init(x: 0.735, y: 0.80), .init(x: 0.70, y: 0.67), .init(x: 0.45, y: 0.66), .init(x: 0.41, y: 0.61)],
+        [.init(x: 0.41, y: 0.61), .init(x: 0.36, y: 0.55), .init(x: 0.65, y: 0.54), .init(x: 0.74, y: 0.49)],
+        [.init(x: 0.74, y: 0.49), .init(x: 0.82, y: 0.44), .init(x: 0.68, y: 0.38), .init(x: 0.37, y: 0.396)]
+    ]
+    private let inner: [[CGPoint]] = [
+        [.init(x: 0.49, y: 1), .init(x: 0.63, y: 0.80), .init(x: 0.40, y: 0.79), .init(x: 0.30, y: 0.73)],
+        [.init(x: 0.30, y: 0.73), .init(x: 0.20, y: 0.69), .init(x: 0.17, y: 0.65), .init(x: 0.23, y: 0.61)],
+        [.init(x: 0.23, y: 0.61), .init(x: 0.30, y: 0.54), .init(x: 0.52, y: 0.52), .init(x: 0.60, y: 0.48)],
+        [.init(x: 0.60, y: 0.48), .init(x: 0.71, y: 0.44), .init(x: 0.51, y: 0.42), .init(x: 0.37, y: 0.396)]
+    ]
+
     func path(in rect: CGRect) -> Path {
+        let amount = min(max(progress, 0), 1)
+        guard amount > 0 else { return Path() }
+        let steps = 160
+        let samples = (0...steps).map { amount * CGFloat($0) / CGFloat(steps) }
         var path = Path()
-        path.move(to: CGPoint(x: 0.37, y: 0.396))
-        path.addCurve(to: CGPoint(x: 0.74, y: 0.49), control1: CGPoint(x: 0.68, y: 0.38), control2: CGPoint(x: 0.82, y: 0.44))
-        path.addCurve(to: CGPoint(x: 0.41, y: 0.61), control1: CGPoint(x: 0.65, y: 0.54), control2: CGPoint(x: 0.36, y: 0.55))
-        path.addCurve(to: CGPoint(x: 0.735, y: 0.80), control1: CGPoint(x: 0.45, y: 0.66), control2: CGPoint(x: 0.70, y: 0.67))
-        path.addLine(to: CGPoint(x: 0.49, y: 1))
-        path.addCurve(to: CGPoint(x: 0.30, y: 0.73), control1: CGPoint(x: 0.63, y: 0.80), control2: CGPoint(x: 0.40, y: 0.79))
-        path.addCurve(to: CGPoint(x: 0.23, y: 0.61), control1: CGPoint(x: 0.20, y: 0.69), control2: CGPoint(x: 0.17, y: 0.65))
-        path.addCurve(to: CGPoint(x: 0.60, y: 0.48), control1: CGPoint(x: 0.30, y: 0.54), control2: CGPoint(x: 0.52, y: 0.52))
-        path.addCurve(to: CGPoint(x: 0.37, y: 0.396), control1: CGPoint(x: 0.71, y: 0.44), control2: CGPoint(x: 0.51, y: 0.42))
+        path.move(to: point(on: outer, at: 0, in: rect))
+        for sample in samples.dropFirst() {
+            path.addLine(to: point(on: outer, at: sample, in: rect))
+        }
+        for sample in samples.reversed() {
+            path.addLine(to: point(on: inner, at: sample, in: rect))
+        }
         path.closeSubpath()
-        return path.applying(CGAffineTransform(scaleX: rect.width, y: rect.height))
-            .offsetBy(dx: rect.minX, dy: rect.minY)
+        return path
+    }
+
+    private func point(on segments: [[CGPoint]], at progress: CGFloat, in rect: CGRect) -> CGPoint {
+        let position = progress * CGFloat(segments.count)
+        let index = min(Int(position), segments.count - 1)
+        let t = position - CGFloat(index)
+        let u = 1 - t
+        let points = segments[index]
+        let a = u * u * u
+        let b = 3 * u * u * t
+        let c = 3 * u * t * t
+        let d = t * t * t
+        let x = a * points[0].x + b * points[1].x + c * points[2].x + d * points[3].x
+        let y = a * points[0].y + b * points[1].y + c * points[2].y + d * points[3].y
+        return CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height)
     }
 }
-
 extension FacilityKind {
     var symbol: String {
         switch self { case .bench: "chair.fill"; case .bathroom: "figure.stand"; case .fountain: "drop.fill"; case .cafe: "cup.and.saucer.fill" }
