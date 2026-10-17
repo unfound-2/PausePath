@@ -8,6 +8,12 @@ struct AccountView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Image("PausePathLogo")
+                        .resizable().scaledToFit().frame(height: 144)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityLabel("PausePath")
+                }.listRowBackground(Color.clear)
                 Section("Optional community account") {
                     Text("Explore stops, plan routes and navigate without signing in. An account is only needed to submit reports or suggest stops.").font(.callout)
                     if account.isSignedIn {
