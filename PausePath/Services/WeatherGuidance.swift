@@ -3,7 +3,6 @@ import Foundation
 import OSLog
 import Observation
 import SwiftUI
-import WeatherKit
 
 struct RouteWeatherSummary {
     let conditions: String
@@ -54,17 +53,105 @@ struct RouteWeatherSummary {
     }
 }
 
+private struct ForecastHour {
+    let date: Date
+    let temperature: Double
+    let precipitationChance: Double
+    let code: Int
+    var description: String {
+        switch code {
+        case 0: "Clear"
+        case 1, 2: "Partly cloudy"
+        case 3: "Overcast"
+        case 45, 48: "Fog"
+        case 51...57: "Drizzle"
+        case 61...67, 80...82: "Rain"
+        case 71...77, 85, 86: "Snow"
+        case 95...99: "Thunderstorms"
+        default: "Conditions unavailable"
+        }
+    }
+    var isPrecipitation: Bool { (51...99).contains(code) }
+}
+
+private struct RouteForecast {
+    let hours: [ForecastHour]
+    let retrievedAt: Date
+    var expiresAt: Date { retrievedAt.addingTimeInterval(15 * 60) }
+}
+
+private struct OpenMeteoResponse: Decodable {
+    struct Hourly: Decodable {
+        let time: [Double]
+        let apparent_temperature: [Double?]
+        let precipitation_probability: [Double?]
+        let weather_code: [Int?]
+    }
+    let hourly: Hourly
+}
+
+/// Memory-only cache: no weather coordinates are written to disk.
+private actor OpenMeteoProvider {
+    static let shared = OpenMeteoProvider()
+    private var cache: [String: RouteForecast] = [:]
+    private let session = URLSession(configuration: .ephemeral)
+
+    func forecast(latitude: Double, longitude: Double) async throws -> RouteForecast {
+        try Task.checkCancellation()
+        // Approximately kilometre-scale locations suffice for forecast models.
+        let lat = (latitude * 100).rounded() / 100
+        let lon = (longitude * 100).rounded() / 100
+        let key = "\(lat),\(lon)"
+        if let cached = cache[key], cached.expiresAt > Date() { return cached }
+        var url = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
+        url.queryItems = [
+            URLQueryItem(name: "latitude", value: String(lat)),
+            URLQueryItem(name: "longitude", value: String(lon)),
+            URLQueryItem(name: "hourly", value: "apparent_temperature,precipitation_probability,weather_code"),
+            URLQueryItem(name: "forecast_days", value: "7"),
+            URLQueryItem(name: "timeformat", value: "unixtime"),
+            URLQueryItem(name: "timezone", value: "GMT"),
+            URLQueryItem(name: "temperature_unit", value: "celsius")
+        ]
+        var request = URLRequest(url: url.url!)
+        request.timeoutInterval = 12
+        let (data, response) = try await session.data(for: request)
+        try Task.checkCancellation()
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        let h = try JSONDecoder().decode(OpenMeteoResponse.self, from: data).hourly
+        guard h.time.count == h.apparent_temperature.count,
+              h.time.count == h.precipitation_probability.count,
+              h.time.count == h.weather_code.count else { throw URLError(.cannotParseResponse) }
+        let hours = h.time.indices.compactMap { index -> ForecastHour? in
+            guard let temperature = h.apparent_temperature[index],
+                  let probability = h.precipitation_probability[index],
+                  let code = h.weather_code[index], temperature.isFinite,
+                  (0...100).contains(probability) else { return nil }
+            return ForecastHour(date: Date(timeIntervalSince1970: h.time[index]),
+                                temperature: temperature, precipitationChance: probability / 100, code: code)
+        }
+        guard !hours.isEmpty else { throw URLError(.cannotParseResponse) }
+        let result = RouteForecast(hours: hours, retrievedAt: Date())
+        cache = cache.filter { $0.value.expiresAt > Date() }
+        if cache.count >= 24, let oldest = cache.min(by: { $0.value.retrievedAt < $1.value.retrievedAt }) {
+            cache.removeValue(forKey: oldest.key)
+        }
+        cache[key] = result
+        return result
+    }
+}
+
 private struct WeatherObservation {
-    let condition: WeatherCondition
     let feelsLikeCelsius: Double
     let isPrecipitation: Bool
 }
 
 @MainActor @Observable final class WeatherGuidanceStore {
-    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "PausePath", category: "WeatherKit")
+    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "PausePath", category: "Weather")
 
     var summary: RouteWeatherSummary?
-    var attribution: WeatherAttribution?
     var isLoading = false
     var message: String?
     var updateMessage: String?
@@ -75,7 +162,6 @@ private struct WeatherObservation {
         guard !isLoading else { return }
         isLoading = true
         summary = nil
-        attribution = nil
         message = nil
         updateMessage = nil
         lastLiveObservation = nil
@@ -90,14 +176,16 @@ private struct WeatherObservation {
 
             let windowStart = walk.preferences.departure
             let windowEnd = windowStart.addingTimeInterval(max(60, walk.duration))
-            var forecasts: [Forecast<HourWeather>] = []
+            var forecasts: [RouteForecast] = []
             var sampleErrors: [Error] = []
             for (index, coordinate) in samples.enumerated() {
                 do {
-                    let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-                    let forecast = try await WeatherService.shared.weather(for: location, including: .hourly)
+                    try Task.checkCancellation()
+                    let forecast = try await OpenMeteoProvider.shared.forecast(latitude: coordinate.latitude, longitude: coordinate.longitude)
+                    try Task.checkCancellation()
                     forecasts.append(forecast)
                 } catch {
+                    if Task.isCancelled { return }
                     sampleErrors.append(error)
                     Self.log(error, context: "Route forecast sample \(index + 1) failed")
                 }
@@ -109,7 +197,7 @@ private struct WeatherObservation {
             }
 
             let relevant = forecasts.flatMap { forecast in
-                forecast.forecast.filter {
+                forecast.hours.filter {
                     $0.date < windowEnd && $0.date.addingTimeInterval(60 * 60) > windowStart
                 }
             }
@@ -118,20 +206,20 @@ private struct WeatherObservation {
                 return
             }
 
-            let conditions = Dictionary(grouping: relevant, by: { $0.condition.description })
+            let conditions = Dictionary(grouping: relevant, by: { $0.description })
                 .sorted { $0.value.count > $1.value.count }
                 .prefix(2)
                 .map(\.key)
                 .joined(separator: ", ")
-            let forecastDates = forecasts.map { $0.metadata.date }
-            let expirations = forecasts.map { $0.metadata.expirationDate }
+            let forecastDates = forecasts.map { $0.retrievedAt }
+            let expirations = forecasts.map { $0.expiresAt }
             let distinctHours = Set(relevant.map { Calendar.current.dateInterval(of: .hour, for: $0.date)?.start ?? $0.date })
 
             let result = RouteWeatherSummary(
                 conditions: conditions,
-                minimumFeelsLikeCelsius: relevant.map { $0.apparentTemperature.converted(to: .celsius).value }.min() ?? 0,
-                maximumFeelsLikeCelsius: relevant.map { $0.apparentTemperature.converted(to: .celsius).value }.max() ?? 0,
-                includesHotConditions: relevant.contains { $0.condition == .hot },
+                minimumFeelsLikeCelsius: relevant.map { $0.temperature }.min() ?? 0,
+                maximumFeelsLikeCelsius: relevant.map { $0.temperature }.max() ?? 0,
+                includesHotConditions: false,
                 maximumPrecipitationChance: relevant.map(\.precipitationChance).max() ?? 0,
                 windowStart: windowStart,
                 windowEnd: windowEnd,
@@ -139,15 +227,15 @@ private struct WeatherObservation {
                 expiresAt: expirations.min() ?? .distantPast,
                 routeSampleCount: forecasts.count,
                 coveredHourCount: distinctHours.count,
-                expectedHourCount: max(1, Int(ceil(walk.duration / 3600)))
+                expectedHourCount: max(1, Int(ceil(windowEnd.timeIntervalSince1970 / 3600) - floor(windowStart.timeIntervalSince1970 / 3600)))
             )
-            let requiredAttribution = try await WeatherService.shared.attribution
+            try Task.checkCancellation()
             summary = result
-            attribution = requiredAttribution
             if let sampleError = sampleErrors.first {
                 message = Self.userMessage(for: sampleError, partial: true)
             }
         } catch {
+            if Task.isCancelled { return }
             Self.log(error, context: "Route forecast loading failed")
             message = Self.userMessage(for: error)
         }
@@ -155,7 +243,6 @@ private struct WeatherObservation {
 
     func clear() {
         summary = nil
-        attribution = nil
         message = nil
         updateMessage = nil
         lastLiveObservation = nil
@@ -163,15 +250,10 @@ private struct WeatherObservation {
 
     func checkForMeaningfulChange(at coordinate: CLLocationCoordinate2D) async {
         do {
-            let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-            let current = try await WeatherService.shared.weather(for: location, including: .current)
-            let condition = current.condition
-            let observation = WeatherObservation(
-                condition: condition,
-                feelsLikeCelsius: current.apparentTemperature.converted(to: .celsius).value,
-                isPrecipitation: Self.isPrecipitation(condition)
-            )
-            guard current.metadata.expirationDate > Date() else { return }
+            let forecast = try await OpenMeteoProvider.shared.forecast(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            try Task.checkCancellation()
+            guard let current = forecast.hours.first(where: { $0.date <= Date() && $0.date.addingTimeInterval(3600) > Date() }) else { return }
+            let observation = WeatherObservation(feelsLikeCelsius: current.temperature, isPrecipitation: current.isPrecipitation)
             defer { lastLiveObservation = observation }
             guard let previous = lastLiveObservation else { return }
 
@@ -180,26 +262,14 @@ private struct WeatherObservation {
             guard temperatureChanged || precipitationStarted else { return }
 
             if precipitationStarted {
-                updateMessage = "Weather update: precipitation is now reported near you. Conditions may vary along the rest of the route."
+                updateMessage = "Weather update: precipitation is now forecast near you. Conditions may vary along the rest of the route."
             } else {
                 let formattedTemperature = Measurement(value: observation.feelsLikeCelsius, unit: UnitTemperature.celsius)
                     .formatted(.measurement(width: .abbreviated))
-                updateMessage = "Weather update: the feels-like temperature near you is now \(formattedTemperature). Conditions may vary along the route."
+                updateMessage = "Weather update: the forecast feels-like temperature near you is now \(formattedTemperature). Conditions may vary along the route."
             }
         } catch {
             // A failed update does not interrupt navigation or replace the forecast.
-        }
-    }
-
-    private static func isPrecipitation(_ condition: WeatherCondition) -> Bool {
-        switch condition {
-        case .drizzle, .heavyRain, .rain, .sunShowers,
-             .isolatedThunderstorms, .scatteredThunderstorms, .strongStorms, .thunderstorms,
-             .flurries, .sleet, .snow, .sunFlurries, .wintryMix, .blizzard,
-             .blowingSnow, .freezingDrizzle, .freezingRain, .heavySnow, .hail:
-            true
-        default:
-            false
         }
     }
 
@@ -209,18 +279,8 @@ private struct WeatherObservation {
             return "Weather is unavailable for this route right now. Try again later."
         }
 
-        if let weatherError = error as? WeatherError {
-            if case .permissionDenied = weatherError {
-                return prefix + "Weather access is not authorized. Check that WeatherKit is enabled for this app in Xcode and for its App ID in your Apple Developer account."
-            }
-        }
         if Self.isNetworkError(error) {
             return prefix + "Weather could not be reached. Check your internet connection and try again."
-        }
-        if let weatherError = error as? WeatherError {
-            if case .unknown = weatherError {
-                return prefix + "A forecast is not available for this route right now. Try again later or choose another time."
-            }
         }
         return prefix + "Weather is temporarily unavailable for this route. Try again later."
     }
@@ -296,7 +356,6 @@ private struct WeatherObservation {
 
 struct WeatherGuidanceCard: View {
     let store: WeatherGuidanceStore
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -328,9 +387,9 @@ struct WeatherGuidanceCard: View {
                     Text("Retrieved \(summary.retrievedAt.formatted(date: .omitted, time: .shortened))")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                if let attribution = store.attribution {
-                    WeatherAttributionRow(attribution: attribution, colorScheme: colorScheme)
-                }
+                Link("Weather data: Open-Meteo · CC BY 4.0", destination: URL(string: "https://open-meteo.com/")!)
+                    .font(.caption2)
+
             } else {
                 Text(store.message ?? "Weather has not been checked.")
                     .font(.callout).foregroundStyle(.secondary)
@@ -342,22 +401,5 @@ struct WeatherGuidanceCard: View {
         .padding()
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
         .accessibilityElement(children: .contain)
-    }
-}
-
-private struct WeatherAttributionRow: View {
-    let attribution: WeatherAttribution
-    let colorScheme: ColorScheme
-
-    var body: some View {
-        HStack {
-            AsyncImage(url: colorScheme == .dark ? attribution.combinedMarkDarkURL : attribution.combinedMarkLightURL) { image in
-                image.resizable().scaledToFit().frame(maxWidth: 130, maxHeight: 24)
-            } placeholder: {
-                Text(attribution.serviceName).font(.caption2)
-            }
-            Spacer()
-            Link("Data sources", destination: attribution.legalPageURL).font(.caption2)
-        }
     }
 }

@@ -65,8 +65,8 @@ struct WalkingNavigationView: View {
     @State private var suggestedStops: [SharedPOI] = []
     @State private var showEndConfirmation = false
     @State private var showReturnConfirmation = false
-    @AppStorage("pausepath.weather.guidance.enabled") private var weatherGuidanceEnabled = false
-    @AppStorage("pausepath.weather.walkUpdates.enabled") private var weatherWalkUpdatesEnabled = false
+    @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherGuidanceEnabled = false
+    @AppStorage("pausepath.weather.openMeteo.walkUpdates.enabled") private var weatherWalkUpdatesEnabled = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     private var plan: GeneratedWalk { navigator.plan ?? walk }
@@ -100,7 +100,7 @@ struct WalkingNavigationView: View {
                             Button("Check weather for this route", systemImage: "cloud.sun.fill") {
                                 weatherGuidanceEnabled = true
                             }.buttonStyle(.bordered)
-                            Text("Checking sends up to three points along this route and your planned time to Apple WeatherKit. PausePath does not save weather requests.")
+                            Text("Checking sends up to three approximate route locations to Open-Meteo. Forecasts are cached in memory for 15 minutes. Open-Meteo may retain request logs for up to 90 days.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Toggle("Show weather updates during this walk", isOn: $weatherWalkUpdatesEnabled)

@@ -120,9 +120,6 @@
 				TargetAttributes = {
 					000000000000000000000004 = {
 						SystemCapabilities = {
-							com.apple.WeatherKit = {
-								enabled = 1;
-							};
 						};
 					};
 				};

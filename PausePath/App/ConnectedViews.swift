@@ -4,8 +4,8 @@ import AuthenticationServices
 
 struct AccountView: View {
     @State private var account = PausePathAccount.shared
-    @AppStorage("pausepath.weather.guidance.enabled") private var weatherGuidanceEnabled = false
-    @AppStorage("pausepath.weather.walkUpdates.enabled") private var weatherWalkUpdatesEnabled = false
+    @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherGuidanceEnabled = false
+    @AppStorage("pausepath.weather.openMeteo.walkUpdates.enabled") private var weatherWalkUpdatesEnabled = false
     @Environment(\.colorScheme) private var colorScheme
     var body: some View {
         NavigationStack {
@@ -50,7 +50,7 @@ struct AccountView: View {
                     Toggle("Show weather on route previews", isOn: $weatherGuidanceEnabled)
                     Toggle("Show meaningful updates while walking", isOn: $weatherWalkUpdatesEnabled)
                         .disabled(!weatherGuidanceEnabled)
-                    Text("When enabled, up to three route points and the planned walk time are sent from your device to Apple WeatherKit. If you also enable walking updates, your current location is sent for a check about every 15 minutes while navigation is active and PausePath is open. PausePath does not save these requests.")
+                    Text("When enabled, up to three approximate route locations are sent to Open-Meteo for a seven-day forecast. Optional walking updates check your approximate location about every 15 minutes while navigation is active and PausePath is open. Forecasts are cached in memory for 15 minutes. Open-Meteo may retain request logs for up to 90 days.")
                         .font(.footnote)
                     Text("Forecasts are estimates and can be unavailable or out of date. Shade and water-stop information is incomplete.")
                         .font(.footnote)
