@@ -135,7 +135,7 @@ struct DiscoverView: View {
                         } label: {
                             HStack(spacing: 7) {
                                 Image(systemName: kind.symbol)
-                                Text(kind.chipTitle)
+                                Text("\(kind.chipTitle) \(discovery.places.filter { $0.kind == kind }.count)")
                                 if enabled { Image(systemName: "checkmark").font(.caption.bold()) }
                             }.font(.subheadline.weight(.semibold))
                                 .padding(.horizontal, 14).frame(minHeight: 44)
@@ -174,6 +174,16 @@ struct DiscoverView: View {
                     Image(systemName: "location.fill").font(.title3).frame(width: 48, height: 48)
                         .background(.regularMaterial, in: Circle()).shadow(color: .black.opacity(0.12), radius: 8, y: 3)
                 }.accessibilityLabel("Center map on my location")
+                Button {
+                    cancelAreaRefresh(); discovery.cancelPending()
+                    reportPlace = nil; showReport = true
+                } label: {
+                    Image(systemName: "exclamationmark")
+                        .font(.title3.weight(.semibold)).frame(width: 48, height: 48)
+                        .background(.regularMaterial, in: Circle())
+                        .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+                }.accessibilityLabel("Suggest a stop at map center")
+                    .accessibilityHint("Report a missing bench, bathroom, fountain or café")
             }
             if !searchFocused {
                 VStack(alignment: .leading, spacing: 6) {
@@ -201,7 +211,7 @@ struct DiscoverView: View {
                             }.accessibilityLabel("Show stops as a list")
                         }
                         if !discovery.status.isEmpty {
-                            Text(discovery.status).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            Text(discovery.status).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                         }
                     }
                 }
@@ -215,14 +225,7 @@ struct DiscoverView: View {
                     .shadow(color: .black.opacity(0.12), radius: 16, y: 5)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            Group {
-                Button("Suggest a stop at map center", systemImage: "plus.circle") { reportPlace = nil; showReport = true }
-                    .font(.caption).padding(8).background(.regularMaterial, in: Capsule())
-                HStack {
-                    Link("© OpenStreetMap", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
-                    Link("© Mapbox", destination: URL(string: "https://www.mapbox.com/about/maps/")!)
-                }.font(.caption2).padding(4).background(.regularMaterial, in: Capsule())
-            }
+
         }.padding(.horizontal, 16).padding(.bottom, 12)
     }
 

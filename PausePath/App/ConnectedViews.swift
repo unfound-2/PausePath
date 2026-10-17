@@ -38,8 +38,11 @@ struct AccountView: View {
                     Text("Explore shares the visible map area to load OSM, community stops and Mapbox cafés. It refreshes as you move the map and once a minute while Explore is open.")
                     Text("Finding route breaks shares the planned path, departure time and stop preferences. Arrival estimates on the server use a standard walking speed. Health data, your recorded activities and personal reflections stay on this device.")
                     Text("Reports are linked to your account. New stops need review before appearing for others. Provider coverage and opening hours vary by location.")
-                    Link("OpenStreetMap attribution", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
-                    Link("Mapbox attribution", destination: URL(string: "https://www.mapbox.com/about/maps/")!)
+                }.font(.footnote)
+                Section("Map credits") {
+                    Text("Facility data: © OpenStreetMap contributors (ODbL), Mapbox, and the PausePath community. Basemap and navigation: Apple Maps.")
+                    Link("© OpenStreetMap contributors", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
+                    Link("© Mapbox", destination: URL(string: "https://www.mapbox.com/about/maps/")!)
                 }.font(.footnote)
             }.navigationTitle("Account")
         }

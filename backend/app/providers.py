@@ -13,7 +13,7 @@ def baseline_osm(conn, bbox):
     # An explicitly configured endpoint remains exclusive (for private deployments).
     configured = os.environ.get('OVERPASS_URL')
     endpoints = [configured] if configured and configured != "https://overpass-api.de/api/interpreter" else [
-        'https://overpass-api.de/api/interpreter',
+        'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
         'https://overpass.private.coffee/api/interpreter',
     ]
     payload = None
