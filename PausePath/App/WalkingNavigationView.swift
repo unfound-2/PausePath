@@ -34,12 +34,15 @@ struct LiveRouteControls: View {
             if builder.isLoading { Button("Cancel route search") { builder.cancel(); builder.status = "Route search cancelled." } }
             Text(builder.status).font(.caption).foregroundStyle(.secondary)
             ForEach(builder.candidates) { walk in
-                Button { selected = walk } label: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(walk.name).font(.headline)
-                        Text("\(walk.distance / 1000, specifier: "%.1f") km • about \(Int(walk.duration / 60)) min • out and back").font(.subheadline)
-                        Text("Review route and start navigation").font(.caption)
-                    }
+                VStack(alignment: .leading, spacing: 8) {
+                    Button { selected = walk } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(walk.name).font(.headline)
+                            Text("\(walk.distance / 1000, specifier: "%.1f") km • about \(Int(walk.duration / 60)) min • out and back").font(.subheadline)
+                            Text("Review route and start navigation").font(.caption)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.buttonStyle(.plain)
+                    RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: walk.distance, durationSeconds: walk.duration))
                 }
             }
             Text("Distance-based routes: slope, seating gaps and facility availability cannot yet be verified. You’ll review these limits before starting.").font(.caption).foregroundStyle(.secondary)
@@ -92,6 +95,7 @@ struct WalkingNavigationView: View {
                     }
                     if navigator.state == .ready {
                         Text("\(plan.distance / 1000, specifier: "%.1f") km • about \(Int(plan.duration / 60)) min").font(.title2.bold())
+                        RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: plan.distance, durationSeconds: plan.duration))
                         Text(plan.requirements).font(.subheadline)
                         Text("This route follows Apple walking directions. Terrain, distance between seats, and facility opening hours are unverified; it is not a confirmed match for those requirements.").font(.callout)
                         if weatherGuidanceEnabled {

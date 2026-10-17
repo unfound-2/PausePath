@@ -256,6 +256,7 @@ struct DiscoverView: View {
                         navigationWalk = GeneratedWalk(name: route.name, legs: [route], preferences: preferences)
                     }.buttonStyle(.borderedProminent)
                 }
+                RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: route.distance, durationSeconds: route.expectedTravelTime))
                 Text("Starts at the map center used for the preview.").font(.caption2).foregroundStyle(.secondary)
             } else {
                 Button { preview(place) } label: {

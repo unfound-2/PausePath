@@ -56,6 +56,7 @@ struct PlannerView: View {
                         Toggle(kind.rawValue, isOn: Binding(get: { preferences.facilities.contains(kind) }, set: { if $0 { preferences.facilities.insert(kind) } else { preferences.facilities.remove(kind) } }))
                     }
                 }
+                RouteDifficultyFactorSettings()
                 Section("Time estimate") {
                     Slider(value: $preferences.speedMetersPerSecond, in: 0.3...2, step: 0.1).disabled(useHealthSpeed).accessibilityLabel("Walking speed in meters per second")
                     Text("\(preferences.speedMetersPerSecond, specifier: "%.2f") m/s • excludes breaks")

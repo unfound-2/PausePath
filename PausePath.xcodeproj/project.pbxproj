@@ -24,6 +24,8 @@
 		0000000000000000000002C7 /* PausePath/App/ConnectedViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002BD /* PausePath/App/ConnectedViews.swift */; };
 		0000000000000000000002C8 /* PausePath/Core/AppleSignInChallenge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002BE /* PausePath/Core/AppleSignInChallenge.swift */; };
 		0000000000000000000002CA /* PausePath/Services/WeatherGuidance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002C9 /* PausePath/Services/WeatherGuidance.swift */; };
+		0000000000000000000002D0 /* PausePath/Core/RouteDifficulty.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002D1 /* PausePath/Core/RouteDifficulty.swift */; };
+		0000000000000000000002D2 /* PausePath/App/RouteDifficultyViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002D3 /* PausePath/App/RouteDifficultyViews.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -45,6 +47,8 @@
 		0000000000000000000002BD /* PausePath/App/ConnectedViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/App/ConnectedViews.swift; sourceTree = SOURCE_ROOT; };
 		0000000000000000000002BE /* PausePath/Core/AppleSignInChallenge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/Core/AppleSignInChallenge.swift; sourceTree = SOURCE_ROOT; };
 		0000000000000000000002C9 /* PausePath/Services/WeatherGuidance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/Services/WeatherGuidance.swift; sourceTree = SOURCE_ROOT; };
+		0000000000000000000002D1 /* PausePath/Core/RouteDifficulty.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/Core/RouteDifficulty.swift; sourceTree = SOURCE_ROOT; };
+		0000000000000000000002D3 /* PausePath/App/RouteDifficultyViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/App/RouteDifficultyViews.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -64,6 +68,8 @@
 000000000000000000000036,
 				0000000000000000000002BE /* PausePath/Core/AppleSignInChallenge.swift */,
 				0000000000000000000002C9 /* PausePath/Services/WeatherGuidance.swift */,
+				0000000000000000000002D1 /* PausePath/Core/RouteDifficulty.swift */,
+				0000000000000000000002D3 /* PausePath/App/RouteDifficultyViews.swift */,
 				0000000000000000000002BD /* PausePath/App/ConnectedViews.swift */,
 				0000000000000000000002BC /* PausePath/Services/PausePathAPI.swift */,
 				000000000000000000000064 /* PausePath/App/ContentView.swift */,
@@ -161,6 +167,8 @@
 			files = (
 				0000000000000000000002C8 /* PausePath/Core/AppleSignInChallenge.swift in Sources */,
 				0000000000000000000002CA /* PausePath/Services/WeatherGuidance.swift in Sources */,
+				0000000000000000000002D0 /* PausePath/Core/RouteDifficulty.swift in Sources */,
+				0000000000000000000002D2 /* PausePath/App/RouteDifficultyViews.swift in Sources */,
 				0000000000000000000002C7 /* PausePath/App/ConnectedViews.swift in Sources */,
 				0000000000000000000002C6 /* PausePath/Services/PausePathAPI.swift in Sources */,
 				0000000000000000000000C8 /* PausePath/App/ContentView.swift in Sources */,
