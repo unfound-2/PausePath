@@ -1046,6 +1046,31 @@
       },
       "DiscoveryResponse": {
         "properties": {
+          "loading_state": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "loading",
+              "unavailable"
+            ],
+            "title": "Loading State",
+            "default": "ready"
+          },
+          "retry_after_seconds": {
+            "type": "integer",
+            "title": "Retry After Seconds",
+            "default": 15
+          },
+          "tiles_ready": {
+            "type": "integer",
+            "title": "Tiles Ready",
+            "default": 0
+          },
+          "tiles_total": {
+            "type": "integer",
+            "title": "Tiles Total",
+            "default": 0
+          },
           "pois": {
             "items": {
               "$ref": "#/components/schemas/DiscoveryPOI"

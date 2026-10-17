@@ -198,6 +198,10 @@ class DiscoveryPOI(POISummary):
     source_updated_at: Optional[datetime] = None
 
 class DiscoveryResponse(StrictModel):
+    loading_state: Literal['ready', 'loading', 'unavailable'] = 'ready'
+    retry_after_seconds: int = 15
+    tiles_ready: int = 0
+    tiles_total: int = 0
     pois: List[DiscoveryPOI]
     truncated: bool
     warning: Optional[str] = None

@@ -236,6 +236,10 @@ struct SharedPOI: Decodable, Identifiable {
     }
 }
 struct SharedSearch: Decodable {
+    let loading_state: String?
+    let retry_after_seconds: Int?
+    let tiles_ready: Int?
+    let tiles_total: Int?
     let pois: [SharedPOI]
     let warning: String?
     let truncated: Bool

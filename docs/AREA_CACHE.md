@@ -1,0 +1,15 @@
+# Shared facility-area cache
+
+Discovery reads saved POIs immediately. It does not wait for OSM. Visible bounding boxes are split into a shared 0.02-degree grid (about 2.2 km north/south, narrower east/west away from the equator). Existing bounding-box and rate limits still apply; very wide views ask users to zoom in.
+
+The private PostGIS database stores tile status, completion times, leases and retry times. Every user reuses the same POIs and completion records. Successful tiles, including genuinely empty tiles, stay fresh for seven days. Reports and closures are read from POIs on every response; they are not cached in tile snapshots. Category-interleaved results avoid a dense category taking the entire 500-pin response.
+
+Requests wake one background job in the existing API process. No paid worker or new hosting service is required. One process has at most one outstanding job; database claims and a shared 15-second admission interval prevent duplicate work and limit all replicas to four tile jobs/minute. Each job can try two providers. Network calls hold no database connection. Failed tiles retry with exponential delay (one minute to thirty minutes). Interrupted jobs become claimable after three minutes. New requests reprioritize the viewed area; jobs not requested within ten minutes are not pursued. Render suspension can pause processing; later requests resume it.
+
+The free-tier guardrails limit metadata to 10,000 tiles and stop new ingestion when the POI table and its indexes exceed 250 MiB. This is a conservative ingestion budget, not a guarantee that all database use fits the plan: reports, logs, indexes and other tables also consume storage. Existing data remains readable at the limit. No community records are automatically deleted.
+
+The API exposes loading_state (ready/loading/unavailable), retry_after_seconds and tile progress. iOS displays pins as they arrive, polls loading areas at the recommended interval up to six times, and keeps the existing foreground refresh afterward. Moving elsewhere cancels UI work; missing data is not treated as proof that facilities do not exist. Temporary unavailable areas keep saved pins and retry during later requests. App Store/TestFlight users need an updated app build for these client behaviors.
+
+Validation: 35 backend tests pass; five isolated-database tests remain skipped without TEST_DATABASE_URL. Simulator build succeeds. Supabase migration applied; both new tables have RLS enabled and no anon/authenticated grants. The no-policy advisor notices are intentional for API-only tables. An existing unrelated leaked-password-protection warning remains: https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection.
+
+Deploy the included timestamped migration before the API. The project's custom migration runner can apply the idempotent DDL on new databases. Production migration was applied through Supabase; the same file remains compatible with the custom runner's checksum ledger.

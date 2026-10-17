@@ -14,3 +14,5 @@ backend/**/__pycache__/
 backend/.pytest_cache/
 backend/osm-client/node_modules/
 backend/osm-client/dist/
+
+backend/supabase/.temp/

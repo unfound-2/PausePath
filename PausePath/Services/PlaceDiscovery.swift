@@ -102,9 +102,11 @@ struct DiscoveredPlace: Identifiable {
         let sharedTask = Task { @MainActor in
             var result = await sharedStops(in: searchRegion)
             // A busy ingestion response is not an authoritative empty area.
-            for delay in [2, 6, 15] {
+            for _ in 0..<6 {
                 guard token == generation, !Task.isCancelled else { return }
-                guard case .success(let response) = result, response.warning != nil else { break }
+                guard case .success(let response) = result,
+                      response.loading_state == "loading" || (response.loading_state == nil && response.warning != nil) else { break }
+                let delay = min(max(response.retry_after_seconds ?? 15, 5), 60)
                 let updates = response.pois.compactMap(\.place)
                 receivedSharedPins = receivedSharedPins || !updates.isEmpty
                 let incomingIDs = Set(updates.map(\.id))
@@ -130,7 +132,7 @@ struct DiscoveredPlace: Identifiable {
             case .failure:
                 sharedWarning = "Shared stops could not refresh; existing pins may be outdated."
             }
-            status = "Updating cafés… " + sharedWarning
+            status = cafeFinished ? sharedWarning : "Updating cafés… " + sharedWarning
         }
         let cafeTask = Task { @MainActor in
             let result = await commercialStops(in: searchRegion)
@@ -144,7 +146,7 @@ struct DiscoveredPlace: Identifiable {
             case .failure:
                 cafeWarning = "Cafés could not refresh; existing pins may be outdated."
             }
-            status = "Updating shared stops… " + cafeWarning
+            status = sharedFinished ? sharedWarning + " " + cafeWarning : "Loading nearby facilities… " + cafeWarning
         }
         await withTaskCancellationHandler {
             await sharedTask.value

@@ -6,7 +6,7 @@ from .geometry import distance
 
 AMENITIES = {'bench':'bench','toilets':'toilet','drinking_water':'drinking_water','cafe':'cafe'}
 
-def baseline_osm(conn, bbox):
+def fetch_osm(bbox):
     bounds = ','.join(str(getattr(bbox,k)) for k in ('south','west','north','east'))
     query = '[out:json][timeout:25];nwr["amenity"~"^(bench|toilets|drinking_water|cafe)$"]('+bounds+');out body center;'
     # Independent public mirrors keep a single upstream outage from hiding node amenities.
@@ -33,6 +33,12 @@ def baseline_osm(conn, bbox):
         raise HTTPException(502, 'OSM baseline provider unavailable')
     elements = payload.get('elements',[])
     if len(elements) > 20000: raise HTTPException(413,'Too many POIs; use a smaller bounding box')
+    return elements
+
+def baseline_osm(conn, bbox):
+    return store_osm(conn, fetch_osm(bbox))
+
+def store_osm(conn, elements):
     count = 0
     for item in elements:
         tags = item.get('tags',{}); category = AMENITIES.get(tags.get('amenity'))
