@@ -10,7 +10,7 @@ struct ContentView: View {
     var body: some View {
         TabView {
             DiscoverView(preferences: preferences).tabItem { Label("Explore", systemImage: "map.fill") }
-            PlannerView(preferences: $preferences, health: health).tabItem { Label("Plan", systemImage: "figure.walk") }
+            PlannerView(preferences: $preferences, health: health).tabItem { Label("Preferences", systemImage: "slider.horizontal.3") }
             ReviewView(preferences: $preferences, health: health).tabItem { Label("My progress", systemImage: "chart.bar.fill") }
             AccountView().tabItem { Label("Account", systemImage: "person.crop.circle") }
         }.tint(Color(red: 0.12, green: 0.40, blue: 0.32))
@@ -65,10 +65,9 @@ struct PlannerView: View {
                             .onChange(of: useHealthSpeed) { if useHealthSpeed { preferences.speedMetersPerSecond = speed } }
                     } else { Text("Manual estimate. Optional Health walking speed can be connected in My progress.").font(.caption) }
                 }
-                LiveRouteControls(preferences: preferences)
                 Section { Text("PausePath does not assess medical recovery readiness or safe exertion limits. Medical recovery decisions remain with your healthcare provider.").font(.footnote).foregroundStyle(.secondary) }
             }
-            .navigationTitle("Plan your walk")
+            .navigationTitle("Walking preferences")
             .onChange(of: health.walkingSpeed) {
                 if useHealthSpeed, let speed = health.walkingSpeed { preferences.speedMetersPerSecond = speed }
                 if health.walkingSpeed == nil { useHealthSpeed = false; preferences.speedMetersPerSecond = 1 }

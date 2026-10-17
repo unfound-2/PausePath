@@ -19,6 +19,7 @@ struct DiscoveredPlace: Identifiable {
 struct WalkingRouteOption: Identifiable {
     let id: UUID
     let title: String
+    let destinationName: String
     let stops: [DiscoveredPlace]
     let legs: [MKRoute]
 
@@ -198,6 +199,10 @@ struct WalkingRouteOption: Identifiable {
     }
 
     func walkingDirections(to place: DiscoveredPlace, from origin: CLLocationCoordinate2D, via stops: [DiscoveredPlace] = []) async {
+        await walkingDirections(to: place.item, destinationName: place.item.name ?? "Destination", from: origin, via: stops)
+    }
+
+    func walkingDirections(to destination: MKMapItem, destinationName: String, from origin: CLLocationCoordinate2D, via stops: [DiscoveredPlace] = []) async {
         let token = UUID(); generation = token; route = nil; itinerary = []; routeOptions = []; selectedRouteOptionID = nil; isLoading = true
         defer { if token == generation { isLoading = false } }
         var options: [WalkingRouteOption] = []
@@ -218,7 +223,7 @@ struct WalkingRouteOption: Identifiable {
             do {
                 var legs: [MKRoute] = []
                 var start = origin
-                for waypoint in stopSet + [place] {
+                for waypoint in stopSet {
                     let request = MKDirections.Request()
                     request.source = MKMapItem(placemark: MKPlacemark(coordinate: start))
                     request.destination = waypoint.item
@@ -228,7 +233,15 @@ struct WalkingRouteOption: Identifiable {
                     legs.append(leg)
                     start = leg.polyline.walkingCoordinates.last?.mapCoordinate ?? waypoint.item.placemark.coordinate
                 }
-                let option = WalkingRouteOption(id: UUID(), title: stopSet.isEmpty ? "Direct" : "Via " + stopSet.compactMap { $0.item.name }.joined(separator: " + "), stops: stopSet, legs: legs)
+                let finalRequest = MKDirections.Request()
+                finalRequest.source = MKMapItem(placemark: MKPlacemark(coordinate: start))
+                finalRequest.destination = destination
+                finalRequest.transportType = .walking
+                let finalResponse = try await MKDirections(request: finalRequest).calculate()
+                guard let finalLeg = finalResponse.routes.first else { throw RouteBuildError.noRoute }
+                legs.append(finalLeg)
+                let stopNames = stopSet.map { $0.item.name ?? $0.kind.rawValue }
+                let option = WalkingRouteOption(id: UUID(), title: stopSet.isEmpty ? "Direct" : "Via " + stopNames.joined(separator: " + "), destinationName: destinationName, stops: stopSet, legs: legs)
                 if stopSet.isEmpty { directDistance = option.distance }
                 if let directDistance, option.distance > directDistance * 2.25 { continue }
                 options.append(option)
@@ -239,6 +252,7 @@ struct WalkingRouteOption: Identifiable {
         }
         guard token == generation else { return }
         routeOptions = options.sorted { $0.distance < $1.distance }
+        SavedRouteStore.save(routeOptions, origin: origin, destination: destination.placemark.coordinate)
         if let direct = routeOptions.first(where: { $0.stops.isEmpty }) {
             selectRouteOption(direct.id)
         } else if let first = routeOptions.first {

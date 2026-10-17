@@ -11,7 +11,14 @@ extension FacilityKind {
         case .cafe: Color(red: 0.65, green: 0.32, blue: 0.13)
         }
     }
-    var chipTitle: String { self == .fountain ? "Water" : rawValue }
+    var chipTitle: String {
+        switch self {
+        case .bench: "Bench"
+        case .bathroom: "Restroom"
+        case .fountain: "Water"
+        case .cafe: "Café"
+        }
+    }
 }
 
 struct DiscoverView: View {
@@ -23,6 +30,7 @@ struct DiscoverView: View {
     @State private var kinds = Set(FacilityKind.allCases)
     @State private var selectedID: UUID?
     @State private var selectedStopIDs: [UUID] = []
+    @State private var showRoutePlanner = false
     @State private var showResults = false
     @State private var cardCollapsed = false
     @State private var navigationWalk: GeneratedWalk?
@@ -73,7 +81,7 @@ struct DiscoverView: View {
             // Programmatic camera changes (such as fitting a route) must not
             // replace the selected stop or erase its directions.
             guard camera.positionedByUser, !isPreviewingRoute,
-                  discovery.route == nil, !showReport, !showResults, navigationWalk == nil else { return }
+                  discovery.route == nil, !showReport, !showResults, !showRoutePlanner, navigationWalk == nil else { return }
             scheduleAreaRefresh(context.region)
         }
         .ignoresSafeArea(edges: .top)
@@ -90,7 +98,7 @@ struct DiscoverView: View {
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
                 guard scenePhase == .active, !discovery.isLoading,
-                      discovery.route == nil, selectedID == nil, !showReport, !showResults, navigationWalk == nil else { continue }
+                      discovery.route == nil, selectedID == nil, !showReport, !showResults, !showRoutePlanner, navigationWalk == nil else { continue }
                 await loadArea(visibleRegion ?? discovery.region)
             }
         }
@@ -100,9 +108,15 @@ struct DiscoverView: View {
                 Task { await refresh() }
             }
         }
+        .sheet(isPresented: $showRoutePlanner) {
+            ExploreRoutePlannerView(discovery: discovery, preferences: preferences, initialDestination: selectedPlace) { walk in
+                navigationWalk = walk
+            }
+        }
         .onChange(of: [discovery.region.center.latitude, discovery.region.center.longitude]) { moveToDiscoveredArea() }
         .onDisappear { cancelAreaRefresh(); discovery.cancelPending() }
         .onChange(of: showResults) { if showResults { cancelAreaRefresh() } }
+        .onChange(of: showRoutePlanner) { if showRoutePlanner { cancelAreaRefresh() } }
         .onChange(of: navigationWalk?.id) { if navigationWalk != nil { cancelAreaRefresh() } }
         .onChange(of: discovery.selectedRouteOptionID) { fitRouteInMap() }
         .sheet(isPresented: $showResults) { resultsSheet }
@@ -201,7 +215,24 @@ struct DiscoverView: View {
                     }.buttonStyle(.plain)
                         .accessibilityLabel(cardCollapsed ? "Show stop card" : "Hide stop card")
                     if !cardCollapsed {
+                    Button {
+                        showRoutePlanner = true
+                    } label: {
+                        Label("Plan a route", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                            .font(.headline).frame(maxWidth: .infinity, minHeight: 48)
+                    }.buttonStyle(.borderedProminent)
                     if let place = selectedPlace { selectedCard(place) }
+                    else if let option = discovery.routeOptions.first(where: { $0.id == discovery.selectedRouteOptionID }) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("\(option.title) to \(option.destinationName)").font(.headline)
+                            Text("\(option.distance / 1000, specifier: "%.1f") km • about \(Int(option.duration / 60)) min")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                            RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: option.distance, durationSeconds: option.duration))
+                            Button("Navigate this route", systemImage: "figure.walk") {
+                                navigationWalk = GeneratedWalk(name: "Walk to \(option.destinationName)", legs: option.legs, preferences: preferences)
+                            }.buttonStyle(.bordered)
+                        }
+                    }
                     else {
                         HStack(spacing: 12) {
                             Image(systemName: "figure.walk").font(.title2).foregroundStyle(.teal)

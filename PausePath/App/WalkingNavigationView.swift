@@ -1,63 +1,6 @@
 import SwiftUI
 import MapKit
 
-struct LiveRouteControls: View {
-    let preferences: RoutePreferences
-    @State private var builder = WalkingRouteBuilder()
-    @State private var locator = WalkingNavigator()
-    @State private var query = ""
-    @State private var waitingForOrigin = false
-    @State private var selected: GeneratedWalk?
-    var body: some View {
-        Section("Create your walking route") {
-            Text("Choose a start. PausePath will create out-and-back walks near your desired distance, with directions for both legs.")
-            TextField("Starting address or landmark", text: $query).submitLabel(.search)
-                .onSubmit { waitingForOrigin = false; builder.searchOrigin(query) }
-                .onChange(of: query) { builder.invalidate(); builder.origin = nil; builder.originName = "Find the new starting point" }
-            HStack {
-                Button("Find start") { waitingForOrigin = false; builder.searchOrigin(query) }.disabled(query.isEmpty || builder.isLoading)
-                Spacer()
-                Button("Use my location") { waitingForOrigin = true; locator.locate() }.disabled(builder.isLoading)
-            }.buttonStyle(.bordered)
-            Text(builder.originName).font(.headline)
-            if waitingForOrigin { Text(locator.status).font(.caption) }
-            if let origin = builder.origin {
-                Map(initialPosition: .region(MKCoordinateRegion(center: origin.mapCoordinate, latitudinalMeters: 600, longitudinalMeters: 600))) {
-                    Marker("Start", coordinate: origin.mapCoordinate)
-                }.frame(height: 160).id(origin)
-            }
-            Button {
-                builder.generate(preferences: preferences)
-            } label: {
-                HStack { if builder.isLoading { ProgressView() }; Text(builder.isLoading ? "Creating routes…" : "Create walking routes") }
-            }.disabled(builder.origin == nil || builder.isLoading)
-            if builder.isLoading { Button("Cancel route search") { builder.cancel(); builder.status = "Route search cancelled." } }
-            Text(builder.status).font(.caption).foregroundStyle(.secondary)
-            ForEach(builder.candidates) { walk in
-                VStack(alignment: .leading, spacing: 8) {
-                    Button { selected = walk } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(walk.name).font(.headline)
-                            Text("\(walk.distance / 1000, specifier: "%.1f") km • about \(Int(walk.duration / 60)) min • out and back").font(.subheadline)
-                            Text("Review route and start navigation").font(.caption)
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }.buttonStyle(.plain)
-                    RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: walk.distance, durationSeconds: walk.duration))
-                }
-            }
-            Text("Distance-based routes: slope, seating gaps and facility availability cannot yet be verified. You’ll review these limits before starting.").font(.caption).foregroundStyle(.secondary)
-        }
-        .onChange(of: locator.location?.timestamp) {
-            guard waitingForOrigin, let location = locator.location, locator.freshLocation() else { return }
-            waitingForOrigin = false
-            builder.setOrigin(Coordinate(location.coordinate.latitude, location.coordinate.longitude), name: "Your current location")
-        }
-        .onChange(of: preferences) { builder.invalidate(); builder.status = "Preferences changed. Create new routes to use them." }
-        .onDisappear { builder.cancel() }
-        .fullScreenCover(item: $selected) { walk in WalkingNavigationView(walk: walk) }
-    }
-}
-
 struct WalkingNavigationView: View {
     let walk: GeneratedWalk
     @State private var navigator = WalkingNavigator()

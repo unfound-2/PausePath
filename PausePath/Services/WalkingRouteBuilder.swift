@@ -28,6 +28,71 @@ struct GeneratedWalk: Identifiable {
     }
 }
 
+struct SavedRouteRecord: Codable, Identifiable {
+    let id: UUID
+    let title: String
+    let destinationName: String
+    let stopNames: [String]
+    let stopKinds: [FacilityKind]
+    let origin: Coordinate
+    let destination: Coordinate
+    let legCoordinates: [[Coordinate]]
+    let distanceMeters: Double
+    let estimatedSeconds: Double
+    let difficulty: String
+    let savedAt: Date
+
+    fileprivate var identity: String {
+        let start = String(format: "%.4f,%.4f", origin.latitude, origin.longitude)
+        let end = String(format: "%.4f,%.4f", destination.latitude, destination.longitude)
+        return ([destinationName.lowercased(), start, end] + stopNames.map { $0.lowercased() }).joined(separator: "|")
+    }
+}
+
+enum SavedRouteStore {
+    private static let storageKey = "pausepath.savedRoutes.v1"
+
+    static func load() -> [SavedRouteRecord] {
+        guard let data = UserDefaults.standard.data(forKey: storageKey) else { return [] }
+        return (try? JSONDecoder().decode([SavedRouteRecord].self, from: data)) ?? []
+    }
+
+    static func save(_ options: [WalkingRouteOption], origin: CLLocationCoordinate2D, destination: CLLocationCoordinate2D) {
+        var records = load()
+        let start = Coordinate(origin.latitude, origin.longitude)
+        let end = Coordinate(destination.latitude, destination.longitude)
+        let difficultyPreferences = RouteDifficultyPreferences(
+            storageValue: UserDefaults.standard.string(forKey: RouteDifficultyPreferences.storageKey) ?? RouteDifficultyPreferences.defaultStorageValue
+        )
+        for option in options {
+            let rating = RouteDifficultyCalculator.assess(
+                RouteDifficultyInput(distanceMeters: option.distance, durationSeconds: option.duration),
+                preferences: difficultyPreferences
+            ).label
+            let record = SavedRouteRecord(
+                id: option.id,
+                title: option.title,
+                destinationName: option.destinationName,
+                stopNames: option.stops.map { $0.item.name ?? $0.kind.rawValue },
+                stopKinds: option.stops.map(\.kind),
+                origin: start,
+                destination: end,
+                legCoordinates: option.legs.map { $0.polyline.walkingCoordinates },
+                distanceMeters: option.distance,
+                estimatedSeconds: option.duration,
+                difficulty: rating,
+                savedAt: Date()
+            )
+            records.removeAll { $0.identity == record.identity }
+            records.insert(record, at: 0)
+        }
+        records = Array(records.prefix(100))
+        if let data = try? JSONEncoder().encode(records) {
+            UserDefaults.standard.set(data, forKey: storageKey)
+        }
+    }
+}
+
 @MainActor enum WalkingDirections {
     static func route(from start: Coordinate, to end: Coordinate, departure: Date) async throws -> MKRoute {
         let request = MKDirections.Request()
