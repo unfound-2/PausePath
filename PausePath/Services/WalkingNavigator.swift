@@ -8,6 +8,7 @@ import UIKit
     enum State { case ready, locating, walking, paused, arrived }
     var state: State = .ready
     var location: CLLocation?
+    private(set) var displayCoordinate: Coordinate?
     var plan: GeneratedWalk?
     var progress = WalkProgress(paths: [])
     var status = "Start navigation when you are at the starting point."
@@ -18,8 +19,10 @@ import UIKit
     private var lastSpoken = ""
     private var wantsNavigation = false
     private var wantsPosition = false
-    private var requestedAlwaysAuthorization = false
     private var requestedPreciseAccuracy = false
+    private var recentGPSCoordinates: [(Coordinate, Date)] = []
+    private var accumulatedActiveSeconds: TimeInterval = 0
+    private var activeIntervalStartedAt: Date?
     private var routeTask: Task<Void, Never>?
     private var token = UUID()
     override init() {
@@ -27,11 +30,12 @@ import UIKit
         manager.desiredAccuracy = kCLLocationAccuracyBest
         manager.distanceFilter = 5
         manager.activityType = .fitness
-        manager.allowsBackgroundLocationUpdates = true
-        manager.showsBackgroundLocationIndicator = true
+        manager.allowsBackgroundLocationUpdates = false
     }
     func prepare(_ plan: GeneratedWalk) {
         stop(); self.plan = plan; returnOrigin = plan.start; progress = WalkProgress(paths: plan.paths)
+        accumulatedActiveSeconds = 0; activeIntervalStartedAt = nil
+        recentGPSCoordinates = []
         state = .ready; status = "Go to the start marker, then start navigation."
     }
     func locate() { wantsNavigation = false; wantsPosition = true; requestLocation() }
@@ -43,19 +47,14 @@ import UIKit
     private func requestLocation() {
         switch manager.authorizationStatus {
         case .notDetermined:
-            if wantsNavigation { manager.requestAlwaysAuthorization() }
-            else { manager.requestWhenInUseAuthorization() }
+            manager.requestWhenInUseAuthorization()
         case .authorizedAlways, .authorizedWhenInUse:
             if wantsNavigation, manager.accuracyAuthorization == .reducedAccuracy, !requestedPreciseAccuracy {
                 requestedPreciseAccuracy = true
                 manager.requestTemporaryFullAccuracyAuthorization(withPurposeKey: "ActiveWalk")
             }
-            if wantsNavigation, manager.authorizationStatus == .authorizedWhenInUse, !requestedAlwaysAuthorization {
-                requestedAlwaysAuthorization = true
-                manager.requestAlwaysAuthorization()
-            }
             if wantsNavigation {
-                manager.allowsBackgroundLocationUpdates = true
+                manager.allowsBackgroundLocationUpdates = false
                 manager.startUpdatingLocation()
                 status = manager.accuracyAuthorization == .fullAccuracy
                     ? "Waiting for an accurate GPS location…"
@@ -87,12 +86,24 @@ import UIKit
                 status = freshLocation() ? "Location found." : "Location is approximate. Enable Precise Location or search a starting address."
             }; return
         }
-        let accepted = progress.update(position: Coordinate(fix.coordinate.latitude, fix.coordinate.longitude), accuracy: fix.horizontalAccuracy, age: Date().timeIntervalSince(fix.timestamp))
+        let rawCoordinate = Coordinate(fix.coordinate.latitude, fix.coordinate.longitude)
+        let fixAge = Date().timeIntervalSince(fix.timestamp)
+        guard rawCoordinate.latitude.isFinite, rawCoordinate.longitude.isFinite,
+              (-90...90).contains(rawCoordinate.latitude), (-180...180).contains(rawCoordinate.longitude),
+              fix.horizontalAccuracy.isFinite, fix.horizontalAccuracy >= 0, fix.horizontalAccuracy <= 50,
+              fixAge.isFinite, fixAge >= -2, fixAge <= 15 else {
+            status = "GPS is weak or outdated. Waiting for an accurate location…"; return
+        }
+        let filteredCoordinate = smooth(rawCoordinate, at: fix.timestamp)
+        let accepted = progress.update(position: filteredCoordinate, accuracy: fix.horizontalAccuracy, age: fixAge)
         guard accepted else { status = "GPS is weak or outdated. Waiting for an accurate location…"; return }
-        state = .walking; UIApplication.shared.isIdleTimerDisabled = true
+        displayCoordinate = filteredCoordinate
+        state = .walking
+        if activeIntervalStartedAt == nil { activeIntervalStartedAt = fix.timestamp }
+        UIApplication.shared.isIdleTimerDisabled = true
         if progress.arrived {
+            finishActiveInterval(at: fix.timestamp)
             state = .arrived; wantsNavigation = false; manager.stopUpdatingLocation()
-            manager.allowsBackgroundLocationUpdates = false
             UIApplication.shared.isIdleTimerDisabled = false; status = "You’ve arrived. Your walk is complete."
         } else if progress.offRoute {
             status = progress.hasStarted ? "You appear to be off route. Return to the path or recalculate the remaining walk." : "Go to the start marker, or recalculate from your location."
@@ -102,12 +113,22 @@ import UIKit
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { status = "GPS is unavailable. Progress is paused until a fresh location arrives." }
     func pause() {
         token = UUID(); routeTask?.cancel(); isRecalculating = false
+        finishActiveInterval(at: .now)
         wantsNavigation = false; wantsPosition = false; manager.stopUpdatingLocation(); speech.stopSpeaking(at: .immediate)
-        manager.allowsBackgroundLocationUpdates = false
+        recentGPSCoordinates = []
         UIApplication.shared.isIdleTimerDisabled = false
         if state != .arrived { state = .paused; status = "Walk paused. Resume when ready. Location tracking stops while paused." }
     }
     func stop() { pause(); state = .ready }
+    var elapsedActiveSeconds: TimeInterval {
+        accumulatedActiveSeconds + (activeIntervalStartedAt.map { max(0, Date().timeIntervalSince($0)) } ?? 0)
+    }
+    private func finishActiveInterval(at date: Date) {
+        if let activeIntervalStartedAt {
+            accumulatedActiveSeconds += max(0, date.timeIntervalSince(activeIntervalStartedAt))
+            self.activeIntervalStartedAt = nil
+        }
+    }
     var remainingMeters: Double {
         guard let plan, progress.totalMeters > 0 else { return 0 }
         return max(0, plan.distance * (1 - progress.completedMeters / progress.totalMeters))
@@ -135,7 +156,19 @@ import UIKit
     }
     func freshLocation(at now: Date = Date()) -> Bool {
         guard let location else { return false }
-        return location.horizontalAccuracy >= 0 && location.horizontalAccuracy <= 35 && abs(now.timeIntervalSince(location.timestamp)) <= 15
+        return location.horizontalAccuracy.isFinite && location.horizontalAccuracy >= 0 && location.horizontalAccuracy <= 50 &&
+            location.coordinate.latitude.isFinite && location.coordinate.longitude.isFinite &&
+            (-90...90).contains(location.coordinate.latitude) && (-180...180).contains(location.coordinate.longitude) &&
+            now.timeIntervalSince(location.timestamp) >= -2 && now.timeIntervalSince(location.timestamp) <= 15
+    }
+
+    private func smooth(_ coordinate: Coordinate, at timestamp: Date) -> Coordinate {
+        recentGPSCoordinates.removeAll { timestamp.timeIntervalSince($0.1) > 10 }
+        recentGPSCoordinates.append((coordinate, timestamp))
+        if recentGPSCoordinates.count > 3 { recentGPSCoordinates.removeFirst(recentGPSCoordinates.count - 3) }
+        let count = Double(recentGPSCoordinates.count)
+        return Coordinate(recentGPSCoordinates.reduce(0) { $0 + $1.0.latitude } / count,
+                          recentGPSCoordinates.reduce(0) { $0 + $1.0.longitude } / count)
     }
     func speakIfNeeded() {
         guard voiceEnabled, state == .walking || state == .arrived else { return }

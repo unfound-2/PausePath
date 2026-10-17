@@ -1,8 +1,35 @@
 import SwiftUI
 import AuthenticationServices
 import UIKit
+import UserNotifications
+
+extension Notification.Name {
+    static let pausePathShowProgress = Notification.Name("pausepath.showProgress")
+    static let pausePathWalkReflectionSaved = Notification.Name("pausepath.walkReflectionSaved")
+    static let pausePathWalkRecorded = Notification.Name("pausepath.walkRecorded")
+    static let pausePathJoinCommunity = Notification.Name("pausepath.joinCommunity")
+}
+
+final class PausePathNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        if response.notification.request.identifier == "pausepath.daily-recap" {
+            NotificationCenter.default.post(name: .pausePathShowProgress, object: nil)
+        }
+        completionHandler()
+    }
+}
 
 @main struct PausePathApp: App {
+    @UIApplicationDelegateAdaptor(PausePathNotificationDelegate.self) private var notificationDelegate
     var body: some Scene { WindowGroup { LaunchExperienceView() } }
 }
 
@@ -15,7 +42,9 @@ private struct LaunchExperienceView: View {
     @State private var exiting = false
     @State private var health = HealthActivityStore()
     @State private var account = PausePathAccount.shared
-    @AppStorage("pausepath.onboarding.permissions-gate.complete") private var onboardingComplete = false
+    @AppStorage("pausepath.onboarding.permissions-gate.v2.complete") private var onboardingComplete = false
+    @AppStorage("pausepath.onboarding.personal-goals.v2.complete") private var personalizationComplete = false
+    @AppStorage("pausepath.personalProfile") private var profileData = Data()
 
     private let mint = Color(red: 0.92, green: 0.99, blue: 0.96)
     private let teal = Color(red: 0.01, green: 0.30, blue: 0.35)
@@ -25,11 +54,12 @@ private struct LaunchExperienceView: View {
         ZStack {
             if finished || exiting {
                 Group {
-                    if onboardingComplete {
+                    if onboardingComplete && personalizationComplete {
                         ContentView(health: health)
                     } else {
-                        WelcomeSetupView(account: account, health: health) {
+                        WelcomeSetupView(account: account, health: health, profileData: $profileData) {
                             onboardingComplete = true
+                            personalizationComplete = true
                         }
                     }
                 }
@@ -56,6 +86,13 @@ private struct LaunchExperienceView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("PausePath")
             }
+        }
+        .onOpenURL { url in
+            guard url.scheme == "pausepath", url.host == "community", url.path == "/join",
+                  let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "code" })?.value,
+                  !code.isEmpty else { return }
+            UserDefaults.standard.set(code, forKey: "pausepath.pendingCommunityInvite")
+            NotificationCenter.default.post(name: .pausePathJoinCommunity, object: nil, userInfo: ["code": code])
         }
         .task { await runIntro() }
     }
@@ -125,105 +162,242 @@ private struct LaunchExperienceView: View {
 @MainActor
 private struct WelcomeSetupView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openURL) private var openURL
     @State var account: PausePathAccount
     let health: HealthActivityStore
+    @Binding var profileData: Data
     let onContinue: () -> Void
     @State private var locationDiscovery = PlaceDiscovery()
     @State private var healthRequested = false
-
-    private var locationReady: Bool {
-        locationDiscovery.authorizationStatus == .authorizedAlways && locationDiscovery.accuracyAuthorization == .fullAccuracy
-    }
+    @State private var profile = PausePathProfile()
+    @State private var step = 0
+    @State private var notificationStatus = "Daily recap notifications are optional. Your recap will also be available in My progress."
+    @State private var notificationEnabled = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 18) {
                     Image("PausePathLogo").resizable().scaledToFit().frame(height: 88)
                         .frame(maxWidth: .infinity)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Welcome to PausePath").font(.largeTitle.bold())
-                        Text("Connect your account and enable precise location before exploring. You control Health access.")
-                            .font(.body).foregroundStyle(.secondary)
-                    }
-
-                    setupCard(title: "Sign in with Apple", subtitle: "Required to continue. PausePath uses your account for community features and to keep your settings connected.", icon: "person.crop.circle") {
-                        if account.isSignedIn {
-                            Label("Signed in with Apple", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                        } else {
-                            SignInWithAppleButton(.continue) { request in
-                                account.prepareAppleSignIn(request)
-                            } onCompletion: { result in
-                                Task { await account.completeAppleSignIn(result) }
-                            }
-                            .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
-                            .frame(height: 48)
-                            .disabled(account.busy)
-                            if account.busy { ProgressView("Signing in…") }
-                            Text(account.message).font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        ForEach(0..<5, id: \.self) { index in
+                            stepDot(index)
+                            if index < 4 { Capsule().fill(step > index ? Color.accentColor : Color.secondary.opacity(0.2)).frame(height: 3) }
                         }
                     }
-
-                    setupCard(title: "Connect Apple Health", subtitle: "PausePath can read walking workouts, walking speed, and recorded heart rate for progress summaries. It never writes to Health. You can choose what to share in Apple’s prompt.", icon: "heart.text.square") {
-                        if health.isLoading {
-                            ProgressView("Requesting Health access…")
-                        } else {
-                            Button(healthRequested ? "Review Health access" : "Connect Apple Health", systemImage: "heart") {
-                                healthRequested = true
-                                Task { await health.connect() }
-                            }.buttonStyle(.bordered)
-                            Text(health.status).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-
-                    setupCard(title: "Always + Precise location", subtitle: "Required for nearby routes and live GPS while a walk is active. PausePath stops location tracking when you pause or end the walk.", icon: "location") {
-                        if locationReady {
-                            Label("Always and Precise are enabled", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                        } else {
-                            Button(locationNeedsSettings ? "Open Location Settings" : "Enable Always + Precise", systemImage: "location.fill") {
-                                if locationNeedsSettings {
-                                    if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
-                                } else {
-                                    locationDiscovery.requestAlwaysPreciseLocation()
-                                }
-                            }.buttonStyle(.bordered)
-                            if locationDiscovery.authorizationStatus == .authorizedWhenInUse ||
-                                (locationDiscovery.authorizationStatus == .authorizedAlways && locationDiscovery.accuracyAuthorization == .reducedAccuracy) {
-                                Button("Open Settings") {
-                                    if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
-                                }.font(.caption.weight(.semibold))
-                            }
-                            Text(locationDiscovery.status).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Button(action: onContinue) {
-                        Text("Continue to Explore").fontWeight(.semibold).frame(maxWidth: .infinity).padding(.vertical, 6)
-                    }.buttonStyle(.borderedProminent)
-                        .disabled(!account.isSignedIn || !locationReady)
-                    if !account.isSignedIn {
-                        Text("Sign in with Apple to continue.").font(.caption).foregroundStyle(.secondary)
-                    } else if !locationReady {
-                        Text("Turn on Always and Precise location to continue. If iOS has already asked, open Settings to change it.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Text("Health access is optional. Apple controls these permissions; PausePath cannot enable access for you.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    page.transition(reduceMotion ? .opacity : .asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .move(edge: .leading).combined(with: .opacity)))
                 }.padding(20).frame(maxWidth: 560)
                     .frame(maxWidth: .infinity, minHeight: 0, alignment: .top)
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .toolbar(.hidden, for: .navigationBar)
         }
-        .task { await account.checkAppleCredential() }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active, locationDiscovery.authorizationStatus == .authorizedAlways,
-               locationDiscovery.accuracyAuthorization == .reducedAccuracy {
-                locationDiscovery.requestAlwaysPreciseLocation()
+        .task {
+            await account.restoreSessionIfNeeded()
+            await account.checkAppleCredential()
+        }
+        .onAppear {
+            if let saved = try? JSONDecoder().decode(PausePathProfile.self, from: profileData) { profile = saved }
+            notificationEnabled = profile.dailyRecapNotifications
+            if notificationEnabled { notificationStatus = "Reminder set for 8 PM. You can turn it off at any time." }
+        }
+        .onChange(of: account.appleProvidedName) { _, name in
+            guard let name, profile.username?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false else { return }
+            profile.username = name
+            saveProfile()
+        }
+    }
+
+    @ViewBuilder private var page: some View {
+        switch step {
+        case 0: introductionStep
+        case 1: goalStep
+        case 2: weeklyGoalStep
+        case 3: usernameStep
+        default: connectionStep
+        }
+    }
+
+    private var introductionStep: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("A little more room for what matters.").font(.largeTitle.bold())
+            Text("PausePath helps you find walking routes, notice your progress, and make space for a pause in a way that fits your day.")
+                .font(.body).foregroundStyle(.secondary)
+            Label("Choose a goal that feels relevant", systemImage: "scope")
+            Label("Find routes with details that matter to you", systemImage: "map")
+            Label("Reflect on activity without pressure", systemImage: "chart.bar")
+            Text("You choose your goal. Sign-in, location, Health, and notifications are optional; PausePath asks for location when you use a location-based feature.")
+                .font(.callout).foregroundStyle(.secondary)
+            Button("Get started") { advance(to: 1) }
+                .buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
+        }
+    }
+
+    private var goalStep: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle().fill(.white.opacity(0.62)).frame(width: 68, height: 68)
+                    Image(systemName: "figure.walk")
+                        .font(.system(size: 31, weight: .medium))
+                        .foregroundStyle(Color(red: 0.05, green: 0.39, blue: 0.34))
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Your pace. Your plan.").font(.headline)
+                    Text("Small steps, chosen by you.").font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "sparkles").font(.title3).foregroundStyle(Color(red: 0.27, green: 0.54, blue: 0.40))
+            }
+            .padding(14)
+            .background(LinearGradient(colors: [Color(red: 0.90, green: 0.97, blue: 0.92), Color(red: 0.96, green: 0.98, blue: 0.93)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 22))
+            VStack(alignment: .leading, spacing: 6) {
+                Text("What brings you to PausePath?").font(.largeTitle.bold())
+                Text("Choose what matters to you. We’ll use it to shape route suggestions and your progress recap. You can change it any time. Your profile stays on this device, and Health data never chooses it for you.")
+                    .font(.body).foregroundStyle(.secondary)
+            }
+            ForEach(PersonalGoalProfile.allCases, id: \.self) { goal in
+                Button { withAnimation(reduceMotion ? .linear(duration: 0) : .snappy) { profile.goal = goal; saveProfile() } } label: {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: profile.goal == goal ? "largecircle.fill.circle" : "circle")
+                            .font(.title3).foregroundStyle(profile.goal == goal ? Color.accentColor : Color.secondary)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(goal.rawValue).font(.headline).foregroundStyle(.primary)
+                            if profile.goal == goal {
+                                Text(goal.explanation).font(.subheadline).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 16))
+                }.buttonStyle(.plain).accessibilityAddTraits(profile.goal == goal ? [.isSelected] : [])
+            }
+            Text("Goals are yours to adjust. PausePath doesn’t assess symptoms, recovery readiness, or safe exertion. Follow advice from your healthcare professional.")
+                .font(.footnote).foregroundStyle(.secondary)
+            HStack {
+                Button("Back") { advance(to: 0) }.buttonStyle(.bordered)
+                Button {
+                    saveProfile()
+                    advance(to: 2)
+                } label: {
+                    Text("Set a weekly goal").fontWeight(.semibold).frame(maxWidth: .infinity).padding(.vertical, 8)
+                }.buttonStyle(.borderedProminent)
             }
         }
+    }
+
+    private var weeklyGoalStep: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Choose a goal for your week").font(.largeTitle.bold())
+            Text("Pick a number of walks that feels useful. Weekly minutes can be adjusted later in Profile → Update Goals.").foregroundStyle(.secondary)
+            Stepper("Walking sessions: \(profile.weeklyWalkTarget)", value: $profile.weeklyWalkTarget, in: 1...14)
+                .padding(14).background(.background, in: RoundedRectangle(cornerRadius: 16)).onChange(of: profile.weeklyWalkTarget) { saveProfile() }
+            HStack {
+                Button("Back") { advance(to: 1) }.buttonStyle(.bordered)
+                Button("Continue") { saveProfile(); advance(to: 3) }.buttonStyle(.borderedProminent)
+            }.frame(maxWidth: .infinity)
+        }
+    }
+
+    private var usernameStep: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("What should we call you?").font(.largeTitle.bold())
+            Text("Choose a PausePath username. You can change it later in Profile. It is only shown to other people when you choose to join a community.")
+                .font(.body).foregroundStyle(.secondary)
+            TextField("Your name", text: Binding(get: { profile.username ?? "" }, set: { profile.username = String($0.prefix(32)); saveProfile() }))
+                .textContentType(.nickname).textInputAutocapitalization(.words).autocorrectionDisabled()
+                .padding(14).background(.background, in: RoundedRectangle(cornerRadius: 14))
+                .accessibilityLabel("PausePath username")
+            HStack {
+                Button("Back") { advance(to: 2) }.buttonStyle(.bordered)
+                Button("Continue") { advance(to: 4) }.buttonStyle(.borderedProminent)
+            }.frame(maxWidth: .infinity)
+        }
+    }
+
+    private var connectionStep: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Let’s get your walk ready").font(.largeTitle.bold())
+                Text("Connect only what you want. You can skip any of these and continue; PausePath asks for location when you use a map or start a walk.")
+                    .font(.body).foregroundStyle(.secondary)
+            }
+            setupCard(title: "Sign in with Apple", subtitle: "Needed only for shared community features and reports. You can browse and use on-device features without signing in.", icon: "person.crop.circle") {
+                if account.isSignedIn {
+                    Label("Signed in with Apple", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                } else {
+                    SignInWithAppleButton(.continue,
+                        onRequest: { request in account.prepareAppleSignIn(request) },
+                        onCompletion: { result in Task { await account.completeAppleSignIn(result) } })
+                        .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+                        .frame(height: 48).disabled(account.busy)
+                    if account.busy { ProgressView("Signing in…") }
+                    Text(account.message).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            setupCard(title: "Apple Health & Fitness", subtitle: "Optional. Available walking activity and speed can support summaries and estimates. Heart-rate data is not used to infer your goals or preferences. Health data stays on this device.", icon: "heart.text.square") {
+                if health.isLoading { ProgressView("Requesting Health access…") }
+                else {
+                    Button(healthRequested ? "Review Health access" : "Connect Apple Health", systemImage: "heart") {
+                        healthRequested = true; Task { await health.connect() }
+                    }.buttonStyle(.bordered)
+                    Text(health.status).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            setupCard(title: "Location", subtitle: "Optional until you use a location-based feature. Nearby search and route planning need location or a starting address. Live GPS runs only during an active walk while PausePath is open, and stops when paused or ended.", icon: "location") {
+                if locationDiscovery.authorizationStatus == .authorizedAlways || locationDiscovery.authorizationStatus == .authorizedWhenInUse {
+                    Label("Location access is available", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                } else {
+                    Button(locationNeedsSettings ? "Open Location Settings" : "Allow location", systemImage: "location.fill") {
+                        if locationNeedsSettings {
+                            if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                        } else { locationDiscovery.requestLocationAccess() }
+                    }.buttonStyle(.bordered)
+                    Text(locationDiscovery.status).font(.caption).foregroundStyle(.secondary)
+                }
+                if locationDiscovery.accuracyAuthorization == .reducedAccuracy && locationDiscovery.authorizationStatus != .notDetermined {
+                    Text("Precise Location is off. Nearby results and route progress may be less accurate. You can change this in Settings.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            setupCard(title: "Daily progress recap", subtitle: "If enabled, an 8 PM reminder follows a saved reflection. Its wording responds to how your walk felt, without route, location, or Health details.", icon: "bell") {
+                if notificationEnabled {
+                    Label("Daily recap reminder is on", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    Button("Turn off reminder") { notificationEnabled = false; profile.dailyRecapNotifications = false; saveProfile(); DailyRecapNotifications.disable() }.font(.caption)
+                } else {
+                    Button("Allow daily recap notifications", systemImage: "bell.badge") {
+                        Task {
+                            let enabled = await DailyRecapNotifications.enable()
+                            notificationEnabled = enabled
+                            profile.dailyRecapNotifications = enabled
+                            notificationStatus = enabled ? "Reminder set for 8 PM. You can turn it off at any time." : "Notifications are off. Your recap is still available in My progress when you open PausePath."
+                            saveProfile()
+                        }
+                    }.buttonStyle(.bordered)
+                }
+                Text(notificationStatus).font(.caption).foregroundStyle(.secondary)
+            }
+            Button(action: onContinue) {
+                Text("Continue to Explore").fontWeight(.semibold).frame(maxWidth: .infinity).padding(.vertical, 6)
+            }.buttonStyle(.borderedProminent)
+            Button("Back to username") { advance(to: 3) }
+                .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity)
+            Text("You can connect or change access later in Profile. If Health has no shared data, PausePath still uses walks recorded in the app.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func stepDot(_ number: Int) -> some View {
+        Circle().fill(step >= number ? Color.accentColor : Color.secondary.opacity(0.2))
+            .frame(width: 9, height: 9).accessibilityLabel("Setup step \(number + 1)")
+    }
+
+    private func advance(to newStep: Int) {
+        withAnimation(reduceMotion ? .linear(duration: 0) : .snappy(duration: 0.3)) { step = newStep }
+    }
+
+    private func saveProfile() {
+        profileData = (try? JSONEncoder().encode(profile)) ?? profileData
     }
 
     private var locationNeedsSettings: Bool {

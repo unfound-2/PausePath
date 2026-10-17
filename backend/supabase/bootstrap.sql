@@ -178,6 +178,78 @@ END $$;
 -- uses it. Mapbox data (including IDs) is request-scoped and never stored here.
 
 INSERT INTO schema_migrations(name,sha256) VALUES ('002_api_only_access.sql','4b4348ae149a0589740e1912579a5175e704a5609995dee167da76a5216644e5');
+CREATE TABLE IF NOT EXISTS discovery_tiles (
+    x integer NOT NULL CHECK (x >= 0 AND x < 18000),
+    y integer NOT NULL CHECK (y >= 0 AND y < 9000),
+    state text NOT NULL DEFAULT 'queued' CHECK (state IN ('queued','loading','ready','unavailable')),
+    fetched_at timestamptz,
+    requested_at timestamptz NOT NULL DEFAULT now(),
+    next_attempt_at timestamptz NOT NULL DEFAULT now(),
+    attempts integer NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 6),
+    PRIMARY KEY (x,y)
+);
+CREATE INDEX IF NOT EXISTS discovery_tiles_pending ON discovery_tiles(next_attempt_at, requested_at);
+CREATE TABLE IF NOT EXISTS discovery_budget (id integer PRIMARY KEY CHECK (id=1), next_job_at timestamptz NOT NULL DEFAULT now());
+INSERT INTO discovery_budget(id) VALUES (1) ON CONFLICT DO NOTHING;
+ALTER TABLE discovery_tiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE discovery_budget ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON discovery_tiles, discovery_budget FROM PUBLIC;
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='anon') THEN
+        REVOKE ALL ON discovery_tiles, discovery_budget FROM anon;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN
+        REVOKE ALL ON discovery_tiles, discovery_budget FROM authenticated;
+    END IF;
+END $$;
+
+INSERT INTO schema_migrations(name,sha256) VALUES ('20261017045536_discovery_tiles.sql','49bb6fe2eb67c8c8a2da6c8c30efca32aa662808da7e77b5e6dde387c40fd619');
+CREATE TABLE walking_communities (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name text NOT NULL CHECK (char_length(name) BETWEEN 2 AND 60),
+    invite_code text NOT NULL UNIQUE CHECK (char_length(invite_code) BETWEEN 4 AND 12),
+    created_by text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE walking_community_members (
+    community_id uuid NOT NULL REFERENCES walking_communities(id) ON DELETE CASCADE,
+    user_id text NOT NULL,
+    display_name text NOT NULL CHECK (char_length(display_name) BETWEEN 1 AND 32),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (community_id,user_id)
+);
+CREATE TABLE walking_challenges (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    community_id uuid NOT NULL REFERENCES walking_communities(id) ON DELETE CASCADE,
+    name text NOT NULL CHECK (char_length(name) BETWEEN 2 AND 80),
+    metric text NOT NULL CHECK (metric IN ('distance_km','walks','minutes','new_routes')),
+    target numeric NOT NULL CHECK (target BETWEEN 1 AND 10000),
+    created_by text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE walking_challenge_progress (
+    challenge_id uuid NOT NULL REFERENCES walking_challenges(id) ON DELETE CASCADE,
+    user_id text NOT NULL,
+    amount numeric NOT NULL DEFAULT 0 CHECK (amount BETWEEN 0 AND 100000),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (challenge_id,user_id)
+);
+CREATE INDEX walking_challenges_community_created ON walking_challenges(community_id,created_at DESC);
+CREATE INDEX walking_progress_leaderboard ON walking_challenge_progress(challenge_id,amount DESC);
+DO $$ DECLARE table_name text; role_name text;
+BEGIN
+    FOREACH table_name IN ARRAY ARRAY['walking_communities','walking_community_members','walking_challenges','walking_challenge_progress'] LOOP
+        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY',table_name);
+        EXECUTE format('REVOKE ALL ON TABLE %I FROM PUBLIC',table_name);
+        FOREACH role_name IN ARRAY ARRAY['anon','authenticated'] LOOP
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=role_name) THEN
+                EXECUTE format('REVOKE ALL ON TABLE %I FROM %I',table_name,role_name);
+            END IF;
+        END LOOP;
+    END LOOP;
+END $$;
+
+INSERT INTO schema_migrations(name,sha256) VALUES ('20261017170000_community_challenges.sql','f7d4d8e1f2cd8258d424ec2686d7a315a92a6fc4d17e0d4b75d7b1033e0e7c30');
 
 -- Lock down the private schema and function resolution for this deployment.
 REVOKE ALL ON SCHEMA pausepath FROM PUBLIC, anon, authenticated;

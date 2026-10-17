@@ -24,6 +24,7 @@ extension FacilityKind {
 
 struct DiscoverView: View {
     let preferences: RoutePreferences
+    let profile: PausePathProfile
     @State private var discovery = PlaceDiscovery()
     @State private var camera: MapCameraPosition = .automatic
     @State private var visibleRegion: MKCoordinateRegion?
@@ -33,11 +34,14 @@ struct DiscoverView: View {
     @State private var routeStart: MKMapItem?
     @State private var routeStartSearchTask: Task<Void, Never>?
     @State private var routeStartSearchInProgress = false
+    @State private var currentLocationRequested = false
+    @State private var routeStartSearchMessage = ""
     @State private var routeDestinationQuery = ""
     @State private var routeDestinationMatches: [MKMapItem] = []
     @State private var routeDestination: MKMapItem?
     @State private var routeSearchTask: Task<Void, Never>?
     @State private var routeSearchInProgress = false
+    @State private var routeSearchMessage = ""
     @State private var routeDifficultyFilter = RoutePlannerDifficultyFilter.all
     @State private var mandatoryRouteStops = Set<FacilityKind>()
     @State private var routeRequestID = UUID()
@@ -75,6 +79,15 @@ struct DiscoverView: View {
     var body: some View {
         Map(position: $camera) {
             UserAnnotation()
+            if let start = routeStartCoordinate {
+                Annotation("Selected route start", coordinate: start, anchor: .bottom) {
+                    Image(systemName: "location.fill")
+                        .font(.headline).foregroundStyle(.white).frame(width: 42, height: 42)
+                        .background(Color(red: 0.02, green: 0.42, blue: 0.34), in: Circle())
+                        .overlay(Circle().stroke(.white, lineWidth: 3)).shadow(radius: 4)
+                        .accessibilityLabel("Selected route starting point")
+                }.annotationTitles(.hidden)
+            }
             ForEach(visiblePlaces) { place in
                 Annotation(place.item.name ?? place.kind.rawValue, coordinate: place.item.placemark.coordinate, anchor: .bottom) {
                     Button { select(place) } label: {
@@ -113,27 +126,12 @@ struct DiscoverView: View {
         .ignoresSafeArea(edges: .top)
         .safeAreaInset(edge: .top, spacing: 0) { topControls }
         .overlay(alignment: .bottom) {
-            if showRoutePlanner {
-                ExploreRoutePlannerView(discovery: discovery, preferences: preferences, initialDestination: selectedPlace,
-                    destinationQuery: $routeDestinationQuery, destination: $routeDestination,
-                    mandatoryKinds: $mandatoryRouteStops, difficultyFilter: $routeDifficultyFilter,
-                    routeRequestID: $routeRequestID, usesCurrentLocation: usesCurrentRouteStart,
-                    customOrigin: routeStartCoordinate, customOriginName: routeStartTitle,
-                    onNavigate: { navigationWalk = $0 }, onClose: { showRoutePlanner = false })
-                    .padding(.horizontal, 10).padding(.bottom, 6)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            } else {
-                bottomControls
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
+            bottomControls
         }
-        .animation(.snappy(duration: 0.25), value: showRoutePlanner)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: showRoutePlanner)
         .toolbarBackground(.hidden, for: .tabBar)
         .task {
             camera = .automatic
-            // Ask in context: Explore uses location to show nearby places and
-            // make routes from the user's actual position.
-            discovery.useLocation()
         }
         .task {
             discovery.places = []; selectedID = nil; discovery.route = nil
@@ -152,6 +150,17 @@ struct DiscoverView: View {
             }
         }
         .onChange(of: [discovery.region.center.latitude, discovery.region.center.longitude]) { moveToDiscoveredArea() }
+        .onChange(of: discovery.currentLocation?.timestamp) { _, _ in
+            guard usesCurrentRouteStart, let location = discovery.currentLocation, isFresh(location) else { return }
+            let region = MKCoordinateRegion(center: location.coordinate, latitudinalMeters: 1_400, longitudinalMeters: 1_400)
+            visibleRegion = region
+            camera = .region(region)
+            clearRoutePreview()
+            Task { await loadArea(region) }
+            if !routeDestinationQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Task { await searchRouteDestinations(routeDestinationQuery) }
+            }
+        }
         .onDisappear {
             cancelAreaRefresh()
             routeStartSearchTask?.cancel()
@@ -163,6 +172,17 @@ struct DiscoverView: View {
         .onChange(of: navigationWalk?.id) { if navigationWalk != nil { cancelAreaRefresh() } }
         .onChange(of: discovery.selectedRouteOptionID) { fitRouteInMap() }
         .sheet(isPresented: $showResults) { resultsSheet }
+        .sheet(isPresented: $showRoutePlanner) {
+            ExploreRoutePlannerView(discovery: discovery, preferences: preferences, profile: profile, initialDestination: selectedPlace,
+                destinationQuery: $routeDestinationQuery, destination: $routeDestination,
+                mandatoryKinds: $mandatoryRouteStops, difficultyFilter: $routeDifficultyFilter,
+                routeRequestID: $routeRequestID, usesCurrentLocation: usesCurrentRouteStart,
+                customOrigin: routeStartCoordinate, customOriginName: routeStartTitle,
+                onNavigate: { navigationWalk = $0 }, onClose: { showRoutePlanner = false })
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(.regularMaterial)
+        }
         .fullScreenCover(item: $navigationWalk) { WalkingNavigationView(walk: $0) }
     }
 
@@ -190,6 +210,7 @@ struct DiscoverView: View {
                         .onSubmit { Task { await searchRouteStarts(routeStartQuery) } }
                         .onChange(of: routeStartQuery) { _, value in
                             if routeStart?.name != value { routeStart = nil }
+                            routeStartSearchMessage = ""
                             routeStartSearchTask?.cancel()
                             guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { routeStartMatches = []; return }
                             routeStartSearchTask = Task {
@@ -207,13 +228,28 @@ struct DiscoverView: View {
 
                 if !routeStartMatches.isEmpty && routeStart == nil {
                     destinationSuggestions(routeStartMatches, selecting: selectRouteStart)
+                } else if !routeStartSearchMessage.isEmpty {
+                    Text(routeStartSearchMessage).font(.caption).foregroundStyle(.secondary)
                 } else if routeStart != nil {
                     Label("Start: \(routeStartTitle)", systemImage: "checkmark.circle.fill")
                         .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 }
             } else {
-                Label(isFresh(discovery.currentLocation) ? "Using this device’s location" : "Getting current location…", systemImage: "location.circle")
-                    .font(.caption).foregroundStyle(.secondary)
+                if isFresh(discovery.currentLocation) {
+                    Label("Using this device’s location", systemImage: "location.circle")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if discovery.authorizationStatus == .denied || discovery.authorizationStatus == .restricted {
+                    Button("Allow location in Settings", systemImage: "location.slash") {
+                        requestLocationAccess()
+                    }.font(.caption.weight(.semibold))
+                } else {
+                    Button("Get current location", systemImage: "location.circle") {
+                        requestLocationAccess()
+                    }.font(.caption.weight(.semibold))
+                }
+                if currentLocationRequested && !isFresh(discovery.currentLocation) {
+                    Text(discovery.status).font(.caption).foregroundStyle(.secondary)
+                }
             }
 
             HStack(spacing: 10) {
@@ -225,6 +261,7 @@ struct DiscoverView: View {
                         if routeDestination?.name != value {
                             routeDestination = nil
                             routeDestinationMatches = []
+                            routeSearchMessage = ""
                             discovery.routeOptions = []
                             discovery.selectedRouteOptionID = nil
                         }
@@ -276,6 +313,8 @@ struct DiscoverView: View {
                 destinationSuggestions(routeDestinationMatches, selecting: selectRouteDestination)
             } else if routeSearchInProgress {
                 ProgressView("Finding nearby destinations…").font(.caption).padding(.vertical, 3)
+            } else if !routeSearchMessage.isEmpty {
+                Text(routeSearchMessage).font(.caption).foregroundStyle(.secondary)
             } else if let routeDestination {
                 Label("End: \(routeDestination.name ?? routeDestinationQuery)", systemImage: "mappin.and.ellipse")
                     .font(.caption.weight(.semibold)).padding(.horizontal, 8)
@@ -296,7 +335,7 @@ struct DiscoverView: View {
     private func destinationSuggestions(_ matches: [MKMapItem], selecting: @escaping (MKMapItem) -> Void) -> some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(Array(matches.enumerated()), id: \.offset) { index, item in
+                ForEach(Array(matches.prefix(20).enumerated()), id: \.offset) { index, item in
                     Button { selecting(item) } label: {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(item.name ?? "Place").font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
@@ -310,11 +349,11 @@ struct DiscoverView: View {
                     }.buttonStyle(.plain)
                         .accessibilityLabel("\(item.name ?? "Place"), \(address(of: item))")
                         .accessibilityHint("Select this location")
-                    if index < matches.count - 1 { Divider() }
+                    if index < min(matches.count, 20) - 1 { Divider() }
                 }
             }
         }
-        .frame(maxHeight: 198)
+        .frame(height: min(CGFloat(min(matches.count, 20)) * 66, 198))
         .scrollIndicators(.visible)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -328,16 +367,18 @@ struct DiscoverView: View {
     }
 
     private func requestLocationAccess() {
+        currentLocationRequested = true
         if discovery.authorizationStatus == .denied || discovery.authorizationStatus == .restricted,
            let settingsURL = URL(string: UIApplication.openSettingsURLString) {
             openURL(settingsURL)
         } else {
-            discovery.requestAlwaysPreciseLocation()
+            discovery.useLocation()
         }
     }
 
     private func setRouteStartToCurrentLocation() {
         usesCurrentRouteStart = true
+        currentLocationRequested = true
         routeStart = nil
         routeStartQuery = ""
         routeStartMatches = []
@@ -357,9 +398,8 @@ struct DiscoverView: View {
 
     private func searchRouteStarts(_ query: String) async {
         let cleaned = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty, let currentLocation = discovery.currentLocation, isFresh(currentLocation) else {
+        guard !cleaned.isEmpty else {
             routeStartMatches = []
-            if !cleaned.isEmpty { discovery.useLocation() }
             return
         }
         routeStartSearchInProgress = true
@@ -367,18 +407,25 @@ struct DiscoverView: View {
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = cleaned
         request.resultTypes = [.pointOfInterest, .address]
-        request.region = MKCoordinateRegion(center: currentLocation.coordinate, latitudinalMeters: 30_000, longitudinalMeters: 30_000)
+        let currentLocation = isFresh(discovery.currentLocation) ? discovery.currentLocation : nil
+        if let currentLocation {
+            request.region = MKCoordinateRegion(center: currentLocation.coordinate, latitudinalMeters: 30_000, longitudinalMeters: 30_000)
+        } else if camera.positionedByUser, let visibleRegion {
+            request.region = visibleRegion
+        }
         do {
             let response = try await MKLocalSearch(request: request).start()
             guard routeStartQuery.trimmingCharacters(in: .whitespacesAndNewlines) == cleaned else { return }
-            routeStartMatches = response.mapItems.sorted {
-                CLLocation(latitude: $0.placemark.coordinate.latitude, longitude: $0.placemark.coordinate.longitude).distance(from: currentLocation) <
-                    CLLocation(latitude: $1.placemark.coordinate.latitude, longitude: $1.placemark.coordinate.longitude).distance(from: currentLocation)
+            routeStartMatches = response.mapItems.sorted { left, right in
+                guard let currentLocation else { return (left.name ?? "") < (right.name ?? "") }
+                return CLLocation(latitude: left.placemark.coordinate.latitude, longitude: left.placemark.coordinate.longitude).distance(from: currentLocation) <
+                    CLLocation(latitude: right.placemark.coordinate.latitude, longitude: right.placemark.coordinate.longitude).distance(from: currentLocation)
             }
+            routeStartSearchMessage = routeStartMatches.isEmpty ? "No starting places found. Try a full address or nearby landmark." : ""
         } catch {
             guard routeStartQuery.trimmingCharacters(in: .whitespacesAndNewlines) == cleaned else { return }
             routeStartMatches = []
-            discovery.status = "Starting place search is unavailable. Check your connection and try again."
+            routeStartSearchMessage = "Starting place search is unavailable. Check your connection and try again."
         }
     }
 
@@ -387,7 +434,17 @@ struct DiscoverView: View {
         routeStartQuery = item.name ?? address(of: item)
         routeStartMatches = []
         clearRoutePreview()
+        moveMapToRouteStart()
         if !routeDestinationQuery.isEmpty { Task { await searchRouteDestinations(routeDestinationQuery) } }
+    }
+
+    private func moveMapToRouteStart() {
+        guard let coordinate = routeStartCoordinate else { return }
+        let region = MKCoordinateRegion(center: coordinate, latitudinalMeters: 1_400, longitudinalMeters: 1_400)
+        visibleRegion = region
+        camera = .region(region)
+        searched = true
+        Task { await loadArea(region) }
     }
 
     private func clearRoutePreview() {
@@ -402,7 +459,7 @@ struct DiscoverView: View {
         let cleaned = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty, let location = routeStartLocation else {
             routeDestinationMatches = []
-            if !cleaned.isEmpty && usesCurrentRouteStart { discovery.requestAlwaysPreciseLocation() }
+            if !cleaned.isEmpty && usesCurrentRouteStart { discovery.useLocation() }
             return
         }
         routeSearchInProgress = true
@@ -418,11 +475,11 @@ struct DiscoverView: View {
                 CLLocation(latitude: $0.placemark.coordinate.latitude, longitude: $0.placemark.coordinate.longitude).distance(from: location) <
                     CLLocation(latitude: $1.placemark.coordinate.latitude, longitude: $1.placemark.coordinate.longitude).distance(from: location)
             }
-            if routeDestinationMatches.isEmpty { discovery.status = "No nearby matches. Try a more specific destination." }
+            routeSearchMessage = routeDestinationMatches.isEmpty ? "No nearby matches. Try a more specific destination." : ""
         } catch {
             guard routeDestinationQuery.trimmingCharacters(in: .whitespacesAndNewlines) == cleaned else { return }
             routeDestinationMatches = []
-            discovery.status = "Destination search is unavailable. Check your connection and try again."
+            routeSearchMessage = "Destination search is unavailable. Check your connection and try again."
         }
     }
 
@@ -500,21 +557,13 @@ struct DiscoverView: View {
                         }
                     }
                     else {
-                        HStack(spacing: 12) {
-                            Image(systemName: "figure.walk").font(.title2).foregroundStyle(.teal)
-                                .frame(width: 44, height: 44).background(.teal.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(kinds.isEmpty ? "Choose a filter" : "Find your next pause").font(.headline)
-                                Text(kinds.isEmpty ? "Turn on a category to show its pins." : "\(visiblePlaces.count) possible stops • choose a destination or route stop")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
+                        HStack(spacing: 10) {
+                            Text(kinds.isEmpty ? "Choose a stop filter" : "\(visiblePlaces.count) stops nearby")
+                                .font(.caption.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
                             Spacer(minLength: 0)
                             Button { showResults = true } label: {
-                                Image(systemName: "list.bullet").font(.title3).frame(width: 44, height: 44)
+                                Image(systemName: "list.bullet").font(.body.weight(.semibold)).frame(width: 36, height: 36)
                             }.accessibilityLabel("Show stops as a list")
-                        }
-                        if !discovery.status.isEmpty {
-                            Text(discovery.status).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                         }
                     }
                 }
@@ -769,6 +818,10 @@ struct DiscoverView: View {
 
     private func isFresh(_ location: CLLocation?) -> Bool {
         guard let location else { return false }
-        return location.horizontalAccuracy >= 0 && location.horizontalAccuracy <= 100 && Date().timeIntervalSince(location.timestamp) <= 60
+        let age = Date().timeIntervalSince(location.timestamp)
+        return location.horizontalAccuracy.isFinite && location.horizontalAccuracy >= 0 && location.horizontalAccuracy <= 50 &&
+            location.coordinate.latitude.isFinite && location.coordinate.longitude.isFinite &&
+            (-90...90).contains(location.coordinate.latitude) && (-180...180).contains(location.coordinate.longitude) &&
+            age.isFinite && age >= -2 && age <= 15
     }
 }

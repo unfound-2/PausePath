@@ -61,6 +61,8 @@ The Blueprint sets `DB_SCHEMA=pausepath`, `DB_EXTENSIONS_SCHEMA=extensions`, poo
 
 Without the pedestrian router, route curation intentionally returns 503; commercial search and reporting remain usable. Mapbox Search does not supply the pedestrian connectivity checks. The existing iOS MapKit routing remains unchanged.
 
+Community challenge groups, invite codes, challenge definitions and opt-in aggregate progress are stored in the private API schema by `20261017170000_community_challenges.sql`. The Render pre-deploy migration step applies it before the updated API starts. On a separately managed deployment, run `python scripts/migrate.py` from `backend/` with the same `MIGRATION_DATABASE_URL` (or owner `DATABASE_URL`) and `DB_SCHEMA` settings before deploying the updated API. Members see random walker aliases and challenge totals only; clients must not send route geometry, location, Health information, or reflection text.
+
 ## Operations and existing databases
 
 Run `python scripts/maintenance.py` daily in a scheduler with the same database/schema settings to refresh report confidence and prune rate buckets. Keep DB backups enabled and define report retention before launch. Migration credentials are not needed by the mobile client.

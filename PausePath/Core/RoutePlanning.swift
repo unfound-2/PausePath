@@ -8,6 +8,76 @@ public enum WalkingGoal: String, CaseIterable, Codable, Sendable {
     case freshAir = "Fresh air", consistency = "Build a routine", distance = "Explore farther"
 }
 
+public enum PersonalGoalProfile: String, CaseIterable, Codable, Sendable {
+    case recovery = "Returning after an injury"
+    case beginner = "Building a walking routine"
+    case seniorFriendly = "Comfortable, accessible walks"
+    case chronicPain = "Managing walks with chronic pain"
+    case generalFitness = "General wellbeing and fitness"
+    case eventTraining = "Training for an event or sport"
+
+    public var explanation: String {
+        switch self {
+        case .recovery: "Start with shorter, flatter routes and nearby rest stops. Follow your care team’s guidance."
+        case .beginner: "Keep route suggestions approachable while you find a pace and routine that suit you."
+        case .seniorFriendly: "Prioritize shorter distances, flatter routes, and more frequent rest-stop options."
+        case .chronicPain: "Keep route choices flexible, with shorter options and nearby places to pause."
+        case .generalFitness: "Balance distance and route variety around the goals you set."
+        case .eventTraining: "Explore longer routes and gentle terrain that can support your own training plan."
+        }
+    }
+
+    public func applyRouteDefaults(to preferences: inout RoutePreferences) {
+        switch self {
+        case .recovery, .seniorFriendly:
+            preferences.distanceMeters = 800
+            preferences.terrain = .flat
+            preferences.maximumRestGapMeters = 250
+            preferences.facilities = [.bench, .bathroom]
+        case .beginner:
+            preferences.distanceMeters = 1200
+            preferences.terrain = .flat
+            preferences.maximumRestGapMeters = 350
+            preferences.facilities = [.bench]
+        case .chronicPain:
+            preferences.distanceMeters = 800
+            preferences.terrain = .flat
+            preferences.maximumRestGapMeters = 250
+            preferences.facilities = [.bench]
+        case .generalFitness:
+            preferences.distanceMeters = 1800
+            preferences.terrain = .any
+            preferences.maximumRestGapMeters = 500
+            preferences.facilities = [.bench]
+        case .eventTraining:
+            preferences.distanceMeters = 3000
+            preferences.terrain = .gentle
+            preferences.maximumRestGapMeters = 600
+            preferences.facilities = []
+        }
+    }
+
+    public var prefersGentlerRoutes: Bool {
+        self == .recovery || self == .beginner || self == .seniorFriendly || self == .chronicPain
+    }
+}
+
+public struct PausePathProfile: Codable, Equatable, Sendable {
+    public var username: String?
+    public var goal: PersonalGoalProfile
+    public var weeklyWalkTarget: Int
+    public var weeklyMinutesTarget: Int
+    public var dailyRecapNotifications: Bool
+
+    public init(username: String? = nil, goal: PersonalGoalProfile = .generalFitness, weeklyWalkTarget: Int = 3, weeklyMinutesTarget: Int = 90, dailyRecapNotifications: Bool = false) {
+        self.username = username
+        self.goal = goal
+        self.weeklyWalkTarget = weeklyWalkTarget
+        self.weeklyMinutesTarget = weeklyMinutesTarget
+        self.dailyRecapNotifications = dailyRecapNotifications
+    }
+}
+
 public enum TerrainPreference: String, CaseIterable, Codable, Sendable {
     case flat = "Mostly flat", gentle = "Gentle slopes", any = "Any terrain"
     public var maximumGrade: Double {
@@ -110,6 +180,45 @@ public enum RoutePlanner {
 
 public enum Manageability: String, CaseIterable, Codable, Sendable {
     case comfortable = "Comfortable", aboutRight = "About right", difficult = "Too demanding"
+}
+
+public struct WalkReflection: Identifiable, Codable, Sendable {
+    public var id: UUID
+    public var date: Date
+    public var routeName: String
+    public var feeling: Manageability
+    public var distanceMeters: Double
+    public var activeSeconds: Double
+    public var completed: Bool
+    public var note: String?
+
+    public init(id: UUID = UUID(), date: Date = .now, routeName: String, feeling: Manageability,
+                distanceMeters: Double, activeSeconds: Double, completed: Bool, note: String? = nil) {
+        self.id = id
+        self.date = date
+        self.routeName = routeName
+        self.feeling = feeling
+        self.distanceMeters = max(0, distanceMeters)
+        self.activeSeconds = max(0, activeSeconds)
+        self.completed = completed
+        self.note = note
+    }
+}
+
+public struct TrackedWalk: Identifiable, Codable, Sendable {
+    public var id: UUID
+    public var date: Date
+    public var routeName: String
+    public var distanceMeters: Double
+    public var activeSeconds: Double
+    public var completed: Bool
+    public var routeIdentity: String?
+    public init(id: UUID = UUID(), date: Date = .now, routeName: String, distanceMeters: Double,
+                activeSeconds: Double, completed: Bool, routeIdentity: String? = nil) {
+        self.id = id; self.date = date; self.routeName = routeName
+        self.distanceMeters = max(0, distanceMeters); self.activeSeconds = max(0, activeSeconds)
+        self.completed = completed; self.routeIdentity = routeIdentity
+    }
 }
 
 public enum RouteAdjustment: String, CaseIterable, Codable, Sendable {

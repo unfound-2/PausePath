@@ -54,6 +54,105 @@ def ready():
     with transaction() as conn: conn.execute('SELECT id FROM pois LIMIT 1')
     return {'status':'ready'}
 
+@app.post('/api/v1/communities',tags=['community'])
+def create_community(body: dict=Body(...),user=Depends(identity)):
+    rate_limit(user,'community',8)
+    raw_name=body.get('name')
+    name=raw_name.strip() if isinstance(raw_name,str) else ''
+    if not 2 <= len(name) <= 60: raise HTTPException(422,'Community name must be 2–60 characters')
+    raw_display=body.get('display_name')
+    display=raw_display.strip() if isinstance(raw_display,str) else ''
+    if not 1 <= len(display) <= 32: raise HTTPException(422,'Choose a community username from 1 to 32 characters')
+    code=secrets.token_urlsafe(6).replace('-','').replace('_','').upper()[:8]
+    with transaction() as conn:
+        row=conn.execute('INSERT INTO walking_communities(name,invite_code,created_by) VALUES (%s,%s,%s) RETURNING id,name,invite_code,created_at',(name,code,user['sub'])).fetchone()
+        conn.execute('INSERT INTO walking_community_members(community_id,user_id,display_name) VALUES (%s,%s,%s)',(row['id'],user['sub'],display))
+    return {**row,'member_count':1,'my_display_name':display}
+
+@app.post('/api/v1/communities/join',tags=['community'])
+def join_community(body: dict=Body(...),user=Depends(identity)):
+    rate_limit(user,'community',12)
+    raw_code=body.get('invite_code')
+    code=raw_code.strip().upper() if isinstance(raw_code,str) else ''
+    if not 4 <= len(code) <= 12: raise HTTPException(422,'Enter a valid invite code')
+    raw_display=body.get('display_name')
+    display=raw_display.strip() if isinstance(raw_display,str) else ''
+    if not 1 <= len(display) <= 32: raise HTTPException(422,'Choose a community username from 1 to 32 characters')
+    with transaction() as conn:
+        row=conn.execute('SELECT id,name,invite_code,created_at FROM walking_communities WHERE invite_code=%s',(code,)).fetchone()
+        if not row: raise HTTPException(404,'That invite code was not found')
+        conn.execute('INSERT INTO walking_community_members(community_id,user_id,display_name) VALUES (%s,%s,%s) ON CONFLICT (community_id,user_id) DO UPDATE SET display_name=excluded.display_name',(row['id'],user['sub'],display))
+        member=conn.execute('SELECT display_name FROM walking_community_members WHERE community_id=%s AND user_id=%s',(row['id'],user['sub'])).fetchone()
+        count=conn.execute('SELECT count(*) AS n FROM walking_community_members WHERE community_id=%s',(row['id'],)).fetchone()['n']
+    return {**row,'member_count':count,'my_display_name':member['display_name']}
+
+@app.post('/api/v1/communities/username',tags=['community'])
+def update_community_username(body: dict=Body(...),user=Depends(identity)):
+    raw=body.get('display_name')
+    display=raw.strip() if isinstance(raw,str) else ''
+    if not 1 <= len(display) <= 32: raise HTTPException(422,'Choose a community username from 1 to 32 characters')
+    with transaction() as conn:
+        conn.execute('UPDATE walking_community_members SET display_name=%s WHERE user_id=%s',(display,user['sub']))
+    return {'saved':True,'display_name':display}
+
+@app.get('/api/v1/communities',tags=['community'])
+def list_communities(user=Depends(identity)):
+    with transaction() as conn:
+        rows=conn.execute('''SELECT c.id,c.name,c.invite_code,c.created_at,m.display_name AS my_display_name,
+            (SELECT count(*) FROM walking_community_members m2 WHERE m2.community_id=c.id) AS member_count,
+            (SELECT coalesce(jsonb_agg(m3.display_name ORDER BY lower(m3.display_name)),'[]'::jsonb)
+                FROM walking_community_members m3 WHERE m3.community_id=c.id) AS members
+            FROM walking_community_members m JOIN walking_communities c ON c.id=m.community_id
+            WHERE m.user_id=%s ORDER BY c.created_at DESC''',(user['sub'],)).fetchall()
+    return {'communities':rows}
+
+@app.post('/api/v1/communities/{community_id}/challenges',tags=['community'])
+def create_challenge(community_id: UUID,body: dict=Body(...),user=Depends(identity)):
+    rate_limit(user,'challenge',12)
+    raw_name=body.get('name'); name=raw_name.strip() if isinstance(raw_name,str) else ''
+    metric=body.get('metric'); target=body.get('target')
+    if not 2 <= len(name) <= 80: raise HTTPException(422,'Challenge name must be 2–80 characters')
+    if metric not in ('distance_km','walks','minutes','new_routes'): raise HTTPException(422,'Choose a supported challenge type')
+    if not isinstance(target,(int,float)) or isinstance(target,bool) or not 1 <= target <= 10000: raise HTTPException(422,'Choose a goal from 1 to 10,000')
+    with transaction() as conn:
+        if not conn.execute('SELECT 1 FROM walking_community_members WHERE community_id=%s AND user_id=%s',(community_id,user['sub'])).fetchone(): raise HTTPException(403,'Join this community before creating a challenge')
+        row=conn.execute('INSERT INTO walking_challenges(community_id,name,metric,target,created_by) VALUES (%s,%s,%s,%s,%s) RETURNING id,community_id,name,metric,target,created_at',(community_id,name,metric,target,user['sub'])).fetchone()
+        conn.execute('INSERT INTO walking_challenge_progress(challenge_id,user_id,amount) VALUES (%s,%s,0)',(row['id'],user['sub']))
+    return row
+
+@app.get('/api/v1/communities/{community_id}/challenges',tags=['community'])
+def list_challenges(community_id: UUID,user=Depends(identity)):
+    with transaction() as conn:
+        if not conn.execute('SELECT 1 FROM walking_community_members WHERE community_id=%s AND user_id=%s',(community_id,user['sub'])).fetchone(): raise HTTPException(403,'Join this community to view its challenges')
+        rows=conn.execute('''SELECT c.id,c.community_id,c.name,c.metric,c.target,c.created_at,
+            coalesce((SELECT p.amount FROM walking_challenge_progress p WHERE p.challenge_id=c.id AND p.user_id=%s),0) AS my_progress,
+            coalesce((SELECT jsonb_agg(jsonb_build_object('name',ranked.display_name,'amount',ranked.amount) ORDER BY ranked.amount DESC)
+                FROM (SELECT m.display_name,coalesce(p.amount,0) AS amount FROM walking_community_members m
+                    LEFT JOIN walking_challenge_progress p ON p.user_id=m.user_id AND p.challenge_id=c.id
+                    WHERE m.community_id=c.community_id ORDER BY amount DESC LIMIT 50) ranked),'[]'::jsonb) AS leaderboard
+            FROM walking_challenges c WHERE c.community_id=%s ORDER BY c.created_at DESC''',(user['sub'],community_id)).fetchall()
+    return {'challenges':rows}
+
+@app.post('/api/v1/challenges/{challenge_id}/progress',tags=['community'])
+def update_challenge_progress(challenge_id: UUID,body: dict=Body(...),user=Depends(identity)):
+    amount=body.get('amount')
+    if not isinstance(amount,(int,float)) or isinstance(amount,bool) or not 0 <= amount <= 100000: raise HTTPException(422,'Progress must be between 0 and 100,000')
+    with transaction() as conn:
+        joined=conn.execute('''SELECT 1 FROM walking_challenges c JOIN walking_community_members m ON m.community_id=c.community_id
+            WHERE c.id=%s AND m.user_id=%s''',(challenge_id,user['sub'])).fetchone()
+        if not joined: raise HTTPException(403,'Join the challenge community before updating progress')
+        conn.execute('''INSERT INTO walking_challenge_progress(challenge_id,user_id,amount) VALUES (%s,%s,%s)
+            ON CONFLICT (challenge_id,user_id) DO UPDATE SET amount=excluded.amount,updated_at=now()''',(challenge_id,user['sub'],amount))
+    return {'saved':True,'amount':amount}
+
+@app.post('/api/v1/challenges/{challenge_id}/progress/delete',tags=['community'])
+def delete_challenge_progress(challenge_id: UUID,user=Depends(identity)):
+    with transaction() as conn:
+        conn.execute('''DELETE FROM walking_challenge_progress p USING walking_challenges c,walking_community_members m
+            WHERE p.challenge_id=c.id AND m.community_id=c.community_id AND m.user_id=%s
+            AND c.id=%s AND p.user_id=%s''',(user['sub'],challenge_id,user['sub']))
+    return {'deleted':True}
+
 @app.post('/api/v1/routes/curate',response_model=CuratedRoute,tags=['routes'])
 def curate_route(body: CurateRequest,user=Depends(public_reader)):
     rate_limit(user,'curate',6)

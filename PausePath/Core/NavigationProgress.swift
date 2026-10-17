@@ -55,6 +55,7 @@ public struct WalkProgress: Sendable {
     public private(set) var offRoute = false
     public private(set) var hasStarted = false
     public let paths: [[Coordinate]]
+    private var consecutiveOffRouteFixes = 0
     public init(paths: [[Coordinate]]) { self.paths = paths }
     public var totalMeters: Double { paths.reduce(0) { $0 + WalkingGeometry.length($1) } }
     public var completedMeters: Double {
@@ -63,16 +64,21 @@ public struct WalkProgress: Sendable {
     }
     /// Returns false for unusable GPS. A poor fix must not advance a step or declare arrival.
     @discardableResult public mutating func update(position: Coordinate, accuracy: Double, age: TimeInterval) -> Bool {
-        guard !arrived, paths.indices.contains(legIndex), accuracy >= 0, accuracy <= 35, age >= -2, age <= 15,
+        guard !arrived, paths.indices.contains(legIndex), position.latitude.isFinite, position.longitude.isFinite,
+              (-90...90).contains(position.latitude), (-180...180).contains(position.longitude),
+              accuracy.isFinite, accuracy >= 0, accuracy <= 50, age.isFinite, age >= -2, age <= 15,
               let start = paths[legIndex].first, let end = paths[legIndex].last else { return false }
         if !hasStarted {
-            guard WalkingGeometry.distance(position, start) <= 40 else { offRoute = true; return true }
+            guard WalkingGeometry.distance(position, start) <= 50 else {
+                markOffRouteCandidate(true)
+                return true
+            }
             hasStarted = true
         }
         guard let projected = WalkingGeometry.project(position, onto: paths[legIndex], near: metersAlongLeg) else {
-            offRoute = true; return true
+            markOffRouteCandidate(true); return true
         }
-        offRoute = projected.metersAway > 40
+        markOffRouteCandidate(projected.metersAway > 50)
         guard !offRoute else { return true }
         metersAlongLeg = max(metersAlongLeg, projected.metersAlong)
         let length = WalkingGeometry.length(paths[legIndex])
@@ -81,5 +87,10 @@ public struct WalkProgress: Sendable {
             else { legIndex += 1; metersAlongLeg = 0 }
         }
         return true
+    }
+
+    private mutating func markOffRouteCandidate(_ isCandidate: Bool) {
+        consecutiveOffRouteFixes = isCandidate ? consecutiveOffRouteFixes + 1 : 0
+        offRoute = consecutiveOffRouteFixes >= 2
     }
 }

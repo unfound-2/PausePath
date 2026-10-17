@@ -1,5 +1,6 @@
 import MapKit
 import Observation
+import CryptoKit
 
 extension MKPolyline {
     var walkingCoordinates: [Coordinate] {
@@ -21,6 +22,15 @@ struct GeneratedWalk: Identifiable {
     var duration: Double { distance / max(0.3, preferences.speedMetersPerSecond) }
     var paths: [[Coordinate]] { legs.map { $0.polyline.walkingCoordinates } }
     var start: Coordinate { paths[0][0] }
+    /// Stable opaque identifier for this waypoint sequence. The identifier stays on device;
+    /// only aggregate challenge totals are sent to the community service.
+    var routeIdentity: String {
+        let signature = paths.compactMap { path -> String? in
+            guard let first = path.first, let last = path.last else { return nil }
+            return "\(Int((first.latitude * 10_000).rounded())),\(Int((first.longitude * 10_000).rounded()))>\(Int((last.latitude * 10_000).rounded())),\(Int((last.longitude * 10_000).rounded()))"
+        }.joined(separator: "|")
+        return SHA256.hash(data: Data(signature.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
     var distanceMatches: Bool { abs(distance - preferences.distanceMeters) <= preferences.distanceMeters * 0.25 }
     var requirements: String {
         "Requested: \(preferences.terrain.rawValue.lowercased()), seats at most \(Int(preferences.maximumRestGapMeters)) m apart" +

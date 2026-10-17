@@ -60,38 +60,28 @@ struct WalkingRouteOption: Identifiable {
         accuracyAuthorization = locationManager.accuracyAuthorization
     }
 
-    func requestAlwaysPreciseLocation() {
+    func requestLocationAccess() {
         switch locationManager.authorizationStatus {
         case .notDetermined:
-            status = "Requesting Always location access…"
-            locationManager.requestAlwaysAuthorization()
-        case .authorizedWhenInUse:
-            status = "Allow Always access to keep route guidance available during an active walk."
-            locationManager.requestAlwaysAuthorization()
-        case .authorizedAlways:
+            status = "Requesting location access for this feature…"
+            locationManager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse, .authorizedAlways:
             if locationManager.accuracyAuthorization == .reducedAccuracy {
                 locationManager.requestTemporaryFullAccuracyAuthorization(withPurposeKey: "ActiveWalk")
             }
-            status = "Checking your precise location…"
+            status = "Finding your location while PausePath is open…"
             locationManager.requestLocation()
         case .denied, .restricted:
-            status = "Enable Always and Precise location in Settings to continue."
+            status = "Allow location in Settings, or enter a starting address."
         @unknown default:
             status = "Location access is unavailable. Check Settings."
         }
     }
 
     func useLocation() {
-        switch locationManager.authorizationStatus {
-        case .notDetermined:
-            status = "Requesting permission to use your location…"
-            locationManager.requestWhenInUseAuthorization()
-        case .authorizedWhenInUse, .authorizedAlways:
-            status = "Finding your device location…"
-            locationManager.requestLocation()
-        default: status = "Location access is unavailable. Enable it in Settings or enter a starting address."
-        }
+        requestLocationAccess()
     }
+
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         authorizationStatus = manager.authorizationStatus
         accuracyAuthorization = manager.accuracyAuthorization

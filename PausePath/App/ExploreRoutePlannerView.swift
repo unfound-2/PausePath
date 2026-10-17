@@ -22,6 +22,7 @@ enum RoutePlannerDifficultyFilter: String, CaseIterable, Identifiable {
 struct ExploreRoutePlannerView: View {
     let discovery: PlaceDiscovery
     let preferences: RoutePreferences
+    let profile: PausePathProfile
     let initialDestination: DiscoveredPlace?
     @Binding var destinationQuery: String
     @Binding var destination: MKMapItem?
@@ -48,6 +49,8 @@ struct ExploreRoutePlannerView: View {
         case hardest = "Hardest first"
         case fewestStops = "Fewest stops"
         case mostStops = "Most stops"
+        case shortest = "Shortest"
+        case longest = "Longest"
         var id: String { rawValue }
     }
 
@@ -61,11 +64,17 @@ struct ExploreRoutePlannerView: View {
         let filtered = difficultyFilter.level.map { level in discovery.routeOptions.filter { difficulty(of: $0) == level } } ?? discovery.routeOptions
         return filtered.sorted { left, right in
             switch sortOrder {
-            case .recommended: return left.duration < right.duration
+            case .recommended:
+                let leftRecommended = profileMatches(left)
+                let rightRecommended = profileMatches(right)
+                if leftRecommended != rightRecommended { return leftRecommended }
+                return left.duration < right.duration
             case .easiest: return (sortRank(difficulty(of: left)), left.duration) < (sortRank(difficulty(of: right)), right.duration)
             case .hardest: return (sortRank(difficulty(of: left)), left.duration) > (sortRank(difficulty(of: right)), right.duration)
             case .fewestStops: return left.stops.count == right.stops.count ? left.duration < right.duration : left.stops.count < right.stops.count
             case .mostStops: return left.stops.count == right.stops.count ? left.duration < right.duration : left.stops.count > right.stops.count
+            case .shortest: return left.distance == right.distance ? left.duration < right.duration : left.distance < right.distance
+            case .longest: return left.distance == right.distance ? left.duration < right.duration : left.distance > right.distance
             }
         }
     }
@@ -112,22 +121,45 @@ struct ExploreRoutePlannerView: View {
 
                     if !status.isEmpty { Text(status).font(.callout).foregroundStyle(.secondary) }
                     if !discovery.routeOptions.isEmpty {
-                        HStack {
+                        VStack(alignment: .leading, spacing: 8) {
                             Text("Routes").font(.headline)
-                            Spacer()
-                            Menu {
-                                ForEach(RouteSortOrder.allCases) { order in
-                                    Button { sortOrder = order } label: {
-                                        if order == sortOrder { Label(order.rawValue, systemImage: "checkmark") } else { Text(order.rawValue) }
+                            HStack {
+                                Menu {
+                                ForEach(RoutePlannerDifficultyFilter.allCases) { filter in
+                                    Button { difficultyFilter = filter } label: {
+                                        if filter == difficultyFilter { Label(filter.rawValue, systemImage: "checkmark") } else { Text(filter.rawValue) }
                                     }
                                 }
-                            } label: {
-                                Label("Filter", systemImage: "line.3.horizontal.decrease")
-                                    .font(.subheadline.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
-                                    .background(.thinMaterial, in: Capsule())
+                                } label: {
+                                    Label("Difficulty: \(difficultyFilter.rawValue)", systemImage: "line.3.horizontal.decrease")
+                                        .font(.subheadline.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
+                                        .background(.thinMaterial, in: Capsule())
+                                }
+                                Menu {
+                                    ForEach(RouteSortOrder.allCases) { order in
+                                        Button { sortOrder = order } label: {
+                                            if order == sortOrder { Label(order.rawValue, systemImage: "checkmark") } else { Text(order.rawValue) }
+                                        }
+                                    }
+                                } label: {
+                                    Label("Sort", systemImage: "arrow.up.arrow.down")
+                                        .font(.subheadline.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
+                                        .background(.thinMaterial, in: Capsule())
+                                }
                             }
                         }
-                        if !mandatoryKinds.isEmpty {
+                        if !visibleOptions.isEmpty && (difficultyFilter != .all || !mandatoryKinds.isEmpty) {
+                            Button("Clear route filters") {
+                                difficultyFilter = .all
+                                mandatoryKinds = []
+                            }.font(.caption.weight(.semibold))
+                        }
+                        if visibleOptions.isEmpty {
+                            Label("No routes match these filters.", systemImage: "line.3.horizontal.decrease.circle")
+                                .font(.callout).foregroundStyle(.secondary)
+                            Button("Clear route filters") { difficultyFilter = .all; mandatoryKinds = [] }
+                                .font(.subheadline.weight(.semibold))
+                        } else if !mandatoryKinds.isEmpty {
                             Text("Routes with required stops").font(.subheadline.weight(.semibold))
                             if requiredOptions.isEmpty {
                                 Text("No route includes all selected stop types. The other routes are listed below.")
@@ -177,7 +209,7 @@ struct ExploreRoutePlannerView: View {
                     List {
                         Section("Location and privacy") {
                             Text("PausePath uses your current location to find nearby destinations and possible stops, calculate walking routes, and show live progress while you navigate. Location is not used for advertising or community tracking. Route details are saved on this device. Weather checks share approximate route points only when you turn weather guidance on.")
-                            Text("Live GPS can continue while an active walk is in the background. iOS controls location permission and Precise Location; you can change both in Settings. Turning off location limits nearby search and live progress.")
+                            Text("Live GPS runs only while an active walk is in the foreground. Tracking pauses when PausePath leaves the foreground and resumes only when you choose to resume the walk. iOS controls location permission and Precise Location; you can change both in Settings.")
                         }
                         Section("Route choices") {
                             Text("Difficulty is a planning estimate based on route details that are available, such as distance and estimated time. It is not a judgment of your fitness.")
@@ -208,6 +240,10 @@ struct ExploreRoutePlannerView: View {
                         .foregroundStyle(isSelected ? Color.accentColor : Color.gray)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(option.title).font(.headline).foregroundStyle(.primary)
+                        if profileMatches(option) {
+                            Label("Recommended for you", systemImage: "sparkles")
+                                .font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
+                        }
                         Text("\(option.distance / 1000, specifier: "%.1f") km • about \(Int(option.duration / 60)) min")
                             .font(.subheadline).foregroundStyle(.secondary)
                         Text(difficulty(of: option)?.rawValue ?? "Rating unavailable")
@@ -286,6 +322,13 @@ struct ExploreRoutePlannerView: View {
         ).rating
     }
 
+    private func profileMatches(_ option: WalkingRouteOption) -> Bool {
+        let withinDistance = abs(option.distance - preferences.distanceMeters) <= preferences.distanceMeters * 0.25
+        let matchesStops = preferences.facilities.isEmpty || preferences.facilities.isSubset(of: Set(option.stops.map(\.kind)))
+        let withinGentleRange = !profile.goal.prefersGentlerRoutes || difficulty(of: option) == .easy || difficulty(of: option) == .moderate
+        return withinDistance && matchesStops && withinGentleRange
+    }
+
     private func sortRank(_ level: RouteDifficultyLevel?) -> Int {
         switch level {
         case .easy: 0
@@ -326,6 +369,10 @@ struct ExploreRoutePlannerView: View {
 
     private func isFresh(_ location: CLLocation?) -> Bool {
         guard let location else { return false }
-        return location.horizontalAccuracy >= 0 && location.horizontalAccuracy <= 100 && Date().timeIntervalSince(location.timestamp) <= 60
+        let age = Date().timeIntervalSince(location.timestamp)
+        return location.horizontalAccuracy.isFinite && location.horizontalAccuracy >= 0 && location.horizontalAccuracy <= 50 &&
+            location.coordinate.latitude.isFinite && location.coordinate.longitude.isFinite &&
+            (-90...90).contains(location.coordinate.latitude) && (-180...180).contains(location.coordinate.longitude) &&
+            age.isFinite && age >= -2 && age <= 15
     }
 }

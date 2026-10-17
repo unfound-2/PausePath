@@ -1,33 +1,187 @@
 import SwiftUI
 import MapKit
 import AuthenticationServices
+import UserNotifications
+
+enum DailyRecapNotifications {
+    static func enable() async -> Bool {
+        let center = UNUserNotificationCenter.current()
+        do { return try await center.requestAuthorization(options: [.alert, .sound, .badge]) }
+        catch { return false }
+    }
+
+    static func schedule(for reflection: WalkReflection) async {
+        let defaults = UserDefaults.standard
+        guard let data = defaults.data(forKey: "pausepath.personalProfile"),
+              let profile = try? JSONDecoder().decode(PausePathProfile.self, from: data),
+              profile.dailyRecapNotifications else { return }
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
+        center.removePendingNotificationRequests(withIdentifiers: ["pausepath.daily-recap"])
+        let content = UNMutableNotificationContent()
+        content.title = "Your PausePath reflection is saved"
+        switch reflection.feeling {
+        case .comfortable: content.body = "You felt good about today’s walk. Your private recap is ready in My progress."
+        case .aboutRight: content.body = "You said your walk felt about right. Your recap is ready in My progress."
+        case .difficult: content.body = "You said today’s walk felt demanding. Take your time; your reflection is saved."
+        }
+        content.sound = .default
+        var date = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        date.hour = 20; date.minute = 0
+        var fireDate = Calendar.current.date(from: date) ?? Date()
+        if fireDate <= Date() { fireDate = Calendar.current.date(byAdding: .day, value: 1, to: fireDate) ?? Date().addingTimeInterval(86400) }
+        let triggerDate = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
+        do { try await center.add(UNNotificationRequest(identifier: "pausepath.daily-recap", content: content, trigger: UNCalendarNotificationTrigger(dateMatching: triggerDate, repeats: false))) }
+        catch {
+            #if DEBUG
+            print("PausePath recap notification scheduling failed: \(error)")
+            #endif
+        }
+    }
+
+    static func disable() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["pausepath.daily-recap"])
+    }
+}
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var preferences = RoutePreferences()
+    @State private var selectedTab = 0
     @AppStorage("pausepath.preferences") private var preferencesData = Data()
+    @AppStorage("pausepath.personalProfile") private var profileData = Data()
+    @AppStorage("pausepath.pendingCommunityInvite") private var pendingCommunityInvite = ""
+    private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
     let health: HealthActivityStore
     var body: some View {
-        TabView {
-            DiscoverView(preferences: preferences).tabItem { Label("Explore", systemImage: "map.fill") }
-            PlannerView(preferences: $preferences, health: health).tabItem { Label("Preferences", systemImage: "slider.horizontal.3") }
-            ReviewView(preferences: $preferences, health: health).tabItem { Label("My progress", systemImage: "chart.bar.fill") }
-            AccountView().tabItem { Label("Account", systemImage: "person.crop.circle") }
+        TabView(selection: $selectedTab) {
+            DiscoverView(preferences: preferences, profile: profile).tabItem { Label("Explore", systemImage: "map.fill") }.tag(0)
+            CommunityChallengesView(preferences: preferences).tabItem { Label("Community", systemImage: "person.3.fill") }.tag(1)
+            ReviewView(preferences: $preferences, health: health).tabItem { Label("My progress", systemImage: "chart.bar.fill") }.tag(2)
+            ProfileSettingsView(preferences: $preferences, health: health).tabItem { Label("Profile", systemImage: "person.crop.circle") }.tag(3)
         }.tint(Color(red: 0.12, green: 0.40, blue: 0.32))
         .onAppear {
+            if !pendingCommunityInvite.isEmpty { selectedTab = 1 }
             if var saved = try? JSONDecoder().decode(RoutePreferences.self, from: preferencesData) {
                 saved.departure = Date()
                 preferences = saved
+            } else {
+                profile.goal.applyRouteDefaults(to: &preferences)
             }
         }
-        .task { await PausePathAccount.shared.checkAppleCredential() }
+        .task {
+            await PausePathAccount.shared.restoreSessionIfNeeded()
+            await PausePathAccount.shared.checkAppleCredential()
+        }
         .onChange(of: scenePhase) {
             if scenePhase == .active { Task { await PausePathAccount.shared.checkAppleCredential() } }
         }
         .onReceive(NotificationCenter.default.publisher(for: ASAuthorizationAppleIDProvider.credentialRevokedNotification)) { _ in
             Task { await PausePathAccount.shared.checkAppleCredential() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pausePathShowProgress)) { _ in selectedTab = 2 }
         .onChange(of: preferences) { preferencesData = (try? JSONEncoder().encode(preferences)) ?? Data() }
+    }
+}
+
+struct ProfileSettingsView: View {
+    @Binding var preferences: RoutePreferences
+    let health: HealthActivityStore
+    @AppStorage("pausepath.personalProfile") private var profileData = Data()
+    private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("Welcome, \(profile.username ?? "Walker")").font(.title2.bold())
+                    Text("Your profile and walking choices are yours to update.").foregroundStyle(.secondary)
+                }
+                Section("Profile") {
+                    NavigationLink("Change Username") { ChangeUsernameView() }
+                    if let username = profile.username, !username.isEmpty {
+                        LabeledContent("Current username", value: username)
+                    }
+                }
+                Section("Personalize PausePath") {
+                    NavigationLink("Update Walking Preferences") { PlannerView(preferences: $preferences, health: health) }
+                    NavigationLink("Update Goals") { GoalPreferencesEditor(preferences: $preferences) }
+                }
+                Section("Account and privacy") {
+                    NavigationLink("Account settings") { AccountView() }
+                    Text("Your username is shown to members of communities you join. You can use a nickname instead of your real name.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }.navigationTitle("Profile")
+        }
+    }
+}
+
+private struct ChangeUsernameView: View {
+    @AppStorage("pausepath.personalProfile") private var profileData = Data()
+    @State private var username = ""
+    @State private var status = ""
+    @State private var saving = false
+    private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
+    private var cleanUsername: String { String(username.trimmingCharacters(in: .whitespacesAndNewlines).prefix(32)) }
+
+    var body: some View {
+        Form {
+            Section("Your PausePath username") {
+                TextField("Username", text: $username)
+                    .textContentType(.nickname).textInputAutocapitalization(.words).autocorrectionDisabled()
+                Text("This is shown to members of communities you join. Use a nickname if you prefer.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if !status.isEmpty { Section { Text(status).font(.callout) } }
+            Section {
+                Button(saving ? "Saving…" : "Save Username") { Task { await save() } }
+                    .disabled(cleanUsername.isEmpty || saving)
+            }
+        }
+        .navigationTitle("Change Username")
+        .onAppear { username = profile.username ?? "" }
+    }
+
+    private func save() async {
+        guard !cleanUsername.isEmpty else { return }
+        saving = true; defer { saving = false }
+        var updated = profile; updated.username = cleanUsername
+        profileData = (try? JSONEncoder().encode(updated)) ?? profileData
+        guard PausePathAccount.shared.isSignedIn else { status = "Saved on this device. Sign in to update your community username."; return }
+        do {
+            try await PausePathAPI.updateCommunityUsername(cleanUsername)
+            status = "Username updated on this device and in your communities."
+        } catch {
+            status = "Saved on this device, but community usernames could not update: \(error.localizedDescription)"
+        }
+    }
+}
+
+private struct GoalPreferencesEditor: View {
+    @Binding var preferences: RoutePreferences
+    @AppStorage("pausepath.personalProfile") private var profileData = Data()
+    private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
+    var body: some View {
+        Form {
+            Section("Your goal") {
+                Picker("What brings you to PausePath?", selection: Binding(get: { profile.goal }, set: { goal in
+                    var updated = profile; updated.goal = goal
+                    profileData = (try? JSONEncoder().encode(updated)) ?? profileData
+                    goal.applyRouteDefaults(to: &preferences)
+                })) {
+                    ForEach(PersonalGoalProfile.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                Text(profile.goal.explanation).font(.caption).foregroundStyle(.secondary)
+                Text("This choice is stored on this device and is never inferred from Health data.").font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Weekly goals") {
+                Stepper("Weekly walks: \(profile.weeklyWalkTarget)", value: Binding(get: { profile.weeklyWalkTarget }, set: { value in var updated = profile; updated.weeklyWalkTarget = value; profileData = (try? JSONEncoder().encode(updated)) ?? profileData }), in: 1...14)
+                Stepper("Weekly minutes: \(profile.weeklyMinutesTarget)", value: Binding(get: { profile.weeklyMinutesTarget }, set: { value in var updated = profile; updated.weeklyMinutesTarget = value; profileData = (try? JSONEncoder().encode(updated)) ?? profileData }), in: 10...600, step: 10)
+            }
+            Section { Text("PausePath does not assess medical recovery readiness or safe exertion. Follow your healthcare professional’s advice.").font(.footnote).foregroundStyle(.secondary) }
+        }.navigationTitle("Update Goals")
     }
 }
 
@@ -79,18 +233,17 @@ struct PlannerView: View {
 struct ReviewView: View {
     @Binding var preferences: RoutePreferences
     var health: HealthActivityStore
-    @AppStorage("pausepath.feedback") private var feedbackData = Data()
-    @AppStorage("pausepath.weeklyGoalKM") private var weeklyGoal = 5.0
-    @State private var manageability: Manageability = .aboutRight
-    @State private var facilitiesAvailable = true
-    @State private var note = ""
-    @State private var routeName = ""
-    @State private var activityID = ""
-    @State private var message = ""
-    private var feedback: [WalkFeedback] { (try? JSONDecoder().decode([WalkFeedback].self, from: feedbackData)) ?? [] }
-    private var weeklyDistance: Double {
+    @AppStorage("pausepath.personalProfile") private var profileData = Data()
+    @AppStorage("pausepath.trackedWalks") private var trackedWalkData = Data()
+    private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
+    private var trackedWalks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedWalkData)) ?? [] }
+    private var todayTrackedWalks: [TrackedWalk] { trackedWalks.filter { Calendar.current.isDateInToday($0.date) } }
+    private var todayActivities: [WalkingActivity] { health.activities.filter { Calendar.current.isDateInToday($0.date) } }
+    private var todayMinutes: Int { Int(todayActivities.reduce(0) { $0 + $1.seconds } / 60) }
+    private var todayDistance: Double { todayActivities.reduce(0) { $0 + $1.meters } / 1000 }
+    private var weekActivities: [WalkingActivity] {
         let interval = Calendar.current.dateInterval(of: .weekOfYear, for: Date())!
-        return health.activities.filter { interval.contains($0.date) }.reduce(0) { $0 + $1.meters } / 1000
+        return health.activities.filter { interval.contains($0.date) }
     }
     var body: some View {
         NavigationStack {
@@ -101,10 +254,44 @@ struct ReviewView: View {
                     Text("Reads walking workouts, walking speed and recorded workout heart rate when available. Nothing is written to Health or sent to a server.").font(.caption).foregroundStyle(.secondary)
                     Button("Clear Health data from this session") { health.clear() }
                 }
+                Section("Today’s recap") {
+                    if todayActivities.isEmpty {
+                        Text(health.activities.isEmpty
+                             ? "No Health walks are available today. If you haven’t connected Health, you can still use PausePath and record a walk reflection when a route ends."
+                             : "No walking workouts are recorded for today. Rest days count too; choose what feels right for you.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("You recorded \(todayActivities.count) walk\(todayActivities.count == 1 ? "" : "s") today.")
+                            .font(.headline)
+                        Text("\(todayDistance, specifier: "%.1f") km • \(todayMinutes) minutes")
+                        Text("Your weekly goal is \(profile.weeklyMinutesTarget) minutes across \(profile.weeklyWalkTarget) walks. Every week can look different.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if let heartRate = todayActivities.compactMap(\.averageHeartRate).first {
+                            Text("Health recorded an average heart rate of \(Int(heartRate)) bpm during a walk. This is shown for context only and does not determine your route or goal.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    if !todayTrackedWalks.isEmpty {
+                        let minutes = Int(todayTrackedWalks.reduce(0) { $0 + $1.activeSeconds } / 60)
+                        let distance = todayTrackedWalks.reduce(0) { $0 + $1.distanceMeters } / 1000
+                        Text("PausePath tracked \(todayTrackedWalks.count) walk\(todayTrackedWalks.count == 1 ? "" : "s"): \(distance, specifier: "%.1f") km and \(minutes) active minutes.")
+                        Text("Your route-tracked walks contribute toward your chosen weekly goal and stay on this device.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text("This is an activity summary, not medical advice or a measure of recovery. Progress may be incomplete if Health access is off or workouts weren’t recorded.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("This week") {
-                    Stepper("Distance goal: \(weeklyGoal, specifier: "%.1f") km", value: $weeklyGoal, in: 0.5...100, step: 0.5)
-                    ProgressView(value: min(weeklyDistance, weeklyGoal), total: weeklyGoal)
-                    Text("\(weeklyDistance, specifier: "%.1f") / \(weeklyGoal, specifier: "%.1f") km from available Health walks")
+                    let minutes = Int(weekActivities.reduce(0) { $0 + $1.seconds } / 60)
+                    let interval = Calendar.current.dateInterval(of: .weekOfYear, for: Date())!
+                    let tracked = trackedWalks.filter { interval.contains($0.date) }
+                    let trackedMinutes = Int(tracked.reduce(0) { $0 + $1.activeSeconds } / 60)
+                    ProgressView(value: min(Double(minutes), Double(profile.weeklyMinutesTarget)), total: Double(profile.weeklyMinutesTarget))
+                    ProgressView(value: min(Double(weekActivities.count), Double(profile.weeklyWalkTarget)), total: Double(profile.weeklyWalkTarget))
+                    Text("Health: \(weekActivities.count) / \(profile.weeklyWalkTarget) walks • \(minutes) / \(profile.weeklyMinutesTarget) minutes")
+                    ProgressView(value: min(Double(tracked.count), Double(profile.weeklyWalkTarget)), total: Double(profile.weeklyWalkTarget))
+                    ProgressView(value: min(Double(trackedMinutes), Double(profile.weeklyMinutesTarget)), total: Double(profile.weeklyMinutesTarget))
+                    Text("PausePath tracked: \(tracked.count) / \(profile.weeklyWalkTarget) walks • \(trackedMinutes) / \(profile.weeklyMinutesTarget) active minutes")
                     Text("Progress may be incomplete when activities are unavailable or not shared.").font(.caption)
                 }
                 Section("Recent walking activities") {
@@ -117,43 +304,9 @@ struct ReviewView: View {
                         }
                     }
                 }
-                Section("Reflect on a walk") {
-                    TextField("Route or walk name", text: $routeName)
-                    Picker("Activity (optional)", selection: $activityID) {
-                        Text("No linked activity").tag("")
-                        ForEach(health.activities) { Text($0.date.formatted(date: .abbreviated, time: .shortened)).tag($0.id) }
-                    }
-                    Picker("How did it feel?", selection: $manageability) { ForEach(Manageability.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
-                    Toggle("The facilities I needed were available", isOn: $facilitiesAvailable)
-                    TextField("Notes about stops or the walk", text: $note, axis: .vertical)
-                    Button("Save feedback on this device") {
-                        let entry = WalkFeedback(routeName: routeName.trimmingCharacters(in: .whitespacesAndNewlines), manageability: manageability, facilitiesAvailable: facilitiesAvailable, note: note, activityID: activityID.isEmpty ? nil : activityID)
-                        feedbackData = (try? JSONEncoder().encode([entry] + feedback)) ?? feedbackData
-                        note = ""; routeName = ""; message = "Feedback saved. Preferences stay unchanged until you choose an adjustment."
-                    }.disabled(routeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                if let latest = feedback.first {
-                    Section("Your next walk, your choice") {
-                        Text("Last reflection: \(latest.manageability.rawValue.lowercased()). \(latest.facilitiesAvailable ? "Facilities were available." : "Some facilities were unavailable.")")
-                        if let activity = health.activities.first(where: { $0.id == latest.activityID }) {
-                            Text("Linked walk: \(activity.meters / 1000, specifier: "%.1f") km in \(Int(activity.seconds / 60)) min. Use this context alongside your own feedback.").font(.caption)
-                        }
-                        ForEach(RouteAdjustment.allCases, id: \.self) { adjustment in
-                            Button(adjustment.rawValue) { adjustment.apply(to: &preferences); message = "Applied: \(adjustment.rawValue). Review your preferences in Plan." }
-                        }
-                        Text("These are optional preference changes, not medical recommendations. Heart rate never determines route adjustments.").font(.caption)
-                    }
-                }
-                if !message.isEmpty { Text(message).font(.callout).accessibilityIdentifier("feedbackStatus") }
-                Section("Saved reflections") {
-                    ForEach(feedback) { entry in
-                        VStack(alignment: .leading) {
-                            Text(entry.routeName).font(.headline)
-                            Text("\(entry.manageability.rawValue) • \(entry.date.formatted(date: .abbreviated, time: .omitted))").font(.caption)
-                            if !entry.note.isEmpty { Text(entry.note) }
-                        }
-                    }
-                    if !feedback.isEmpty { Button("Delete saved feedback", role: .destructive) { feedbackData = Data(); message = "Saved feedback deleted." } }
+                Section("Walk reflections") {
+                    Text("A short, private reflection appears after you finish or end a tracked walk. It is stored on this device and can shape your daily recap.")
+                        .font(.callout).foregroundStyle(.secondary)
                 }
             }.navigationTitle("My progress")
         }
