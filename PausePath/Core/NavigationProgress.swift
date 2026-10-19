@@ -79,7 +79,9 @@ public struct WalkProgress: Sendable {
             markOffRouteCandidate(true); return true
         }
         markOffRouteCandidate(projected.metersAway > 50)
-        guard !offRoute else { return true }
+        // Debounce the warning, not progress validation: even the first fix
+        // outside the route corridor must not earn distance or declare arrival.
+        guard projected.metersAway <= 50 else { return true }
         metersAlongLeg = max(metersAlongLeg, projected.metersAlong)
         let length = WalkingGeometry.length(paths[legIndex])
         if length > 0, metersAlongLeg >= max(length * 0.9, length - 25), WalkingGeometry.distance(position, end) <= 25 {
