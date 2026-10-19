@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+from time import monotonic
 import hashlib
 import hmac
 import secrets
@@ -11,15 +13,31 @@ from psycopg import errors
 from psycopg.types.json import Jsonb
 from .auth import identity,reviewer,admin
 from .db import transaction
-from .models import (ExistingReport,Suggestion,ReportReceipt,IngestRequest,CurateRequest,CuratedRoute,
+from .models import (ExistingReport,Suggestion,ReportReceipt,IngestRequest,DiscoveryRequest,CurateRequest,CuratedRoute,
                      Review,POIReview,QueueEdit,QueueReceipt,MapboxCategorySearch,MapboxSuggest,MapboxRetrieve,MapboxResponse,DiscoveryResponse)
 from .providers import baseline_osm
-from .discovery import search_area
+from .discovery import search_area, start_worker, stop_worker
 from . import mapbox
 from .curation import curate
 
-app=FastAPI(title='PausePath Micro-Amenity API',version='1.0.0',
+@asynccontextmanager
+async def lifespan(app):
+    start_worker()
+    try: yield
+    finally: stop_worker()
+
+app=FastAPI(lifespan=lifespan,title='PausePath Micro-Amenity API',version='1.0.0',
     description='PostGIS-backed walking/running break curation and community verification. No medical readiness or exertion inference.')
+
+_booted_at = monotonic()
+
+@app.middleware('http')
+async def request_timing(request, call_next):
+    started = monotonic()
+    response = await call_next(request)
+    response.headers['Server-Timing'] = f'api;dur={(monotonic()-started)*1000:.1f}'
+    response.headers['X-Service-Uptime-Seconds'] = str(int(monotonic()-_booted_at))
+    return response
 
 # Public reads never grant a Supabase identity or database privileges. Raw IPs
 # are not persisted; client-controlled forwarding headers are not read here.
@@ -199,8 +217,8 @@ def ingest(body: IngestRequest,user=Depends(admin)):
     return {'upserted':count,'attribution':'© OpenStreetMap contributors, ODbL 1.0'}
 
 @app.post('/api/v1/pois/search',response_model=DiscoveryResponse,tags=['pois'])
-def discover_pois(body: IngestRequest,response: Response,user=Depends(public_reader)):
-    rate_limit(user,'discovery',20)
+def discover_pois(body: DiscoveryRequest,response: Response,user=Depends(public_reader)):
+    rate_limit(user,'discovery',120)
     response.headers['Cache-Control']='private, no-store'
     return search_area(body)
 

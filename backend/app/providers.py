@@ -39,7 +39,7 @@ def baseline_osm(conn, bbox):
     return store_osm(conn, fetch_osm(bbox))
 
 def store_osm(conn, elements):
-    count = 0
+    rows = []
     for item in elements:
         tags = item.get('tags',{}); category = AMENITIES.get(tags.get('amenity'))
         coordinate = item if item.get('type') == 'node' else item.get('center',{})
@@ -50,16 +50,19 @@ def store_osm(conn, elements):
             if tags.get(tag) in ('yes','no'): attributes[key] = tags[tag] == 'yes'
         attributes['access'] = {'yes':'public','public':'public','customers':'customers','private':'private','no':'private'}.get(tags.get('access'),'unknown')
         hours = {'raw':tags['opening_hours']} if tags.get('opening_hours') else None
-        conn.execute('''INSERT INTO pois(source,external_id,name,category,geom,operating_hours,attributes)
+        rows.append((str(item['type'])+'/'+str(item['id']),tags.get('name'),category,lon,lat,Jsonb(hours),Jsonb(attributes)))
+    if not rows: return 0
+    # Psycopg batches this through pipeline mode instead of one network round trip per POI.
+    with conn.cursor() as cursor:
+        cursor.executemany('''INSERT INTO pois(source,external_id,name,category,geom,operating_hours,attributes)
             VALUES ('osm',%s,%s,%s,ST_SetSRID(ST_MakePoint(%s,%s),4326),%s,%s)
             ON CONFLICT(source,external_id) DO UPDATE SET name=excluded.name,category=excluded.category,
               geom=excluded.geom,operating_hours=CASE WHEN pois.operating_hours ? 'reviewed' THEN pois.operating_hours ELSE excluded.operating_hours END,
               attributes=excluded.attributes || coalesce(pois.attributes->'reviewed_attributes','{}'::jsonb) ||
                  CASE WHEN pois.attributes ? 'reviewed_attributes' THEN jsonb_build_object('reviewed_attributes',pois.attributes->'reviewed_attributes') ELSE '{}'::jsonb END,
               source_updated_at=now(),updated_at=now()''',
-            (str(item['type'])+'/'+str(item['id']),tags.get('name'),category,lon,lat,Jsonb(hours),Jsonb(attributes)))
-        count += 1
-    return count
+            rows)
+    return len(rows)
 
 def pedestrian_connector(start, end, max_meters):
     base = os.environ.get('PEDESTRIAN_ROUTER_URL','').rstrip('/')

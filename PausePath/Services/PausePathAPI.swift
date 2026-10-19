@@ -318,9 +318,10 @@ struct SharedSearch: Decodable {
     let retry_after_seconds: Int?
     let tiles_ready: Int?
     let tiles_total: Int?
-    let pois: [SharedPOI]
+    var pois: [SharedPOI]
+    var next_cursor: String?
     let warning: String?
-    let truncated: Bool
+    var truncated: Bool
     let attribution: String
 }
 struct CuratedBreak: Decodable, Identifiable {
@@ -402,9 +403,30 @@ private struct ChallengeListResponse: Decodable { let challenges: [WalkingCommun
         }
         return ["south": c.latitude-lat, "north": c.latitude+lat, "west": c.longitude-lon, "east": c.longitude+lon]
     }
-    static func search(_ region: MKCoordinateRegion) async throws -> SharedSearch {
-        let data = try await request("api/v1/pois/search", body: bounds(region))
-        return try JSONDecoder().decode(SharedSearch.self, from: data)
+    static func search(_ region: MKCoordinateRegion, onPage: ((SharedSearch) -> Void)? = nil) async throws -> SharedSearch {
+        let area = try bounds(region)
+        var body: [String: Any] = area
+        var combined: SharedSearch?
+        var seenCursors = Set<String>()
+        while true {
+            try Task.checkCancellation()
+            let data = try await request("api/v1/pois/search", body: body)
+            let page = try JSONDecoder().decode(SharedSearch.self, from: data)
+            try Task.checkCancellation()
+            if combined == nil { combined = page }
+            else {
+                let known = Set(combined!.pois.map(\.id))
+                combined!.pois += page.pois.filter { !known.contains($0.id) }
+                combined!.next_cursor = page.next_cursor
+                combined!.truncated = page.truncated
+            }
+            onPage?(page)
+            guard let cursor = page.next_cursor else { return combined! }
+            guard seenCursors.insert(cursor).inserted else {
+                throw ServiceFailure(status: 502, message: "Stop loading paused. Please refresh this area.")
+            }
+            body["cursor"] = cursor
+        }
     }
     static func cafes(_ region: MKCoordinateRegion) async throws -> [DiscoveredPlace] {
         let b = try bounds(region)

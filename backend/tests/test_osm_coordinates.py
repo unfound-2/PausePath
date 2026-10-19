@@ -14,7 +14,11 @@ def test_osm_query_keeps_node_coordinates_and_area_centers(monkeypatch):
                              center={'lat': 41.88, 'lon': -87.62}))
         return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'elements': elements})
     monkeypatch.setattr(providers.httpx, 'post', post)
-    conn = SimpleNamespace(execute=lambda sql, params: stored.append(params))
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self,*args): pass
+        def executemany(self,sql,rows): stored.extend(rows)
+    conn = SimpleNamespace(cursor=Cursor)
     bounds = SimpleNamespace(south=41.87, west=-87.63, north=41.89, east=-87.61)
     assert providers.baseline_osm(conn, bounds) == 5
     assert {row[2] for row in stored} == {'bench', 'toilet', 'drinking_water', 'cafe'}

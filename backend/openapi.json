@@ -806,7 +806,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IngestRequest"
+                "$ref": "#/components/schemas/DiscoveryRequest"
               }
             }
           },
@@ -1732,7 +1732,19 @@
           "retry_after_seconds": {
             "type": "integer",
             "title": "Retry After Seconds",
-            "default": 15
+            "default": 5
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
           },
           "tiles_ready": {
             "type": "integer",
@@ -2557,6 +2569,55 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "DiscoveryRequest": {
+        "properties": {
+          "south": {
+            "type": "number",
+            "maximum": 85.0,
+            "minimum": -85.0,
+            "title": "South"
+          },
+          "west": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "West"
+          },
+          "north": {
+            "type": "number",
+            "maximum": 85.0,
+            "minimum": -85.0,
+            "title": "North"
+          },
+          "east": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "East"
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "south",
+          "west",
+          "north",
+          "east"
+        ],
+        "title": "DiscoveryRequest"
       }
     },
     "securitySchemes": {

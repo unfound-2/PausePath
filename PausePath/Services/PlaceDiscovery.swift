@@ -144,13 +144,27 @@ struct WalkingRouteOption: Identifiable {
         var sharedWarning = ""
         var cafeWarning = ""
         let sharedTask = Task { @MainActor in
-            var result = await sharedStops(in: searchRegion)
+            let publish: (SharedSearch) -> Void = { [self] page in
+                guard token == generation, !Task.isCancelled else { return }
+                let updates = page.pois.compactMap(\.place)
+                receivedSharedPins = receivedSharedPins || !updates.isEmpty
+                let ids = Set(updates.map(\.id))
+                places.removeAll { ids.contains($0.id) }
+                places += updates
+                // Save progress before a city switch cancels the remaining pages.
+                if !updates.isEmpty {
+                    recentAreas.removeAll { $0.key == key }
+                    recentAreas.insert(AreaSnapshot(key: key, places: places, savedAt: Date()), at: 0)
+                    recentAreas = Array(recentAreas.prefix(8))
+                }
+            }
+            var result = await sharedStops(in: searchRegion, onPage: publish)
             // A busy ingestion response is not an authoritative empty area.
-            for _ in 0..<6 {
+            for attempt in 0..<24 {
                 guard token == generation, !Task.isCancelled else { return }
                 guard case .success(let response) = result,
                       response.loading_state == "loading" || (response.loading_state == nil && response.warning != nil) else { break }
-                let delay = min(max(response.retry_after_seconds ?? 15, 5), 60)
+                let delay = min(max(response.retry_after_seconds ?? 5, 3), 60) + (attempt >= 12 ? 5 : 0)
                 let updates = response.pois.compactMap(\.place)
                 receivedSharedPins = receivedSharedPins || !updates.isEmpty
                 let incomingIDs = Set(updates.map(\.id))
@@ -159,7 +173,7 @@ struct WalkingRouteOption: Identifiable {
                 status = "Loading facilities in this area… " + (response.warning ?? "")
                 do { try await Task.sleep(for: .seconds(delay)) } catch { return }
                 guard token == generation else { return }
-                result = await sharedStops(in: searchRegion)
+                result = await sharedStops(in: searchRegion, onPage: publish)
             }
             guard token == generation, !Task.isCancelled else { return }
             sharedFinished = true
@@ -169,7 +183,7 @@ struct WalkingRouteOption: Identifiable {
                 let updates = response.pois.compactMap(\.place)
                 receivedSharedPins = receivedSharedPins || !updates.isEmpty
                 let incomingIDs = Set(updates.map(\.id))
-                if sharedSucceeded { places.removeAll { $0.provider != "Mapbox" } }
+                if sharedSucceeded && !response.truncated { places.removeAll { $0.provider != "Mapbox" } }
                 else { places.removeAll { incomingIDs.contains($0.id) } }
                 places.insert(contentsOf: updates, at: 0)
                 sharedWarning = (response.warning ?? "") + (response.truncated ? " Zoom in for all stops." : "")
@@ -217,8 +231,8 @@ struct WalkingRouteOption: Identifiable {
         return sharedSucceeded && cafeSucceeded
     }
 
-    private func sharedStops(in region: MKCoordinateRegion) async -> Result<SharedSearch, Error> {
-        do { return .success(try await PausePathAPI.search(region)) }
+    private func sharedStops(in region: MKCoordinateRegion, onPage: ((SharedSearch) -> Void)? = nil) async -> Result<SharedSearch, Error> {
+        do { return .success(try await PausePathAPI.search(region, onPage: onPage)) }
         catch { return .failure(error) }
     }
     private func commercialStops(in region: MKCoordinateRegion) async -> Result<[DiscoveredPlace], Error> {

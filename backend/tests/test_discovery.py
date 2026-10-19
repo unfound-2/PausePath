@@ -33,7 +33,7 @@ def test_reads_do_not_wait_for_provider_and_distinguish_empty_loading(database,m
     assert result['pois']==[] and result['loading_state']=='unavailable'
     sql,params=next((s,p) for s,p in database[1] if 'ST_AsGeoJSON' in s)
     assert 'WHERE is_active' in sql and 'closed_until <= now()' in sql
-    assert params==(-87.63,41.88,-87.62,41.89)
+    assert params==(-87.63,41.88,-87.62,41.89,None,None)
 
 def test_ready_empty_is_distinct_from_pending_and_failed(database):
     bounds=IngestRequest(**BOUNDS)
@@ -45,7 +45,8 @@ def test_ready_empty_is_distinct_from_pending_and_failed(database):
     assert discovery.search_area(bounds)['loading_state']=='unavailable'
 
 def test_result_cap_and_shared_grid(database):
-    database[0].extend([{}]*501)
+    from uuid import UUID
+    database[0].extend({'id':UUID(int=i+1)} for i in range(501))
     result=discovery.search_area(IngestRequest(**BOUNDS))
     assert len(result['pois'])==500 and result['truncated']
     assert discovery.tiles_for(IngestRequest(west=0,south=0,east=.02,north=.02))==[(9000,4500)]
@@ -129,3 +130,35 @@ def test_worker_failure_schedules_backoff_without_clearing_pois(monkeypatch):
     assert any('make_interval' in s and p[0]==240 for s,p in statements)
     assert not any('DELETE' in s for s,p in statements)
     assert not discovery._worker_lock.locked()
+
+
+def test_cursor_advances_and_skips_queue_admission(database):
+    from uuid import UUID
+    from app.models import DiscoveryRequest
+    cursor=UUID(int=500)
+    discovery.search_area(DiscoveryRequest(**BOUNDS,cursor=cursor))
+    assert not any('INSERT INTO discovery_tiles' in sql for sql,_ in database[1])
+    assert next(p for sql,p in database[1] if 'ST_AsGeoJSON' in sql)[-2:]==(cursor,cursor)
+
+
+def test_prefetch_cannot_overwrite_visible_priority(database):
+    discovery.search_area(IngestRequest(**BOUNDS))
+    prefetch=[sql for sql,_ in database[1] if "interval '5 minutes'" in sql]
+    assert prefetch and all('ON CONFLICT DO NOTHING' in sql for sql in prefetch)
+
+
+def test_worker_drains_without_new_requests(monkeypatch):
+    calls=[]
+    class Stop:
+        def is_set(self): return len(calls)>=3
+    class Wake:
+        def wait(self,timeout): assert timeout==5
+        def clear(self): pass
+    monkeypatch.setattr(discovery,'_stop',Stop())
+    monkeypatch.setattr(discovery,'_wake',Wake())
+    def run():
+        calls.append(True)
+        discovery._worker_lock.release()
+    monkeypatch.setattr(discovery,'_run_one',run)
+    discovery._worker_loop()
+    assert len(calls)==3

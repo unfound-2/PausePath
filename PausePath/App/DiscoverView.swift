@@ -63,6 +63,26 @@ struct DiscoverView: View {
     @FocusState private var searchFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var visiblePlaces: [DiscoveredPlace] { discovery.places.filter { kinds.contains($0.kind) } }
+    private struct StopCluster: Identifiable {
+        let id: String
+        let places: [DiscoveredPlace]
+        var coordinate: CLLocationCoordinate2D {
+            CLLocationCoordinate2D(latitude: places.map { $0.item.placemark.coordinate.latitude }.reduce(0,+) / Double(places.count),
+                                   longitude: places.map { $0.item.placemark.coordinate.longitude }.reduce(0,+) / Double(places.count))
+        }
+    }
+    private var stopClusters: [StopCluster] {
+        let region = visibleRegion ?? discovery.region
+        let latStep = max(region.span.latitudeDelta / 10, 0.00001)
+        let lonStep = max(region.span.longitudeDelta / 7, 0.00001)
+        let displayed = visiblePlaces
+        let grouped = Dictionary(grouping: displayed) { place in
+            if displayed.count < 150 || place.id == selectedID { return place.id.uuidString }
+            let c = place.item.placemark.coordinate
+            return "\(place.kind.rawValue)-\(Int(floor(c.latitude / latStep)))-\(Int(floor(c.longitude / lonStep)))"
+        }
+        return grouped.map { StopCluster(id: $0.key, places: $0.value) }.sorted { $0.id < $1.id }
+    }
     private var selectedPlace: DiscoveredPlace? { visiblePlaces.first { $0.id == selectedID } }
     private var routeStartLocation: CLLocation? {
         if usesCurrentRouteStart { return isFresh(discovery.currentLocation) ? discovery.currentLocation : nil }
@@ -89,10 +109,22 @@ struct DiscoverView: View {
                             .accessibilityLabel("Selected route starting point")
                     }.annotationTitles(.hidden)
                 }
-                ForEach(visiblePlaces) { place in
-                    Annotation(place.item.name ?? place.kind.rawValue, coordinate: place.item.placemark.coordinate, anchor: .bottom) {
-                        Button { select(place) } label: {
+                ForEach(stopClusters) { cluster in
+                    let place = cluster.places[0]
+                    Annotation(place.item.name ?? place.kind.rawValue, coordinate: cluster.coordinate, anchor: .bottom) {
+                        Button {
+                            if cluster.places.count == 1 { select(place) }
+                            else {
+                                let region = visibleRegion ?? discovery.region
+                                camera = .region(MKCoordinateRegion(center: cluster.coordinate,
+                                    span: MKCoordinateSpan(latitudeDelta: region.span.latitudeDelta / 2, longitudeDelta: region.span.longitudeDelta / 2)))
+                            }
+                        } label: {
                             VStack(spacing: -3) {
+                                if cluster.places.count > 1 {
+                                    Text("\(cluster.places.count)").font(.caption.bold()).foregroundStyle(.white)
+                                        .padding(5).background(place.kind.mapColor, in: Capsule())
+                                }
                                 Image(systemName: place.kind.symbol)
                                     .font(.system(size: selectedID == place.id ? 20 : 16, weight: .semibold))
                                     .foregroundStyle(.white)
@@ -104,7 +136,7 @@ struct DiscoverView: View {
                                 .frame(minWidth: 44, minHeight: 52)
                         }.buttonStyle(.plain)
                             .disabled(showRoutePlanner)
-                            .accessibilityLabel("\(place.item.name ?? "Possible stop"), \(place.kind.rawValue)")
+                            .accessibilityLabel(cluster.places.count > 1 ? "\(cluster.places.count) \(place.kind.rawValue) stops. Zoom in to explore." : "\(place.item.name ?? "Possible stop"), \(place.kind.rawValue)")
                             .accessibilityHint("Show stop details and walking directions")
                             .accessibilityAddTraits(selectedID == place.id ? [.isSelected] : [])
                     }.annotationTitles(.hidden)

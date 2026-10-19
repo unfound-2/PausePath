@@ -94,6 +94,9 @@ class IngestRequest(StrictModel):
             raise ValueError('Use a non-wrapping bbox no larger than 0.1 × 0.1 degrees; split larger/dateline areas')
         return self
 
+class DiscoveryRequest(IngestRequest):
+    cursor: Optional[UUID] = None
+
 class Review(StrictModel):
     decision: Literal['approve','reject']
     evidence: str = Field(min_length=20, max_length=2000)
@@ -199,7 +202,8 @@ class DiscoveryPOI(POISummary):
 
 class DiscoveryResponse(StrictModel):
     loading_state: Literal['ready', 'loading', 'unavailable'] = 'ready'
-    retry_after_seconds: int = 15
+    retry_after_seconds: int = 5
+    next_cursor: Optional[UUID] = None
     tiles_ready: int = 0
     tiles_total: int = 0
     pois: List[DiscoveryPOI]
