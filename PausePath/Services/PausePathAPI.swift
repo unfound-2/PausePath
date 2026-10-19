@@ -3,6 +3,7 @@ import Observation
 import Security
 import MapKit
 import AuthenticationServices
+import OSLog
 
 // Public client configuration. Database credentials and Mapbox tokens stay on Render.
 enum ServiceConfiguration {
@@ -14,6 +15,17 @@ struct ServiceFailure: LocalizedError {
     let status: Int
     let message: String
     var errorDescription: String? { message }
+
+    /// Only errors that prove the backend credential is invalid may erase a saved session.
+    var confirmsInvalidSession: Bool {
+        if status == 401 { return true }
+        guard status == 400 else { return false }
+        let detail = message.lowercased()
+        return detail.contains("invalid refresh token")
+            || detail.contains("refresh_token_not_found")
+            || detail.contains("refresh token not found")
+            || detail.contains("refresh token already used")
+    }
 }
 enum ServiceHTTP {
     static let session: URLSession = {
@@ -41,7 +53,6 @@ private struct AuthSession: Codable {
     let expires_at: Double?
     let expires_in: Double?
     let user: User
-    var appleUserID: String? = nil
     struct User: Codable { let id: String; let email: String? }
 }
 private enum SessionKeychain {
@@ -75,15 +86,16 @@ private enum SessionKeychain {
     }
 
     static let shared = PausePathAccount()
+    static let signedOutMessage = "Browse without signing in. Sign in with Apple for community features."
     private var session: AuthSession?
     private var expiration = Date.distantPast
     private var revision = UUID()
     private var refreshTask: Task<AuthSession, Error>?
     private var appleChallenge: AppleSignInChallenge?
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "PausePath", category: "Account")
     var email: String? { session?.user.email }
     var isSignedIn: Bool { session != nil }
     var sessionState: SessionState = .signedOut
-    var appleCredentialStatusText = "No Apple credential is linked"
     var sessionStatusText: String {
         switch sessionState {
         case .signedOut: "Not signed in"
@@ -102,7 +114,7 @@ private enum SessionKeychain {
         sessionState = .temporarilyUnavailable
         message = "Your account is saved, but PausePath could not reach the community service. Check your connection and try again."
     }
-    var message = "Browse and plan without an account. Sign in only to contribute reports."
+    var message = PausePathAccount.signedOutMessage
     var busy = false
     var appleProvidedName: String?
     private init() {
@@ -119,21 +131,28 @@ private enum SessionKeychain {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         _ = try await ServiceHTTP.send(request)
     }
+    // Apple establishes the Supabase session at sign-in. There is no periodic Apple
+    // credential-state check; the backend session is the source of truth afterward.
     /// Validate a Keychain-restored backend session without discarding it on transient network errors.
     func restoreSessionIfNeeded() async {
         guard session != nil else { sessionState = .signedOut; return }
+        let current = revision
         sessionState = .checking
         do {
             var token = try await accessToken()
+            guard current == revision else { return }
             do {
                 try await validateAccessToken(token)
             } catch let error as ServiceFailure where error.status == 401 {
                 token = try await accessToken(forceRefresh: true)
+                guard current == revision else { return }
                 try await validateAccessToken(token)
             }
+            guard current == revision else { return }
             sessionState = .ready
             message = "Your PausePath account is ready for community features."
-        } catch let error as ServiceFailure where [400, 401, 403].contains(error.status) {
+        } catch let error as ServiceFailure where error.confirmsInvalidSession {
+            guard current == revision else { return }
             if session != nil {
                 session = nil
                 SessionKeychain.clear()
@@ -142,6 +161,7 @@ private enum SessionKeychain {
             sessionState = .signedOut
             message = "Your saved session expired. Sign in with Apple again to use community features."
         } catch {
+            guard current == revision else { return }
             // A network outage or timeout must not erase a potentially valid saved session.
             sessionState = .temporarilyUnavailable
             message = "Your account is saved, but PausePath could not reach the community service. Check your connection and try again."
@@ -160,7 +180,7 @@ private enum SessionKeychain {
         // Normalize expiry so a restored session never extends the original lifetime.
         let expiry = value.expires_at ?? Date().timeIntervalSince1970 + (value.expires_in ?? 0)
         let saved = AuthSession(access_token: value.access_token, refresh_token: value.refresh_token,
-            expires_at: expiry, expires_in: value.expires_in, user: value.user, appleUserID: value.appleUserID)
+            expires_at: expiry, expires_in: value.expires_in, user: value.user)
         try SessionKeychain.write(JSONEncoder().encode(saved))
         session = saved; expiration = Date(timeIntervalSince1970: expiry)
         sessionState = .ready
@@ -177,10 +197,12 @@ private enum SessionKeychain {
             busy = true; message = "Confirm Sign in with Apple to continue."
         } catch {
             busy = false; message = "Could not securely start Apple sign-in. Please try again."
+            let diagnostic = error as NSError
+            logger.error("Could not create Apple sign-in challenge (domain: \(diagnostic.domain, privacy: .public), code: \(diagnostic.code, privacy: .public))")
         }
     }
     func completeAppleSignIn(_ result: Result<ASAuthorization, Error>) async {
-        let current = revision
+        var current = revision
         let challenge = appleChallenge
         appleChallenge = nil // Never reuse a challenge, including after a failed exchange.
         defer { if current == revision { busy = false } }
@@ -196,46 +218,24 @@ private enum SessionKeychain {
             let data = try await authRequest("token?grant_type=id_token", body: [
                 "provider": "apple", "id_token": idToken, "nonce": challenge.nonce])
             guard current == revision else { return }
-            var value = try JSONDecoder().decode(AuthSession.self, from: data)
-            value.appleUserID = credential.user
+            let value = try JSONDecoder().decode(AuthSession.self, from: data)
+            // Invalidate credential checks started while this sign-in was in progress.
+            revision = UUID()
+            current = revision
             appleProvidedName = credential.fullName.map { PersonNameComponentsFormatter.localizedString(from: $0, style: .default) }
                 .flatMap { $0.isEmpty ? nil : $0 }
-            appleCredentialStatusText = "Apple sign-in completed"
             try install(value)
             sessionState = .ready
             message = "Signed in with Apple. You can now submit community reports."
         } catch let error as ASAuthorizationError where error.code == .canceled {
             if current == revision { message = "Sign-in cancelled. You can continue exploring without an account." }
-        } catch {
+        } catch let error as ServiceFailure {
+            logger.error("Apple sign-in exchange failed with HTTP status \(error.status, privacy: .public)")
             if current == revision { message = error.localizedDescription }
-        }
-    }
-    func checkAppleCredential() async {
-        guard let appleID = session?.appleUserID else {
-            appleCredentialStatusText = "No Apple credential is linked"
-            return
-        }
-        let current = revision
-        do {
-            let state: ASAuthorizationAppleIDProvider.CredentialState = try await withCheckedThrowingContinuation { continuation in
-                ASAuthorizationAppleIDProvider().getCredentialState(forUserID: appleID) { state, error in
-                    if let error { continuation.resume(throwing: error) }
-                    else { continuation.resume(returning: state) }
-                }
-            }
-            guard current == revision else { return }
-            if state == .authorized {
-                appleCredentialStatusText = "Apple credential authorized"
-            } else if state == .revoked || state == .notFound {
-                appleCredentialStatusText = "Apple credential needs sign-in again"
-                await signOut()
-                message = "Apple sign-in is no longer authorized. Sign in again to contribute."
-            } else {
-                appleCredentialStatusText = "Apple credential status is unavailable"
-            }
         } catch {
-            // A temporary Apple/network failure does not erase a valid session.
-            appleCredentialStatusText = "Apple credential status could not be checked"
+            let diagnostic = error as NSError
+            logger.error("Apple sign-in failed (domain: \(diagnostic.domain, privacy: .public), code: \(diagnostic.code, privacy: .public))")
+            if current == revision { message = error.localizedDescription }
         }
     }
     func accessToken(forceRefresh: Bool = false) async throws -> String {
@@ -252,15 +252,14 @@ private enum SessionKeychain {
             refreshTask = task
         }
         do {
-            var value = try await task.value
-            value.appleUserID = session.appleUserID
+            let value = try await task.value
             guard revision == current else { throw CancellationError() }
             try install(value); refreshTask = nil
             return value.access_token
         } catch {
             if revision == current {
                 refreshTask = nil
-                if let error = error as? ServiceFailure, [400,401,403].contains(error.status) {
+                if let error = error as? ServiceFailure, error.confirmsInvalidSession {
                     self.session = nil; SessionKeychain.clear(); revision = UUID()
                     sessionState = .signedOut
                     message = "Your session expired. Please sign in again."

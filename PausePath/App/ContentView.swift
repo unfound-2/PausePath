@@ -1,6 +1,5 @@
 import SwiftUI
 import MapKit
-import AuthenticationServices
 import UserNotifications
 
 enum DailyRecapNotifications {
@@ -10,7 +9,7 @@ enum DailyRecapNotifications {
         catch { return false }
     }
 
-    static func schedule(for reflection: WalkReflection) async {
+    static func schedule() async {
         let defaults = UserDefaults.standard
         guard let data = defaults.data(forKey: "pausepath.personalProfile"),
               let profile = try? JSONDecoder().decode(PausePathProfile.self, from: data),
@@ -20,12 +19,8 @@ enum DailyRecapNotifications {
         guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
         center.removePendingNotificationRequests(withIdentifiers: ["pausepath.daily-recap"])
         let content = UNMutableNotificationContent()
-        content.title = "Your PausePath reflection is saved"
-        switch reflection.feeling {
-        case .comfortable: content.body = "You felt good about today’s walk. Your private recap is ready in My progress."
-        case .aboutRight: content.body = "You said your walk felt about right. Your recap is ready in My progress."
-        case .difficult: content.body = "You said today’s walk felt demanding. Take your time; your reflection is saved."
-        }
+        content.title = "Your PausePath activity recap is ready"
+        content.body = "See your walking summary in My progress whenever it suits you."
         content.sound = .default
         var date = Calendar.current.dateComponents([.year, .month, .day], from: Date())
         date.hour = 20; date.minute = 0
@@ -46,7 +41,6 @@ enum DailyRecapNotifications {
 }
 
 struct ContentView: View {
-    @Environment(\.scenePhase) private var scenePhase
     @State private var preferences = RoutePreferences()
     @State private var selectedTab = 0
     @AppStorage("pausepath.preferences") private var preferencesData = Data()
@@ -72,13 +66,6 @@ struct ContentView: View {
         }
         .task {
             await PausePathAccount.shared.restoreSessionIfNeeded()
-            await PausePathAccount.shared.checkAppleCredential()
-        }
-        .onChange(of: scenePhase) {
-            if scenePhase == .active { Task { await PausePathAccount.shared.checkAppleCredential() } }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: ASAuthorizationAppleIDProvider.credentialRevokedNotification)) { _ in
-            Task { await PausePathAccount.shared.checkAppleCredential() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pausePathShowProgress)) { _ in selectedTab = 2 }
         .onChange(of: preferences) { preferencesData = (try? JSONEncoder().encode(preferences)) ?? Data() }
@@ -257,7 +244,7 @@ struct ReviewView: View {
                 Section("Today’s recap") {
                     if todayActivities.isEmpty {
                         Text(health.activities.isEmpty
-                             ? "No Health walks are available today. If you haven’t connected Health, you can still use PausePath and record a walk reflection when a route ends."
+                             ? "No Health walks are available today. You can still track a route walk with PausePath."
                              : "No walking workouts are recorded for today. Rest days count too; choose what feels right for you.")
                             .foregroundStyle(.secondary)
                     } else {
@@ -303,10 +290,6 @@ struct ReviewView: View {
                             Text(activity.averageHeartRate.map { "Recorded average heart rate: \(Int($0)) bpm" } ?? "Recorded heart rate unavailable").font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                }
-                Section("Walk reflections") {
-                    Text("A short, private reflection appears after you finish or end a tracked walk. It is stored on this device and can shape your daily recap.")
-                        .font(.callout).foregroundStyle(.secondary)
                 }
             }.navigationTitle("My progress")
         }

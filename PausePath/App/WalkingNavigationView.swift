@@ -11,16 +11,10 @@ struct WalkingNavigationView: View {
     @State private var suggestedStops: [SharedPOI] = []
     @State private var showEndConfirmation = false
     @State private var showReturnConfirmation = false
-    @State private var showReflection = false
-    @State private var reflectionPrompted = false
-    @State private var reflectionCompleted = false
-    @State private var reflectionDistanceMeters = 0.0
-    @State private var reflectionActiveSeconds = 0.0
     @State private var walkRecorded = false
     @AppStorage("pausepath.trackedWalks") private var trackedWalkData = Data()
-    @AppStorage("pausepath.walkReflections") private var reflectionData = Data()
-    @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherGuidanceEnabled = false
-    @AppStorage("pausepath.weather.openMeteo.walkUpdates.enabled") private var weatherWalkUpdatesEnabled = false
+    @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherGuidanceEnabled = true
+    @AppStorage("pausepath.weather.openMeteo.walkUpdates.enabled") private var weatherWalkUpdatesEnabled = true
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     private var plan: GeneratedWalk { navigator.plan ?? walk }
@@ -129,21 +123,13 @@ struct WalkingNavigationView: View {
                     else { showEndConfirmation = true }
                 } }
                 .confirmationDialog("End this walk?", isPresented: $showEndConfirmation, titleVisibility: .visible) {
-                    Button("End walk and reflect", role: .destructive) { presentReflection(completed: false) }
+                    Button("End walk", role: .destructive) { finishWalk(completed: false) }
                 }
                 .confirmationDialog("Replace the remaining walk with directions back to your original start? Distance will change; rest stops and terrain remain unverified.", isPresented: $showReturnConfirmation, titleVisibility: .visible) {
                     Button("Return to start") { navigator.returnToStart() }
                 }
-                .sheet(isPresented: $showReflection) {
-                    WalkReflectionSheet(routeName: plan.name, distanceMeters: reflectionDistanceMeters,
-                        activeSeconds: reflectionActiveSeconds, completed: reflectionCompleted,
-                        onSave: saveReflection, onSkip: leaveAfterReflection)
-                        .interactiveDismissDisabled(true)
-                        .presentationDetents([.medium, .large])
-                        .presentationDragIndicator(.visible)
-                }
         }
-        .interactiveDismissDisabled(navigator.state != .ready || showReflection)
+        .interactiveDismissDisabled(navigator.state != .ready)
         .onAppear { if navigator.plan == nil { navigator.prepare(walk) } }
         .task(id: "\(plan.id)-\(weatherGuidanceEnabled)") {
             guard weatherGuidanceEnabled else { weatherGuidance.clear(); return }
@@ -164,7 +150,7 @@ struct WalkingNavigationView: View {
         .onDisappear { if !takingBreak { navigator.stop() } }
         .onChange(of: navigator.plan?.id) { camera = .automatic; suggestedStops = [] }
         .onChange(of: navigator.state) { _, state in
-            if state == .arrived { presentReflection(completed: true) }
+            if state == .arrived { finishWalk(completed: true) }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active, navigator.state == .walking || navigator.state == .locating {
@@ -207,17 +193,13 @@ struct WalkingNavigationView: View {
         }
     }
 
-    private func presentReflection(completed: Bool) {
-        guard !reflectionPrompted else { return }
-        reflectionPrompted = true
-        reflectionCompleted = completed
-        reflectionDistanceMeters = completed ? plan.distance : navigator.progress.completedMeters
-        reflectionActiveSeconds = navigator.elapsedActiveSeconds
-        guard !walkRecorded else { showReflection = true; return }
+    private func finishWalk(completed: Bool) {
+        guard !walkRecorded else { return }
         walkRecorded = true
         var tracked = (try? JSONDecoder().decode([TrackedWalk].self, from: trackedWalkData)) ?? []
-        let activity = TrackedWalk(routeName: plan.name, distanceMeters: reflectionDistanceMeters,
-            activeSeconds: reflectionActiveSeconds, completed: completed, routeIdentity: plan.routeIdentity)
+        let distance = completed ? plan.distance : navigator.progress.completedMeters
+        let activity = TrackedWalk(routeName: plan.name, distanceMeters: distance,
+            activeSeconds: navigator.elapsedActiveSeconds, completed: completed, routeIdentity: plan.routeIdentity)
         tracked.insert(activity, at: 0)
         trackedWalkData = (try? JSONEncoder().encode(Array(tracked.prefix(500)))) ?? trackedWalkData
         NotificationCenter.default.post(name: .pausePathWalkRecorded, object: activity)
@@ -229,26 +211,8 @@ struct WalkingNavigationView: View {
                 #endif
             }
         }
-        if !completed { navigator.pause() }
-        showReflection = true
-    }
-
-    private func saveReflection(feeling: Manageability, note: String) {
-        var reflections = (try? JSONDecoder().decode([WalkReflection].self, from: reflectionData)) ?? []
-        let reflection = WalkReflection(routeName: plan.name, feeling: feeling,
-            distanceMeters: reflectionDistanceMeters, activeSeconds: reflectionActiveSeconds,
-            completed: reflectionCompleted, note: note.isEmpty ? nil : note)
-        reflections.insert(reflection, at: 0)
-        reflectionData = (try? JSONEncoder().encode(Array(reflections.prefix(200)))) ?? reflectionData
-        NotificationCenter.default.post(name: .pausePathWalkReflectionSaved, object: reflection)
-        Task { await DailyRecapNotifications.schedule(for: reflection) }
-        leaveAfterReflection()
-    }
-
-    private func leaveAfterReflection() {
-        showReflection = false
-        navigator.stop()
-        dismiss()
+        Task { await DailyRecapNotifications.schedule() }
+        if !completed { navigator.stop(); dismiss() }
     }
 
     private func elapsedText(_ seconds: TimeInterval) -> String {
@@ -256,97 +220,5 @@ struct WalkingNavigationView: View {
         return total >= 3600
             ? String(format: "%d:%02d:%02d", total / 3600, (total / 60) % 60, total % 60)
             : String(format: "%02d:%02d", total / 60, total % 60)
-    }
-}
-
-private struct WalkReflectionSheet: View {
-    let routeName: String
-    let distanceMeters: Double
-    let activeSeconds: Double
-    let completed: Bool
-    let onSave: (Manageability, String) -> Void
-    let onSkip: () -> Void
-    @State private var feeling: Manageability?
-    @State private var note = ""
-
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(completed ? "You made it to your destination" : "Walk ended")
-                        .font(.title2.bold())
-                    Text("\(routeName) • \(distanceMeters / 1000, specifier: "%.1f") km • \(elapsedText(activeSeconds)) moving time")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                }
-                Text("How did that walk feel?").font(.headline)
-                HStack(spacing: 0) {
-                    faceChoice(.comfortable, label: "Good")
-                    Spacer(minLength: 8)
-                    faceChoice(.aboutRight, label: "Okay")
-                    Spacer(minLength: 8)
-                    faceChoice(.difficult, label: "Hard")
-                }.frame(maxWidth: .infinity)
-                TextField("A note for yourself (optional)", text: $note, axis: .vertical)
-                    .lineLimit(1...3).textFieldStyle(.roundedBorder)
-                Button("Save reflection") { if let feeling { onSave(feeling, String(note.prefix(280))) } }
-                    .buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
-                    .disabled(feeling == nil)
-                Button("Skip reflection", action: onSkip)
-                    .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity)
-                Text("Your reflection stays on this device. It isn’t medical advice and won’t be used to judge your fitness.")
-                    .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .center)
-            }.padding(22)
-                .navigationTitle("Walk reflection")
-                .navigationBarTitleDisplayMode(.inline)
-        }
-    }
-
-    private func faceChoice(_ mood: Manageability, label: String) -> some View {
-        Button { feeling = mood } label: {
-            VStack(spacing: 6) {
-                ReflectionFace(mood: mood, selected: feeling == mood).frame(width: 64, height: 64)
-                Text(label).font(.subheadline.weight(.semibold))
-            }.padding(.horizontal, 8).padding(.vertical, 5)
-                .contentShape(Rectangle())
-        }.buttonStyle(.plain)
-            .accessibilityLabel("\(label), walk felt \(mood.rawValue.lowercased())")
-            .accessibilityAddTraits(feeling == mood ? [.isSelected] : [])
-    }
-
-    private func elapsedText(_ seconds: Double) -> String {
-        let total = max(0, Int(seconds))
-        return total >= 3600 ? String(format: "%d:%02d:%02d", total / 3600, (total / 60) % 60, total % 60) : String(format: "%02d:%02d", total / 60, total % 60)
-    }
-}
-
-private struct ReflectionFace: View {
-    let mood: Manageability
-    let selected: Bool
-    private var color: Color { selected ? .accentColor : .secondary }
-
-    var body: some View {
-        Canvas { context, size in
-            let rect = CGRect(origin: .zero, size: size).insetBy(dx: 3, dy: 3)
-            let circle = Path(ellipseIn: rect)
-            context.fill(circle, with: .color(selected ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.08)))
-            context.stroke(circle, with: .color(color), lineWidth: selected ? 3 : 2)
-            for x in [0.36, 0.64] {
-                let eye = CGRect(x: size.width * x - 2.2, y: size.height * 0.34, width: 4.4, height: 5.2)
-                context.fill(Path(ellipseIn: eye), with: .color(color))
-            }
-            var mouth = Path()
-            switch mood {
-            case .comfortable:
-                mouth.move(to: CGPoint(x: size.width * 0.27, y: size.height * 0.59))
-                mouth.addQuadCurve(to: CGPoint(x: size.width * 0.73, y: size.height * 0.59), control: CGPoint(x: size.width * 0.5, y: size.height * 0.83))
-            case .aboutRight:
-                mouth.move(to: CGPoint(x: size.width * 0.3, y: size.height * 0.66))
-                mouth.addLine(to: CGPoint(x: size.width * 0.7, y: size.height * 0.66))
-            case .difficult:
-                mouth.move(to: CGPoint(x: size.width * 0.27, y: size.height * 0.72))
-                mouth.addQuadCurve(to: CGPoint(x: size.width * 0.73, y: size.height * 0.72), control: CGPoint(x: size.width * 0.5, y: size.height * 0.48))
-            }
-            context.stroke(mouth, with: .color(color), style: StrokeStyle(lineWidth: 3, lineCap: .round))
-        }
     }
 }

@@ -5,7 +5,6 @@ import UserNotifications
 
 extension Notification.Name {
     static let pausePathShowProgress = Notification.Name("pausepath.showProgress")
-    static let pausePathWalkReflectionSaved = Notification.Name("pausepath.walkReflectionSaved")
     static let pausePathWalkRecorded = Notification.Name("pausepath.walkRecorded")
     static let pausePathJoinCommunity = Notification.Name("pausepath.joinCommunity")
 }
@@ -196,7 +195,6 @@ private struct WelcomeSetupView: View {
         }
         .task {
             await account.restoreSessionIfNeeded()
-            await account.checkAppleCredential()
         }
         .onAppear {
             if let saved = try? JSONDecoder().decode(PausePathProfile.self, from: profileData) { profile = saved }
@@ -326,7 +324,9 @@ private struct WelcomeSetupView: View {
             }
             setupCard(title: "Sign in with Apple", subtitle: "Needed only for shared community features and reports. You can browse and use on-device features without signing in.", icon: "person.crop.circle") {
                 if account.isSignedIn {
-                    Label("Signed in with Apple", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    Label("PausePath: \(account.sessionStatusText)",
+                          systemImage: account.sessionState == .ready ? "checkmark.circle.fill" : "person.crop.circle.badge.clock")
+                        .foregroundStyle(account.sessionState == .ready ? .green : .orange)
                 } else {
                     SignInWithAppleButton(.continue,
                         onRequest: { request in account.prepareAppleSignIn(request) },
@@ -334,7 +334,9 @@ private struct WelcomeSetupView: View {
                         .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
                         .frame(height: 48).disabled(account.busy)
                     if account.busy { ProgressView("Signing in…") }
-                    Text(account.message).font(.caption).foregroundStyle(.secondary)
+                    else if account.message != PausePathAccount.signedOutMessage {
+                        Text(account.message).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
             setupCard(title: "Apple Health & Fitness", subtitle: "Optional. Available walking activity and speed can support summaries and estimates. Heart-rate data is not used to infer your goals or preferences. Health data stays on this device.", icon: "heart.text.square") {
@@ -361,7 +363,7 @@ private struct WelcomeSetupView: View {
                     Text("Precise Location is off. Nearby results and route progress may be less accurate. You can change this in Settings.").font(.caption).foregroundStyle(.secondary)
                 }
             }
-            setupCard(title: "Daily progress recap", subtitle: "If enabled, an 8 PM reminder follows a saved reflection. Its wording responds to how your walk felt, without route, location, or Health details.", icon: "bell") {
+            setupCard(title: "Daily progress recap", subtitle: "If enabled, an 8 PM reminder lets you know your walking summary is ready in My progress. It does not include route, location, or Health details.", icon: "bell") {
                 if notificationEnabled {
                     Label("Daily recap reminder is on", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                     Button("Turn off reminder") { notificationEnabled = false; profile.dailyRecapNotifications = false; saveProfile(); DailyRecapNotifications.disable() }.font(.caption)

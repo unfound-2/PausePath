@@ -182,29 +182,6 @@ public enum Manageability: String, CaseIterable, Codable, Sendable {
     case comfortable = "Comfortable", aboutRight = "About right", difficult = "Too demanding"
 }
 
-public struct WalkReflection: Identifiable, Codable, Sendable {
-    public var id: UUID
-    public var date: Date
-    public var routeName: String
-    public var feeling: Manageability
-    public var distanceMeters: Double
-    public var activeSeconds: Double
-    public var completed: Bool
-    public var note: String?
-
-    public init(id: UUID = UUID(), date: Date = .now, routeName: String, feeling: Manageability,
-                distanceMeters: Double, activeSeconds: Double, completed: Bool, note: String? = nil) {
-        self.id = id
-        self.date = date
-        self.routeName = routeName
-        self.feeling = feeling
-        self.distanceMeters = max(0, distanceMeters)
-        self.activeSeconds = max(0, activeSeconds)
-        self.completed = completed
-        self.note = note
-    }
-}
-
 public struct TrackedWalk: Identifiable, Codable, Sendable {
     public var id: UUID
     public var date: Date

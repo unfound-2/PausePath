@@ -178,7 +178,7 @@ struct ExploreRoutePlannerView: View {
                 NavigationStack {
                     List {
                         Section("Location and privacy") {
-                            Text("PausePath uses your current location to find nearby destinations and possible stops, calculate walking routes, and show live progress while you navigate. Location is not used for advertising or community tracking. Route details are saved on this device. Weather checks share approximate route points only when you turn weather guidance on.")
+                            Text("PausePath uses your current location to find nearby destinations and possible stops, calculate walking routes, and show live progress while you navigate. Location is not used for advertising or community tracking. Route details are saved on this device. Weather guidance is on by default and sends approximate route points to Open-Meteo; turn it off in Account settings any time.")
                             Text("Live GPS runs only while an active walk is in the foreground. Tracking pauses when PausePath leaves the foreground and resumes only when you choose to resume the walk. iOS controls location permission and Precise Location; you can change both in Settings.")
                         }
                         Section("Route choices") {

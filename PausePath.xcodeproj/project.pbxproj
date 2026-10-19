@@ -129,6 +129,9 @@
 				TargetAttributes = {
 					000000000000000000000004 = {
 						SystemCapabilities = {
+							com.apple.SignInWithApple = {
+								enabled = 1;
+							};
 						};
 					};
 				};

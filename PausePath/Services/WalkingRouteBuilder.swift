@@ -22,14 +22,36 @@ struct GeneratedWalk: Identifiable {
     var duration: Double { distance / max(0.3, preferences.speedMetersPerSecond) }
     var paths: [[Coordinate]] { legs.map { $0.polyline.walkingCoordinates } }
     var start: Coordinate { paths[0][0] }
-    /// Stable opaque identifier for this waypoint sequence. The identifier stays on device;
-    /// only aggregate challenge totals are sent to the community service.
+    /// Stable opaque identifier for this route's sampled geometry. The identifier stays on
+    /// device; only aggregate challenge totals are sent to the community service.
     var routeIdentity: String {
-        let signature = paths.compactMap { path -> String? in
-            guard let first = path.first, let last = path.last else { return nil }
-            return "\(Int((first.latitude * 10_000).rounded())),\(Int((first.longitude * 10_000).rounded()))>\(Int((last.latitude * 10_000).rounded())),\(Int((last.longitude * 10_000).rounded()))"
-        }.joined(separator: "|")
+        let signature = paths.map(sampledPathSignature).joined(separator: "|")
         return SHA256.hash(data: Data(signature.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+    private func sampledPathSignature(_ path: [Coordinate]) -> String {
+        guard let first = path.first else { return "" }
+        let length = WalkingGeometry.length(path)
+        guard length > 0 else { return "\(Int((first.latitude * 10_000).rounded())),\(Int((first.longitude * 10_000).rounded()))" }
+        var distances = Array(stride(from: 0.0, through: length, by: 100.0))
+        if distances.last != length { distances.append(length) }
+        return distances.compactMap { coordinate(at: $0, along: path) }.map {
+            "\(Int(($0.latitude * 10_000).rounded())),\(Int(($0.longitude * 10_000).rounded()))"
+        }.joined(separator: ";")
+    }
+    private func coordinate(at target: Double, along path: [Coordinate]) -> Coordinate? {
+        guard let first = path.first else { return nil }
+        if target <= 0 { return first }
+        var traversed = 0.0
+        for (start, end) in zip(path, path.dropFirst()) {
+            let segmentLength = WalkingGeometry.distance(start, end)
+            if traversed + segmentLength >= target, segmentLength > 0 {
+                let fraction = min(1, max(0, (target - traversed) / segmentLength))
+                return Coordinate(start.latitude + (end.latitude - start.latitude) * fraction,
+                                  start.longitude + (end.longitude - start.longitude) * fraction)
+            }
+            traversed += segmentLength
+        }
+        return path.last
     }
     var distanceMatches: Bool { abs(distance - preferences.distanceMeters) <= preferences.distanceMeters * 0.25 }
     var requirements: String {
