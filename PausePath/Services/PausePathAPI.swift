@@ -356,6 +356,14 @@ struct WalkingChallengeMember: Decodable, Identifiable {
     let amount: Double
 }
 struct WalkingCommunityChallenge: Decodable, Identifiable {
+    let created_at: String
+    var startDate: Date? {
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = parser.date(from: created_at) { return date }
+        parser.formatOptions = [.withInternetDateTime]
+        return parser.date(from: created_at)
+    }
     let id: UUID
     let community_id: UUID
     let name: String
@@ -464,20 +472,23 @@ private struct ChallengeListResponse: Decodable { let challenges: [WalkingCommun
     static func syncChallengeProgress(walks: [TrackedWalk]) async throws {
         guard UserDefaults.standard.bool(forKey: "pausepath.shareChallengeProgress") else { return }
         let groups = try await communities()
-        let completedWalks = walks.filter(\.completed)
-        let totals: [String: Double] = [
-            "walks": Double(completedWalks.count),
-            "distance_km": completedWalks.reduce(0) { $0 + $1.distanceMeters / 1000 },
-            "minutes": completedWalks.reduce(0) { $0 + $1.activeSeconds / 60 },
-            // Route identifiers stay local. The community API receives only this aggregate.
-            "new_routes": Double(Set(completedWalks.compactMap(\.routeIdentity)).count)
-        ]
         for group in groups {
             for challenge in try await challenges(in: group.id) {
-                try await updateChallengeProgress(challenge.id, amount: totals[challenge.metric] ?? 0)
+                guard UserDefaults.standard.bool(forKey: "pausepath.shareChallengeProgress") else { return }
+                guard let start = challenge.startDate else {
+                    throw ServiceFailure(status: 422, message: "This challenge has an invalid start date. Progress has not been changed.")
+                }
+                let total = ChallengeProgressCalculator.total(metric: challenge.metric, walks: walks, from: start, until: Date())
+                try await updateChallengeProgress(challenge.id, amount: min(total, 100000))
+                // An opt-out during the request must not leave that upload visible.
+                if !UserDefaults.standard.bool(forKey: "pausepath.shareChallengeProgress") {
+                    try await deleteChallengeProgress(challenge.id)
+                    return
+                }
             }
         }
     }
+
     static func clearChallengeProgress() async throws {
         for group in try await communities() {
             for challenge in try await challenges(in: group.id) {

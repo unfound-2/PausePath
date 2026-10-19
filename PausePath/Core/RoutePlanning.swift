@@ -245,3 +245,34 @@ public struct WalkFeedback: Identifiable, Codable, Sendable {
         self.note = note; self.activityID = activityID
     }
 }
+
+
+/// Only completed activity inside the challenge window counts. Route identities
+/// never leave the device; a route is new only if absent from earlier records.
+public enum ChallengeProgressCalculator {
+    public static func total(metric: String, walks: [TrackedWalk], from start: Date, until end: Date) -> Double {
+        let completed = walks.filter { $0.completed && $0.date <= end }
+        let eligible = completed.filter { $0.date >= start }
+        switch metric {
+        case "walks": return Double(eligible.count)
+        case "distance_km": return eligible.reduce(0) { $0 + valid($1.distanceMeters) / 1000 }
+        case "minutes": return eligible.reduce(0) { $0 + valid($1.activeSeconds) / 60 }
+        case "new_routes":
+            let previous = Set(completed.filter { $0.date < start }.compactMap(\.routeIdentity))
+            return Double(Set(eligible.compactMap(\.routeIdentity)).subtracting(previous).count)
+        default: return 0
+        }
+    }
+    private static func valid(_ value: Double) -> Double { value.isFinite ? max(0, value) : 0 }
+}
+
+/// A refreshed deck cannot award the same suggestion twice in one week.
+public struct ChallengeRewardLedger: Codable {
+    public var week = ""
+    public var awarded: Set<String> = []
+    public init() {}
+    public mutating func claim(_ key: String, week currentWeek: String) -> Bool {
+        if week != currentWeek { week = currentWeek; awarded = [] }
+        return awarded.insert(key).inserted
+    }
+}

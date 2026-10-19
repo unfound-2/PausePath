@@ -1,0 +1,17 @@
+name: PausePath iOS
+on:
+  push:
+    paths: ['PausePath/**', 'PausePath.xcodeproj/**', 'Tests/**', 'Package.swift', '.github/workflows/ios.yml']
+  pull_request:
+    paths: ['PausePath/**', 'PausePath.xcodeproj/**', 'Tests/**', 'Package.swift', '.github/workflows/ios.yml']
+permissions:
+  contents: read
+jobs:
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test core logic
+        run: swift test
+      - name: Build iOS app
+        run: xcodebuild -project PausePath.xcodeproj -scheme PausePath -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build

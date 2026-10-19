@@ -117,7 +117,6 @@ def create_challenge(community_id: UUID,body: dict=Body(...),user=Depends(identi
     with transaction() as conn:
         if not conn.execute('SELECT 1 FROM walking_community_members WHERE community_id=%s AND user_id=%s',(community_id,user['sub'])).fetchone(): raise HTTPException(403,'Join this community before creating a challenge')
         row=conn.execute('INSERT INTO walking_challenges(community_id,name,metric,target,created_by) VALUES (%s,%s,%s,%s,%s) RETURNING id,community_id,name,metric,target,created_at',(community_id,name,metric,target,user['sub'])).fetchone()
-        conn.execute('INSERT INTO walking_challenge_progress(challenge_id,user_id,amount) VALUES (%s,%s,0)',(row['id'],user['sub']))
     return row
 
 @app.get('/api/v1/communities/{community_id}/challenges',tags=['community'])
@@ -128,7 +127,7 @@ def list_challenges(community_id: UUID,user=Depends(identity)):
             coalesce((SELECT p.amount FROM walking_challenge_progress p WHERE p.challenge_id=c.id AND p.user_id=%s),0) AS my_progress,
             coalesce((SELECT jsonb_agg(jsonb_build_object('name',ranked.display_name,'amount',ranked.amount) ORDER BY ranked.amount DESC)
                 FROM (SELECT m.display_name,coalesce(p.amount,0) AS amount FROM walking_community_members m
-                    LEFT JOIN walking_challenge_progress p ON p.user_id=m.user_id AND p.challenge_id=c.id
+                    JOIN walking_challenge_progress p ON p.user_id=m.user_id AND p.challenge_id=c.id
                     WHERE m.community_id=c.community_id ORDER BY amount DESC LIMIT 50) ranked),'[]'::jsonb) AS leaderboard
             FROM walking_challenges c WHERE c.community_id=%s ORDER BY c.created_at DESC''',(user['sub'],community_id)).fetchall()
     return {'challenges':rows}
