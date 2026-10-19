@@ -36,6 +36,10 @@ final class NavigationProgressTests: XCTestCase {
     func testMustBeginNearStart() {
         var progress = WalkProgress(paths: [[start, middle, end]])
         progress.update(position: end, accuracy: 5, age: 0)
+        XCTAssertFalse(progress.offRoute) // Warning waits for a second fix.
+        XCTAssertFalse(progress.hasStarted)
+        XCTAssertEqual(progress.completedMeters, 0)
+        progress.update(position: end, accuracy: 5, age: 0)
         XCTAssertTrue(progress.offRoute)
         XCTAssertFalse(progress.hasStarted)
         XCTAssertFalse(progress.arrived)
@@ -43,6 +47,9 @@ final class NavigationProgressTests: XCTestCase {
     func testOffRouteDoesNotAdvance() {
         var progress = WalkProgress(paths: [[start, middle, end]])
         progress.update(position: start, accuracy: 5, age: 0)
+        progress.update(position: Coordinate(0.001, 0.001), accuracy: 5, age: 0)
+        XCTAssertFalse(progress.offRoute)
+        XCTAssertEqual(progress.metersAlongLeg, 0)
         progress.update(position: Coordinate(0.001, 0.001), accuracy: 5, age: 0)
         XCTAssertTrue(progress.offRoute)
         XCTAssertEqual(progress.metersAlongLeg, 0)
