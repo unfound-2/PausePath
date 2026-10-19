@@ -77,113 +77,124 @@ struct DiscoverView: View {
     }
 
     var body: some View {
-        Map(position: $camera) {
-            UserAnnotation()
-            if let start = routeStartCoordinate {
-                Annotation("Selected route start", coordinate: start, anchor: .bottom) {
-                    Image(systemName: "location.fill")
-                        .font(.headline).foregroundStyle(.white).frame(width: 42, height: 42)
-                        .background(Color(red: 0.02, green: 0.42, blue: 0.34), in: Circle())
-                        .overlay(Circle().stroke(.white, lineWidth: 3)).shadow(radius: 4)
-                        .accessibilityLabel("Selected route starting point")
-                }.annotationTitles(.hidden)
-            }
-            ForEach(visiblePlaces) { place in
-                Annotation(place.item.name ?? place.kind.rawValue, coordinate: place.item.placemark.coordinate, anchor: .bottom) {
-                    Button { select(place) } label: {
-                        VStack(spacing: -3) {
-                            Image(systemName: place.kind.symbol)
-                                .font(.system(size: selectedID == place.id ? 20 : 16, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .frame(width: selectedID == place.id ? 48 : 38, height: selectedID == place.id ? 48 : 38)
-                                .background(place.kind.mapColor, in: Circle())
-                                .overlay(Circle().stroke(.white, lineWidth: 3))
-                            Image(systemName: "arrowtriangle.down.fill").font(.system(size: 12)).foregroundStyle(place.kind.mapColor)
-                        }.shadow(color: .black.opacity(0.2), radius: 4, y: 2)
-                            .frame(minWidth: 44, minHeight: 52)
-                    }.buttonStyle(.plain)
-                        .accessibilityLabel("\(place.item.name ?? "Possible stop"), \(place.kind.rawValue)")
-                        .accessibilityHint("Show stop details and walking directions")
-                        .accessibilityAddTraits(selectedID == place.id ? [.isSelected] : [])
-                }.annotationTitles(.hidden)
-            }
-            if discovery.route != nil {
-                ForEach(Array(discovery.itinerary.enumerated()), id: \.offset) { index, leg in
-                    MapPolyline(leg.polyline).stroke(index == 0 ? .teal : .blue, lineWidth: 6)
+        GeometryReader { geometry in
+            Map(position: $camera) {
+                UserAnnotation()
+                if let start = routeStartCoordinate {
+                    Annotation("Selected route start", coordinate: start, anchor: .bottom) {
+                        Image(systemName: "location.fill")
+                            .font(.headline).foregroundStyle(.white).frame(width: 42, height: 42)
+                            .background(Color(red: 0.02, green: 0.42, blue: 0.34), in: Circle())
+                            .overlay(Circle().stroke(.white, lineWidth: 3)).shadow(radius: 4)
+                            .accessibilityLabel("Selected route starting point")
+                    }.annotationTitles(.hidden)
+                }
+                ForEach(visiblePlaces) { place in
+                    Annotation(place.item.name ?? place.kind.rawValue, coordinate: place.item.placemark.coordinate, anchor: .bottom) {
+                        Button { select(place) } label: {
+                            VStack(spacing: -3) {
+                                Image(systemName: place.kind.symbol)
+                                    .font(.system(size: selectedID == place.id ? 20 : 16, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: selectedID == place.id ? 48 : 38, height: selectedID == place.id ? 48 : 38)
+                                    .background(place.kind.mapColor, in: Circle())
+                                    .overlay(Circle().stroke(.white, lineWidth: 3))
+                                Image(systemName: "arrowtriangle.down.fill").font(.system(size: 12)).foregroundStyle(place.kind.mapColor)
+                            }.shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+                                .frame(minWidth: 44, minHeight: 52)
+                        }.buttonStyle(.plain)
+                            .disabled(showRoutePlanner)
+                            .accessibilityLabel("\(place.item.name ?? "Possible stop"), \(place.kind.rawValue)")
+                            .accessibilityHint("Show stop details and walking directions")
+                            .accessibilityAddTraits(selectedID == place.id ? [.isSelected] : [])
+                    }.annotationTitles(.hidden)
+                }
+                if discovery.route != nil {
+                    ForEach(Array(discovery.itinerary.enumerated()), id: \.offset) { index, leg in
+                        MapPolyline(leg.polyline).stroke(index == 0 ? .teal : .blue, lineWidth: 6)
+                    }
                 }
             }
-        }
-        .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
-        .mapControls { MapCompass(); MapScaleView() }
-        .onMapCameraChange(frequency: .onEnd) { context in
-            visibleRegion = context.region
-            // Programmatic camera changes (such as fitting a route) must not
-            // replace the selected stop or erase its directions.
-            guard camera.positionedByUser, !isPreviewingRoute,
-                  discovery.route == nil, !showReport, !showResults, !showRoutePlanner, navigationWalk == nil else { return }
-            scheduleAreaRefresh(context.region)
-        }
-        .ignoresSafeArea(edges: .top)
-        .safeAreaInset(edge: .top, spacing: 0) { topControls }
-        .overlay(alignment: .bottom) {
-            bottomControls
-        }
-        .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: showRoutePlanner)
-        .toolbarBackground(.hidden, for: .tabBar)
-        .task {
-            camera = .automatic
-        }
-        .task {
-            discovery.places = []; selectedID = nil; discovery.route = nil
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: .seconds(60)) } catch { return }
-                guard scenePhase == .active, !discovery.isLoading,
-                      discovery.route == nil, selectedID == nil, !showReport, !showResults, !showRoutePlanner, navigationWalk == nil else { continue }
-                guard let location = discovery.currentLocation, isFresh(location) else { continue }
-                await loadArea(visibleRegion ?? discovery.region)
+            .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
+            .mapControls { MapCompass(); MapScaleView() }
+            .onMapCameraChange(frequency: .onEnd) { context in
+                visibleRegion = context.region
+                // Programmatic camera changes (such as fitting a route) must not
+                // replace the selected stop or erase its directions.
+                guard camera.positionedByUser, !isPreviewingRoute,
+                      discovery.route == nil, !showReport, !showResults, !showRoutePlanner, navigationWalk == nil else { return }
+                scheduleAreaRefresh(context.region)
             }
-        }
-        .sheet(isPresented: $showReport) {
-            StopReportView(place: reportPlace,
-                coordinate: reportPlace?.item.placemark.coordinate ?? (visibleRegion ?? discovery.region).center) {
-                Task { await refresh() }
+            .ignoresSafeArea(edges: .top)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if !showRoutePlanner { topControls }
             }
-        }
-        .onChange(of: [discovery.region.center.latitude, discovery.region.center.longitude]) { moveToDiscoveredArea() }
-        .onChange(of: discovery.currentLocation?.timestamp) { _, _ in
-            guard usesCurrentRouteStart, let location = discovery.currentLocation, isFresh(location) else { return }
-            let region = MKCoordinateRegion(center: location.coordinate, latitudinalMeters: 1_400, longitudinalMeters: 1_400)
-            visibleRegion = region
-            camera = .region(region)
-            clearRoutePreview()
-            Task { await loadArea(region) }
-            if !routeDestinationQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Task { await searchRouteDestinations(routeDestinationQuery) }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                // Keep the selected route fitted in the map above the half sheet.
+                if showRoutePlanner { Color.clear.frame(height: geometry.size.height * 0.5) }
             }
+            .overlay(alignment: .bottom) {
+                if !showRoutePlanner { bottomControls }
+            }
+            .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: showRoutePlanner)
+            .toolbarBackground(.hidden, for: .tabBar)
+            .task {
+                camera = .automatic
+            }
+            .task {
+                discovery.places = []; selectedID = nil; discovery.route = nil
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                    guard scenePhase == .active, !discovery.isLoading,
+                          discovery.route == nil, selectedID == nil, !showReport, !showResults, !showRoutePlanner, navigationWalk == nil else { continue }
+                    guard let location = discovery.currentLocation, isFresh(location) else { continue }
+                    await loadArea(visibleRegion ?? discovery.region)
+                }
+            }
+            .sheet(isPresented: $showReport) {
+                StopReportView(place: reportPlace,
+                    coordinate: reportPlace?.item.placemark.coordinate ?? (visibleRegion ?? discovery.region).center) {
+                    Task { await refresh() }
+                }
+            }
+            .onChange(of: [discovery.region.center.latitude, discovery.region.center.longitude]) { moveToDiscoveredArea() }
+            .onChange(of: discovery.currentLocation?.timestamp) { _, _ in
+                guard usesCurrentRouteStart, let location = discovery.currentLocation, isFresh(location) else { return }
+                let region = MKCoordinateRegion(center: location.coordinate, latitudinalMeters: 1_400, longitudinalMeters: 1_400)
+                visibleRegion = region
+                camera = .region(region)
+                clearRoutePreview()
+                Task { await loadArea(region) }
+                if !routeDestinationQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Task { await searchRouteDestinations(routeDestinationQuery) }
+                }
+            }
+            .onDisappear {
+                cancelAreaRefresh()
+                routeStartSearchTask?.cancel()
+                routeSearchTask?.cancel()
+                discovery.cancelPending()
+            }
+            .onChange(of: showResults) { if showResults { cancelAreaRefresh() } }
+            .onChange(of: showRoutePlanner) { if showRoutePlanner { cancelAreaRefresh() } }
+            .onChange(of: navigationWalk?.id) { if navigationWalk != nil { cancelAreaRefresh() } }
+            .onChange(of: discovery.selectedRouteOptionID) { fitRouteInMap() }
+            .sheet(isPresented: $showResults) { resultsSheet }
+            .sheet(isPresented: $showRoutePlanner) {
+                ExploreRoutePlannerView(discovery: discovery, preferences: preferences, profile: profile, initialDestination: selectedPlace,
+                    destinationQuery: $routeDestinationQuery, destination: $routeDestination,
+                    mandatoryKinds: $mandatoryRouteStops, difficultyFilter: $routeDifficultyFilter,
+                    routeRequestID: $routeRequestID, usesCurrentLocation: usesCurrentRouteStart,
+                    customOrigin: routeStartCoordinate, customOriginName: routeStartTitle,
+                    onNavigate: { navigationWalk = $0 }, onClose: { showRoutePlanner = false })
+                    .presentationDetents([.fraction(0.5)])
+                    .presentationContentInteraction(.scrolls)
+                    .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.5)))
+                    .presentationDragIndicator(.visible)
+                    .presentationBackground(Color(.systemGroupedBackground))
+            }
+            .fullScreenCover(item: $navigationWalk) { WalkingNavigationView(walk: $0) }
         }
-        .onDisappear {
-            cancelAreaRefresh()
-            routeStartSearchTask?.cancel()
-            routeSearchTask?.cancel()
-            discovery.cancelPending()
-        }
-        .onChange(of: showResults) { if showResults { cancelAreaRefresh() } }
-        .onChange(of: showRoutePlanner) { if showRoutePlanner { cancelAreaRefresh() } }
-        .onChange(of: navigationWalk?.id) { if navigationWalk != nil { cancelAreaRefresh() } }
-        .onChange(of: discovery.selectedRouteOptionID) { fitRouteInMap() }
-        .sheet(isPresented: $showResults) { resultsSheet }
-        .sheet(isPresented: $showRoutePlanner) {
-            ExploreRoutePlannerView(discovery: discovery, preferences: preferences, profile: profile, initialDestination: selectedPlace,
-                destinationQuery: $routeDestinationQuery, destination: $routeDestination,
-                mandatoryKinds: $mandatoryRouteStops, difficultyFilter: $routeDifficultyFilter,
-                routeRequestID: $routeRequestID, usesCurrentLocation: usesCurrentRouteStart,
-                customOrigin: routeStartCoordinate, customOriginName: routeStartTitle,
-                onNavigate: { navigationWalk = $0 }, onClose: { showRoutePlanner = false })
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-                .presentationBackground(.regularMaterial)
-        }
-        .fullScreenCover(item: $navigationWalk) { WalkingNavigationView(walk: $0) }
     }
 
     private var topControls: some View {

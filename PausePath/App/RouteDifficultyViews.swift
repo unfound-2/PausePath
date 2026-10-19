@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RouteDifficultyPreview: View {
     let input: RouteDifficultyInput
+    var compact = false
     @AppStorage(RouteDifficultyPreferences.storageKey)
     private var factorSelection = RouteDifficultyPreferences.defaultStorageValue
     @State private var showingDetails = false
@@ -11,22 +12,37 @@ struct RouteDifficultyPreview: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Label(assessment.label, systemImage: assessment.rating == nil ? "info.circle" : "figure.walk")
-                    .font(.subheadline.weight(.semibold))
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 8)
-                Button("Why this rating?") { showingDetails = true }
-                    .font(.subheadline)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.tint)
-            }
-            Text("A planning aid, not a measure of your fitness or ability.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if let message = assessment.limitedInformationMessage {
-                Text(message).font(.caption).foregroundStyle(.secondary)
+        Group {
+            if compact {
+                Button { showingDetails = true } label: {
+                    Label("Difficulty: \(assessment.label)", systemImage: "info.circle")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
+                .accessibilityHint("Shows the factors and missing data behind this rating")
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Label(assessment.label, systemImage: assessment.rating == nil ? "info.circle" : "figure.walk")
+                            .font(.subheadline.weight(.semibold))
+                            .accessibilityAddTraits(.isHeader)
+                        Spacer(minLength: 8)
+                        Button("Why this rating?") { showingDetails = true }
+                            .font(.subheadline)
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.tint)
+                    }
+                    Text("A planning aid, not a measure of your fitness or ability.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let message = assessment.limitedInformationMessage {
+                        Text(message).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
         }
         .sheet(isPresented: $showingDetails) {

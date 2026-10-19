@@ -89,65 +89,32 @@ struct ExploreRoutePlannerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Capsule().fill(.secondary.opacity(0.45)).frame(width: 38, height: 5).padding(.top, 8).padding(.bottom, 3)
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Route options").font(.headline)
-                    Text("From \(originTitle)").font(.caption).foregroundStyle(.secondary)
+                    Text("From \(originTitle)").font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer()
                 Button(action: onClose) {
                     Image(systemName: "chevron.down").font(.subheadline.weight(.semibold))
-                        .frame(width: 40, height: 40).background(.quaternary, in: Circle())
+                        .frame(width: 44, height: 44).background(.quaternary, in: Circle())
                 }.accessibilityLabel("Collapse route options and return to map")
-            }.padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 8)
+            }.padding(.horizontal, 16).padding(.top, 20).padding(.bottom, 8)
                 .contentShape(Rectangle())
                 .simultaneousGesture(DragGesture(minimumDistance: 25).onEnded { value in
                     if value.translation.height > 65 { onClose() }
                 })
+            Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if usesCurrentLocation {
-                        if originCoordinate == nil {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    if usesCurrentLocation && originCoordinate == nil {
                             Label("Getting your location…", systemImage: "location.slash").font(.caption).foregroundStyle(.secondary)
                             Button("Try location again", systemImage: "location.fill") { discovery.useLocation() }.buttonStyle(.bordered)
-                        } else {
-                            Label("Using your current device location", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.secondary)
-                        }
-                    } else {
-                        Label(customOriginName.isEmpty ? "Choose a starting place above" : "Starting at \(customOriginName)", systemImage: "location.circle")
-                            .font(.caption).foregroundStyle(.secondary)
                     }
 
                     if !status.isEmpty { Text(status).font(.callout).foregroundStyle(.secondary) }
                     if !discovery.routeOptions.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Routes").font(.headline)
-                            HStack {
-                                Menu {
-                                ForEach(RoutePlannerDifficultyFilter.allCases) { filter in
-                                    Button { difficultyFilter = filter } label: {
-                                        if filter == difficultyFilter { Label(filter.rawValue, systemImage: "checkmark") } else { Text(filter.rawValue) }
-                                    }
-                                }
-                                } label: {
-                                    Label("Difficulty: \(difficultyFilter.rawValue)", systemImage: "line.3.horizontal.decrease")
-                                        .font(.subheadline.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
-                                        .background(.thinMaterial, in: Capsule())
-                                }
-                                Menu {
-                                    ForEach(RouteSortOrder.allCases) { order in
-                                        Button { sortOrder = order } label: {
-                                            if order == sortOrder { Label(order.rawValue, systemImage: "checkmark") } else { Text(order.rawValue) }
-                                        }
-                                    }
-                                } label: {
-                                    Label("Sort", systemImage: "arrow.up.arrow.down")
-                                        .font(.subheadline.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
-                                        .background(.thinMaterial, in: Capsule())
-                                }
-                            }
-                        }
+                        routeFilters
                         if !visibleOptions.isEmpty && (difficultyFilter != .all || !mandatoryKinds.isEmpty) {
                             Button("Clear route filters") {
                                 difficultyFilter = .all
@@ -166,14 +133,17 @@ struct ExploreRoutePlannerView: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             ForEach(requiredOptions) { routeRow($0) }
-                            Text("Other routes without \(mandatoryKinds.map(\.chipTitle).sorted().joined(separator: ", "))")
-                                .font(.subheadline.weight(.semibold))
-                            Text("These routes may still work for you; each one names the stop types it misses.").font(.caption).foregroundStyle(.secondary)
-                            ForEach(otherOptions) { routeRow($0) }
+                            if !otherOptions.isEmpty {
+                                Text("Other routes").font(.subheadline.weight(.semibold))
+                                Text("These routes do not include every required stop type.").font(.caption).foregroundStyle(.secondary)
+                                ForEach(otherOptions) { routeRow($0) }
+                            }
                         } else {
                             ForEach(visibleOptions) { routeRow($0) }
                         }
-                        Text("Route choices are saved on this device for future comparison. \(savedRouteCount) saved.")
+                        Text("Difficulty uses available route data. Tap a difficulty badge for factors and missing information.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text("\(savedRouteCount) routes saved on this device.")
                             .font(.caption).foregroundStyle(.secondary)
                     } else if let destination {
                         Text("Destination: \(destination.name ?? destinationQuery)").font(.subheadline.weight(.semibold))
@@ -187,7 +157,7 @@ struct ExploreRoutePlannerView: View {
                                 .disabled(originCoordinate == nil)
                         }
                     } else {
-                        Label("Search for a destination in the bar above to get started.", systemImage: "magnifyingglass")
+                        Label("Close route options to choose a destination on the map.", systemImage: "magnifyingglass")
                             .font(.callout).foregroundStyle(.secondary)
                     }
                 }.padding()
@@ -220,23 +190,65 @@ struct ExploreRoutePlannerView: View {
                 }.presentationDetents([.medium, .large])
             }
             .onChange(of: discovery.currentLocation?.timestamp) {
-                if isFresh(discovery.currentLocation) { status = "Starting point: your current location." }
+                if isFresh(discovery.currentLocation) && discovery.routeOptions.isEmpty && !discovery.isLoading {
+                    status = "Starting point: your current location."
+                }
             }
         }
-        .frame(maxWidth: .infinity)
-        .frame(maxHeight: 520)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
-        .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.5), lineWidth: 1))
-        .shadow(color: .black.opacity(0.15), radius: 16, y: 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var routeFilters: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(visibleOptions.count) route options").font(.subheadline.weight(.semibold))
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { difficultyMenu; sortMenu }
+                VStack(alignment: .leading, spacing: 8) { difficultyMenu; sortMenu }
+            }
+        }
+    }
+
+    private var difficultyMenu: some View {
+        Menu {
+            ForEach(RoutePlannerDifficultyFilter.allCases) { filter in
+                Button { difficultyFilter = filter } label: {
+                    if filter == difficultyFilter { Label(filter.rawValue, systemImage: "checkmark") }
+                    else { Text(filter.rawValue) }
+                }
+            }
+        } label: {
+            Label("Difficulty: \(difficultyFilter.rawValue)", systemImage: "line.3.horizontal.decrease")
+                .font(.caption.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 12).frame(minHeight: 44)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            ForEach(RouteSortOrder.allCases) { order in
+                Button { sortOrder = order } label: {
+                    if order == sortOrder { Label(order.rawValue, systemImage: "checkmark") }
+                    else { Text(order.rawValue) }
+                }
+            }
+        } label: {
+            Label(sortOrder.rawValue, systemImage: "arrow.up.arrow.down")
+                .font(.caption.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 12).frame(minHeight: 44)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .accessibilityLabel("Sort routes: \(sortOrder.rawValue)")
     }
 
     @ViewBuilder private func routeRow(_ option: WalkingRouteOption) -> some View {
         let isSelected = option.id == discovery.selectedRouteOptionID
         let missing = mandatoryKinds.subtracting(Set(option.stops.map(\.kind))).map(\.chipTitle).sorted()
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             Button { discovery.selectRouteOption(option.id) } label: {
+                VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(isSelected ? Color.accentColor : Color.gray)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(option.title).font(.headline).foregroundStyle(.primary)
@@ -244,19 +256,23 @@ struct ExploreRoutePlannerView: View {
                             Label("Recommended for you", systemImage: "sparkles")
                                 .font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
                         }
-                        Text("\(option.distance / 1000, specifier: "%.1f") km • about \(Int(option.duration / 60)) min")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                        Text(difficulty(of: option)?.rawValue ?? "Rating unavailable")
-                            .font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
                     }
                     Spacer(minLength: 0)
+                }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 80), spacing: 8)], spacing: 8) {
+                    routeMetric("Distance", value: String(format: "%.1f km", option.distance / 1000))
+                    routeMetric("Est. time", value: "\(max(1, Int(ceil(option.duration / 60)))) min")
+                    routeMetric("Stops", value: "\(option.stops.count)")
+                }
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityAddTraits(isSelected ? [.isSelected] : [])
+                .accessibilityHint("Preview this route on the map")
             if !missing.isEmpty {
                 Text("Does not include: \(missing.joined(separator: ", "))")
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             }
-            RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: option.distance, durationSeconds: option.duration))
+            RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: option.distance, durationSeconds: option.duration), compact: true)
+            if isSelected {
             Button("Navigate this route", systemImage: "figure.walk") {
                 let walk = GeneratedWalk(name: "Walk to \(option.destinationName)", legs: option.legs, preferences: preferences)
                 onClose()
@@ -264,8 +280,28 @@ struct ExploreRoutePlannerView: View {
                     try? await Task.sleep(for: .milliseconds(250))
                     onNavigate(walk)
                 }
-            }.buttonStyle(.bordered)
-        }.padding(.vertical, 6)
+            }.buttonStyle(.borderedProminent).controlSize(.large)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .strokeBorder(isSelected ? Color.accentColor : Color.primary.opacity(0.1), lineWidth: isSelected ? 2 : 1)
+        }
+    }
+
+    private func routeMetric(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .combine)
     }
 
     private func buildRoutes() async {
@@ -305,7 +341,7 @@ struct ExploreRoutePlannerView: View {
         let availableKinds = Set(candidates.map(\.kind))
         let unavailable = mandatoryKinds.subtracting(availableKinds)
         let unavailableText = unavailable.isEmpty ? "" : " No mapped \(unavailable.map(\.chipTitle).sorted().joined(separator: " or ")) was found near the route."
-        status = "Routes found. Required stop matches appear first; other routes show which stop types they miss." + unavailableText
+        status = unavailableText.trimmingCharacters(in: .whitespaces)
         savedRouteCount = SavedRouteStore.load().count
     }
 
