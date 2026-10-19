@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import AuthenticationServices
+import UIKit
 
 struct AccountView: View {
     @State private var account = PausePathAccount.shared
@@ -111,6 +112,7 @@ struct CommunityChallengesView: View {
     @State private var communities: [WalkingCommunity] = []
     @State private var challenges: [UUID: [WalkingCommunityChallenge]] = [:]
     @State private var showCommunityComposer = false
+    @State private var communityComposerStartsWithJoin = false
     @AppStorage("pausepath.pendingCommunityInvite") private var pendingInviteCode = ""
     @State private var challengeSheetTarget: ChallengeTarget?
     @State private var message = ""
@@ -134,23 +136,27 @@ struct CommunityChallengesView: View {
         NavigationStack {
             Form {
                 Section {
-                    Text("Create a community. Walk together!").font(.headline)
-                    Text("Join by invite code, or keep your activity private. Community participation and sharing progress are optional.")
-                        .font(.callout).foregroundStyle(.secondary)
-                    Button("Create or join a community", systemImage: "person.3.fill") { showCommunityComposer = true }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(busy)
-                    if account.isSignedIn {
-                        if account.sessionState != .ready {
-                            Label(account.sessionStatusText, systemImage: "person.crop.circle.badge.clock")
-                                .font(.caption).foregroundStyle(.secondary)
-                            if account.sessionState == .temporarilyUnavailable {
-                                Button("Retry account check") { Task { await account.restoreSessionIfNeeded() } }
-                            }
+                    VStack(spacing: 14) {
+                        Image(systemName: "person.3.fill").font(.largeTitle).foregroundStyle(.tint)
+                        Text("Walk together").font(.title2.bold())
+                        Text("Create a community for your friends, or join one with an invite code.")
+                            .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        Button {
+                            communityComposerStartsWithJoin = false; showCommunityComposer = true
+                        } label: {
+                            Label("Create a community", systemImage: "plus.circle.fill")
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }.buttonStyle(.borderedProminent)
+                        Button {
+                            communityComposerStartsWithJoin = true; showCommunityComposer = true
+                        } label: {
+                            Label("Join with a code", systemImage: "person.badge.plus")
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }.buttonStyle(.bordered)
+                        if !account.isSignedIn {
+                            Text("Sign in with Apple in the next step.").font(.caption).foregroundStyle(.secondary)
                         }
-                    } else {
-                        Text("Sign in with Apple to create or join a community.").font(.caption).foregroundStyle(.secondary)
-                    }
+                    }.frame(maxWidth: .infinity).padding(.vertical, 12)
                 }
                 Section {
                     ForEach(weeklyChallenges) { challenge in
@@ -284,7 +290,7 @@ struct CommunityChallengesView: View {
                 }
             }
             .sheet(isPresented: $showCommunityComposer, onDismiss: { pendingInviteCode = "" }) {
-                CommunityJoinSheet(account: account, onCreate: createCommunity, onJoin: joinCommunity, initialUsername: profile.username ?? "", initialInviteCode: pendingInviteCode)
+                CommunityJoinSheet(account: account, onCreate: createCommunity, onJoin: joinCommunity, initialUsername: profile.username ?? "", initialInviteCode: pendingInviteCode, startsWithJoin: communityComposerStartsWithJoin)
             }
             .sheet(item: $challengeSheetTarget) { target in
                 ChallengeComposer(onSave: { name, metric, amount in
@@ -411,13 +417,23 @@ struct CommunityChallengesView: View {
         var updated = profile; updated.username = username
         profileData = (try? JSONEncoder().encode(updated)) ?? profileData
     }
-    private func createCommunity(name: String, username: String) async throws {
-        busy = true; defer { busy = false }
-        saveCommunityUsername(username); let community = try await PausePathAPI.createCommunity(name: name, username: username); message = "Community created. Share invite code \(community.invite_code) with people you choose."; await refresh()
+    private func createCommunity(name: String, username: String) async throws -> WalkingCommunity {
+        let community = try await PausePathAPI.createCommunity(name: name, username: username)
+        saveCommunityUsername(username)
+        communities.removeAll { $0.id == community.id }
+        communities.insert(community, at: 0)
+        message = ""
+        Task { await refresh() }
+        return community
     }
-    private func joinCommunity(code: String, username: String) async throws {
-        busy = true; defer { busy = false }
-        saveCommunityUsername(username); let community = try await PausePathAPI.joinCommunity(code: code, username: username); message = "Joined \(community.name)."; await refresh()
+    private func joinCommunity(code: String, username: String) async throws -> WalkingCommunity {
+        let community = try await PausePathAPI.joinCommunity(code: code, username: username)
+        saveCommunityUsername(username)
+        communities.removeAll { $0.id == community.id }
+        communities.insert(community, at: 0)
+        message = ""
+        Task { await refresh() }
+        return community
     }
     private func createChallenge(communityID: UUID, name: String, metric: String, target: Double) async throws {
         try await PausePathAPI.createChallenge(in: communityID, name: name, metric: metric, target: target); message = "Community task created. Everyone can join at their own pace."; await refresh()
@@ -447,57 +463,146 @@ private struct ChallengeTarget: Identifiable { let id: UUID; init(_ id: UUID) { 
 
 private struct CommunityJoinSheet: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
     let account: PausePathAccount
-    let onCreate: (String, String) async throws -> Void
-    let onJoin: (String, String) async throws -> Void
+    let onCreate: (String, String) async throws -> WalkingCommunity
+    let onJoin: (String, String) async throws -> WalkingCommunity
     let initialUsername: String
     let initialInviteCode: String
-    @Environment(\.dismiss) private var dismiss
+    let startsWithJoin: Bool
+    @State private var isJoining = false
     @State private var name = ""
     @State private var code = ""
     @State private var username = ""
     @State private var busy = false
     @State private var submissionError = ""
+    @State private var result: WalkingCommunity?
+    @State private var copied = false
+
     var body: some View {
         NavigationStack {
             Form {
-                if !account.isSignedIn {
-                    Section("Connect your account") {
-                        Text("Sign in with Apple to create or join a community. Your route and location history stays private.").font(.callout)
-                        SignInWithAppleButton(.continue,
-                            onRequest: { request in account.prepareAppleSignIn(request) },
-                            onCompletion: { result in Task { await account.completeAppleSignIn(result) } })
-                            .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black).frame(height: 48).disabled(account.busy)
-                        if account.busy { ProgressView("Signing in…") }
-                        if !account.message.isEmpty { Text(account.message).font(.caption).foregroundStyle(.secondary) }
+                if let result {
+                    successCard(result)
+                } else {
+                    Section {
+                        Picker("Community action", selection: $isJoining) {
+                            Text("Create").tag(false)
+                            Text("Join").tag(true)
+                        }.pickerStyle(.segmented).disabled(busy)
                     }
-                } else if account.sessionState != .ready {
-                    Section("Account connection") {
-                        Text(account.sessionStatusText).font(.callout)
-                        Text(account.message).font(.caption).foregroundStyle(.secondary)
-                        Button("Check account connection") { Task { await account.restoreSessionIfNeeded() } }
-                            .disabled(account.sessionState == .checking)
+                    accountSection
+                    Section {
+                        TextField("Your community username", text: $username)
+                            .textInputAutocapitalization(.words).autocorrectionDisabled().disabled(busy)
+                            .accessibilityLabel("Your community username")
+                    } header: { Text("Your display name") }
+                      footer: { Text("This is the name other members see. Use 1–32 characters.") }
+                    if isJoining {
+                        Section {
+                            TextField("Enter invite code", text: $code)
+                                .textInputAutocapitalization(.characters).autocorrectionDisabled().disabled(busy)
+                                .font(.body.monospaced()).accessibilityLabel("Community invite code")
+                        } header: { Text("Invite code") }
+                          footer: { Text("Ask a member for their code. You do not need to create a community first.") }
+                    } else {
+                        Section {
+                            TextField("For example, Weekend Walkers", text: $name)
+                                .textInputAutocapitalization(.words).disabled(busy).accessibilityLabel("Community name")
+                        } header: { Text("Community name") }
+                          footer: { Text("Use 2–60 characters. Your invite code appears after creation.") }
                     }
+                    Section {
+                        Button { Task { await submit() } } label: {
+                            HStack(spacing: 8) {
+                                if busy { ProgressView().tint(.white) }
+                                Text(busy ? (isJoining ? "Joining…" : "Creating…") : (isJoining ? "Join community" : "Create community"))
+                                    .font(.headline)
+                            }.frame(maxWidth: .infinity, minHeight: 44)
+                        }.buttonStyle(.borderedProminent).disabled(!canSubmit || busy)
+                        if !submissionError.isEmpty {
+                            Label(submissionError, systemImage: "exclamationmark.circle")
+                                .font(.callout).foregroundStyle(.secondary)
+                        }
+                    } footer: { Text("Progress sharing stays optional. Your routes and locations remain private.") }
                 }
-                Section("Create a community") {
-                    TextField("Community name", text: $name).textInputAutocapitalization(.words)
-                    TextField("Community username", text: $username).textInputAutocapitalization(.words)
-                    Button("Create and get an invite code") { Task { busy = true; defer { busy = false }; do { try await onCreate(name.trimmingCharacters(in: .whitespacesAndNewlines), cleanUsername); dismiss() } catch { submissionError = communityErrorMessage(error) } } }
-                        .disabled(!account.isSignedIn || account.sessionState != .ready || busy || !(2...60).contains(name.trimmingCharacters(in: .whitespacesAndNewlines).count) || cleanUsername.isEmpty)
-                }
-                Section("Join a community") {
-                    TextField("Invite code", text: $code).textInputAutocapitalization(.characters).autocorrectionDisabled()
-                    Button("Join with code") { Task { busy = true; defer { busy = false }; do { try await onJoin(code, cleanUsername); dismiss() } catch { submissionError = communityErrorMessage(error) } } }
-                        .disabled(!account.isSignedIn || account.sessionState != .ready || busy || code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || cleanUsername.isEmpty)
-                }
-                Text("Members see this chosen username. Only challenge totals you choose to share appear on community boards.").font(.footnote).foregroundStyle(.secondary)
-                if !submissionError.isEmpty { Text(submissionError).foregroundStyle(.secondary) }
-            }.navigationTitle("Community")
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-                .onAppear { username = initialUsername; code = initialInviteCode }
+            }
+            .navigationTitle(result == nil ? (isJoining ? "Join a community" : "Create a community") : "You're in!")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.disabled(busy) } }
+            .interactiveDismissDisabled(busy)
+            .onAppear { username = initialUsername; code = initialInviteCode; isJoining = startsWithJoin || !initialInviteCode.isEmpty }
+            .onChange(of: isJoining) { _, _ in submissionError = "" }
         }
     }
-    private var cleanUsername: String { String(username.trimmingCharacters(in: .whitespacesAndNewlines).prefix(32)) }
+
+    @ViewBuilder private var accountSection: some View {
+        if !account.isSignedIn {
+            Section("Connect your account") {
+                Text("Sign in with Apple to create or join. Your entries stay here while you sign in.").font(.callout)
+                SignInWithAppleButton(.continue,
+                    onRequest: { request in account.prepareAppleSignIn(request) },
+                    onCompletion: { result in Task { await account.completeAppleSignIn(result) } })
+                    .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+                    .frame(height: 48).disabled(account.busy)
+                if account.busy { ProgressView("Signing in…") }
+                if !account.message.isEmpty { Text(account.message).font(.caption).foregroundStyle(.secondary) }
+            }
+        } else if account.sessionState != .ready {
+            Section("Account connection") {
+                Text(account.sessionStatusText).font(.callout)
+                Text(account.message).font(.caption).foregroundStyle(.secondary)
+                Button("Retry account connection") { Task { await account.restoreSessionIfNeeded() } }
+                    .disabled(account.sessionState == .checking)
+            }
+        }
+    }
+
+    private func successCard(_ community: WalkingCommunity) -> some View {
+        Section {
+            VStack(spacing: 16) {
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 44)).foregroundStyle(.green)
+                Text(isJoining ? "You joined \(community.name)" : "\(community.name) is ready")
+                    .font(.title2.bold()).multilineTextAlignment(.center)
+                Text("Share this invite code with someone you want to walk with.")
+                    .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                VStack(spacing: 6) {
+                    Text("INVITE CODE").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Text(community.invite_code).font(.system(.largeTitle, design: .monospaced, weight: .bold))
+                        .textSelection(.enabled).minimumScaleFactor(0.6).lineLimit(1)
+                }.frame(maxWidth: .infinity).padding(20)
+                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+                Button {
+                    UIPasteboard.general.string = community.invite_code; copied = true
+                } label: {
+                    Label(copied ? "Copied" : "Copy invite code", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }.buttonStyle(.borderedProminent)
+                ShareLink(item: "Join my PausePath community with code \(community.invite_code)\nPausePath: pausepath://community/join?code=\(community.invite_code)") {
+                    Label("Share invitation", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity, minHeight: 44)
+                }.buttonStyle(.bordered)
+                Text("They can open Community, choose Join with a code, and enter this code with their own username.")
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }.frame(maxWidth: .infinity).padding(.vertical, 12)
+        }
+    }
+
+    private var cleanUsername: String { username.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var cleanName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var cleanCode: String { code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+    private var canSubmit: Bool {
+        account.isSignedIn && account.sessionState == .ready && (1...32).contains(cleanUsername.count) &&
+        (isJoining ? (4...12).contains(cleanCode.count) : (2...60).contains(cleanName.count))
+    }
+    @MainActor private func submit() async {
+        guard canSubmit, !busy else { return }
+        busy = true; submissionError = ""
+        defer { busy = false }
+        do {
+            if isJoining { result = try await onJoin(cleanCode, cleanUsername) }
+            else { result = try await onCreate(cleanName, cleanUsername) }
+        } catch { submissionError = communityErrorMessage(error) }
+    }
 }
 
 private struct ChallengeComposer: View {
