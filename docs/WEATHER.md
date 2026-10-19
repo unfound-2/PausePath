@@ -11,3 +11,7 @@ Attribution is shown beside forecasts. The free API is for non-commercial use on
 The prior WeatherKit design remains in PERSONALIZED_GUIDANCE_DESIGN.md as historical design context; this document describes the active implementation.
 
 Validation: the actual Swift adapter decoded a live public Chicago forecast with 168 hours; assertions verified nearby-coordinate cache reuse, normalized probabilities, and hourly UTC spacing.
+
+## Default settings
+
+Weather previews and meaningful walking updates default to on. Explicitly saved off settings remain off, and both controls remain available in Account. Explore loads a forecast for the selected route; live updates still run only while walking in the foreground.

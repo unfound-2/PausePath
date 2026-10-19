@@ -40,6 +40,8 @@ struct ExploreRoutePlannerView: View {
     @State private var showHelp = false
     @State private var sortOrder: RouteSortOrder = .recommended
     @State private var lastBuiltRequestID: UUID?
+    @State private var routeWeather = WeatherGuidanceStore()
+    @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherGuidanceEnabled = true
     @AppStorage(RouteDifficultyPreferences.storageKey)
     private var factorSelection = RouteDifficultyPreferences.defaultStorageValue
 
@@ -196,6 +198,14 @@ struct ExploreRoutePlannerView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .task(id: "\(discovery.selectedRouteOptionID?.uuidString ?? "none")-\(weatherGuidanceEnabled)") {
+            guard weatherGuidanceEnabled,
+                  let option = discovery.routeOptions.first(where: { $0.id == discovery.selectedRouteOptionID }) else {
+                routeWeather.clear()
+                return
+            }
+            await routeWeather.load(for: GeneratedWalk(name: option.title, legs: option.legs, preferences: preferences))
+        }
     }
 
     private var routeFilters: some View {
@@ -273,6 +283,7 @@ struct ExploreRoutePlannerView: View {
             }
             RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: option.distance, durationSeconds: option.duration), compact: true)
             if isSelected {
+            if weatherGuidanceEnabled { WeatherGuidanceCard(store: routeWeather) }
             Button("Navigate this route", systemImage: "figure.walk") {
                 let walk = GeneratedWalk(name: "Walk to \(option.destinationName)", legs: option.legs, preferences: preferences)
                 onClose()

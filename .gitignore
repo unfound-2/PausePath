@@ -16,3 +16,7 @@ backend/osm-client/node_modules/
 backend/osm-client/dist/
 
 backend/supabase/.temp/
+
+# Local verification dependencies
+.test-deps/
+.venv/
