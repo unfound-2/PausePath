@@ -116,6 +116,8 @@ struct CommunityChallengesView: View {
     @State private var challengeSheetTarget: ChallengeTarget?
     @State private var message = ""
     @State private var communityLoadMessage: String?
+    @State private var challengeLoadMessages: [UUID: String] = [:]
+    @State private var communityRevision = UUID()
     @State private var busy = false
     @AppStorage("pausepath.trackedWalks") private var trackedWalkData = Data()
     @AppStorage("pausepath.shareChallengeProgress") private var shareProgress = false
@@ -137,8 +139,15 @@ struct CommunityChallengesView: View {
             Form {
                 Section {
                     VStack(spacing: 14) {
-                        Image(systemName: "person.3.fill").font(.largeTitle).foregroundStyle(.tint)
-                        Text("Walk together").font(.title2.bold())
+                        ZStack {
+                            Circle().fill(PausePathPalette.teal.opacity(0.08)).frame(width: 104, height: 104)
+                            Circle().fill(PausePathPalette.lime).frame(width: 76, height: 76)
+                            Image(systemName: "person.3.fill").font(.system(size: 29, weight: .semibold)).foregroundStyle(PausePathPalette.ink)
+                            Image(systemName: "leaf.fill").font(.caption.bold()).foregroundStyle(PausePathPalette.teal)
+                                .padding(9).background(.background, in: Circle()).offset(x: 38, y: 28)
+                        }.accessibilityHidden(true)
+                        Text("Good paths. Better together.").font(.system(.title2, design: .rounded).bold())
+                            .foregroundStyle(PausePathPalette.teal)
                         Text("Create a community for your friends, or join one with an invite code.")
                             .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
                         Button {
@@ -156,8 +165,12 @@ struct CommunityChallengesView: View {
                         if !account.isSignedIn {
                             Text("Sign in with Apple in the next step.").font(.caption).foregroundStyle(.secondary)
                         }
-                    }.frame(maxWidth: .infinity).padding(.vertical, 12)
-                }
+                        HStack(spacing: 16) {
+                            Label("Your people", systemImage: "person.2")
+                            Label("Your pace", systemImage: "leaf")
+                        }.font(.caption.weight(.medium)).foregroundStyle(PausePathPalette.teal)
+                    }.frame(maxWidth: .infinity).padding(.vertical, 16)
+                }.listRowBackground(PausePathPalette.teal.opacity(0.05))
                 Section {
                     ForEach(weeklyChallenges) { challenge in
                         let progress = weeklyProgress(for: challenge)
@@ -174,8 +187,9 @@ struct CommunityChallengesView: View {
                                 .frame(height: 9)
                                 .accessibilityLabel("\(challengeProgressLabel(challenge, progress: progress)) complete")
                             if complete { Label("Completed • 10 points", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green) }
-                        }.padding(.vertical, 3)
-                    }
+                        }.padding(14)
+                            .background(complete ? PausePathPalette.lime.opacity(0.22) : PausePathPalette.teal.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+                    }.listRowSeparator(.hidden)
                     HStack {
                         Label("\(monthlyPoints) points this month", systemImage: "star.fill")
                             .font(.subheadline.weight(.semibold))
@@ -186,12 +200,12 @@ struct CommunityChallengesView: View {
                     }
                     Text("Choose two achievable suggestions for this week. You can refresh them twice; points are awarded once when recorded walks meet a challenge. Points never depend on pace, harder routes, or heart rate.")
                         .font(.caption).foregroundStyle(.secondary)
-                } header: { Text("Your challenges") }
+                } header: { Label("Small steps this week", systemImage: "sparkles") }
                 Section("Communities") {
                     if let communityLoadMessage {
-                        Label(communityLoadMessage, systemImage: "wifi.exclamationmark")
+                        Label(communityLoadMessage, systemImage: "arrow.clockwise.circle")
                             .font(.callout).foregroundStyle(.secondary)
-                        Button("Try loading again") { Task { await refresh() } }
+                        Button("Refresh communities") { Task { await refresh() } }.disabled(busy)
                     } else if busy {
                         ProgressView("Loading communities…")
                     }
@@ -202,14 +216,21 @@ struct CommunityChallengesView: View {
                         Toggle("Share challenge progress with my communities", isOn: $shareProgress)
                         Text("When enabled, PausePath sends only challenge totals (walk count, distance, minutes, or routes). It never shares route names, location, or Health data. Turning this off removes your totals from community boards.")
                             .font(.caption).foregroundStyle(.secondary)
-                        if communities.isEmpty && communityLoadMessage == nil && !busy { Text("You haven’t joined a community yet.").foregroundStyle(.secondary) }
+                        if communities.isEmpty && communityLoadMessage == nil && !busy {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label("Make room for your walking circle", systemImage: "person.2.circle").font(.headline)
+                                Text("Create a group above, then share its code with a friend. Your first shared path starts here.")
+                                    .font(.subheadline).foregroundStyle(.secondary)
+                            }.padding(.vertical, 8)
+                        }
                         ForEach(communities) { community in
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack(alignment: .firstTextBaseline) {
-                                    Text(community.name).font(.headline)
+                                    Label(community.name, systemImage: "person.2.fill").font(.headline).foregroundStyle(PausePathPalette.teal)
                                     Spacer()
                                     Text("\(community.member_count) members").font(.caption).foregroundStyle(.secondary)
                                 }
+                                CommunityInviteCard(code: community.invite_code)
                                 Text("You appear as \(community.my_display_name)").font(.caption).foregroundStyle(.secondary)
                                 if let members = community.members, !members.isEmpty {
                                     Text("Members").font(.caption.weight(.semibold))
@@ -217,11 +238,6 @@ struct CommunityChallengesView: View {
                                 }
                                 Text("Community members can see these usernames. They see your activity totals only while progress sharing is on; routes, locations, and Health data stay private.")
                                     .font(.caption2).foregroundStyle(.secondary)
-                                Label("Invite code: \(community.invite_code)", systemImage: "number")
-                                    .font(.caption.monospaced()).textSelection(.enabled)
-                                ShareLink(item: "Join my PausePath community with invite code \(community.invite_code)\nOpen PausePath: pausepath://community/join?code=\(community.invite_code)") {
-                                    Label("Share invite code", systemImage: "square.and.arrow.up").font(.caption.weight(.semibold))
-                                }
                                 if let list = challenges[community.id], !list.isEmpty {
                                     ForEach(list) { challenge in
                                         VStack(alignment: .leading, spacing: 5) {
@@ -245,10 +261,15 @@ struct CommunityChallengesView: View {
                                             }
                                         }.padding(.vertical, 4)
                                     }
-                                } else { Text("No active tasks in this community yet.").font(.caption).foregroundStyle(.secondary) }
+                                } else if challengeLoadMessages[community.id] == nil {
+                                    Text("A fresh start. Add your first shared challenge.").font(.caption).foregroundStyle(.secondary)
+                                }
+                                if let notice = challengeLoadMessages[community.id] {
+                                    Label(notice, systemImage: "arrow.clockwise").font(.caption).foregroundStyle(.secondary)
+                                }
                                 Button("Create a community task", systemImage: "plus") { challengeSheetTarget = ChallengeTarget(community.id) }
                                     .font(.subheadline)
-                            }.padding(.vertical, 5)
+                            }.padding(.vertical, 12)
                         }
                     }
                 }
@@ -259,7 +280,7 @@ struct CommunityChallengesView: View {
                 if !message.isEmpty { Section { Text(message).font(.callout); Button("Retry community connection") { Task { await refresh() } }.disabled(busy) } }
             }
             .pausePathSurface()
-        .navigationTitle("Challenges")
+        .navigationTitle("Community")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 4) { Image(systemName: "star.fill"); Text("\(monthlyPoints)") }
@@ -276,7 +297,7 @@ struct CommunityChallengesView: View {
             }
             .onChange(of: account.userID) { _, userID in
                 if userID != nil { Task { await refresh() } }
-                else { communities = []; challenges = [:]; communityLoadMessage = nil; message = "" }
+                else { communityRevision = UUID(); communities = []; challenges = [:]; challengeLoadMessages = [:]; communityLoadMessage = nil; message = "" }
             }
             .onReceive(NotificationCenter.default.publisher(for: .pausePathJoinCommunity)) { notification in
                 pendingInviteCode = notification.userInfo?["code"] as? String ?? ""
@@ -294,7 +315,10 @@ struct CommunityChallengesView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showCommunityComposer, onDismiss: { pendingInviteCode = "" }) {
+            .sheet(isPresented: $showCommunityComposer, onDismiss: {
+                pendingInviteCode = ""
+                Task { await refresh() }
+            }) {
                 CommunityJoinSheet(account: account, onCreate: createCommunity, onJoin: joinCommunity, initialUsername: profile.username ?? "", initialInviteCode: pendingInviteCode, startsWithJoin: communityComposerStartsWithJoin)
             }
             .sheet(item: $challengeSheetTarget) { target in
@@ -394,30 +418,55 @@ struct CommunityChallengesView: View {
     private func unit(_ metric: String) -> String {
         switch metric { case "distance_km": "km"; case "minutes": "minutes"; case "new_routes": "routes"; default: "walks" }
     }
-    private func refresh() async {
-        guard account.isSignedIn else { return }
-        busy = true; defer { busy = false }
-        message = ""
+    @MainActor private func refresh() async {
+        guard account.isSignedIn, !busy else { return }
+        let revision = UUID()
+        communityRevision = revision
+        busy = true
+        defer { busy = false }
         do {
-            if let username = profile.username?.trimmingCharacters(in: .whitespacesAndNewlines), !username.isEmpty {
-                try await PausePathAPI.updateCommunityUsername(username)
-            }
-            communities = try await PausePathAPI.communities()
-            for community in communities {
-                let list = try await PausePathAPI.challenges(in: community.id)
-                challenges[community.id] = list
-            }
-            if shareProgress {
-                try await PausePathAPI.syncChallengeProgress(walks: walks)
-            } else {
-                // Retry an earlier opt-out that may have failed while offline.
-                try await PausePathAPI.clearChallengeProgress()
-            }
-            for community in communities {
-                challenges[community.id] = try await PausePathAPI.challenges(in: community.id)
-            }
+            let loaded = try await PausePathAPI.communities()
+            guard communityRevision == revision, account.isSignedIn else { return }
+            communities = loaded
             communityLoadMessage = nil
-        } catch { communityLoadMessage = communityErrorMessage(error) }
+            message = ""
+        } catch {
+            guard communityRevision == revision else { return }
+            communityLoadMessage = "We couldn’t refresh your groups. Pull down to try again."
+            return
+        }
+        guard !communities.isEmpty else { return }
+        // A secondary request must never erase working communities or their invite codes.
+        if let username = profile.username?.trimmingCharacters(in: .whitespacesAndNewlines), !username.isEmpty {
+            do { try await PausePathAPI.updateCommunityUsername(username) }
+            catch {
+                guard communityRevision == revision else { return }
+                message = "Your groups are loaded. Your updated username hasn’t synced yet."
+            }
+        }
+        guard communityRevision == revision else { return }
+        do {
+            if shareProgress { try await PausePathAPI.syncChallengeProgress(walks: walks) }
+            else { try await PausePathAPI.clearChallengeProgress() }
+            guard communityRevision == revision else { return }
+            if message.contains("progress") { message = "" }
+        } catch {
+            guard communityRevision == revision else { return }
+            message = shareProgress
+                ? "Your groups are ready. Challenge progress will retry on refresh."
+                : "Your groups are ready. Removing shared progress hasn’t finished; refresh to retry."
+        }
+        for community in communities {
+            do {
+                let list = try await PausePathAPI.challenges(in: community.id)
+                guard communityRevision == revision else { return }
+                challenges[community.id] = list
+                challengeLoadMessages[community.id] = nil
+            } catch {
+                guard communityRevision == revision else { return }
+                challengeLoadMessages[community.id] = "Tasks haven’t refreshed yet. Your invite code is still ready to share."
+            }
+        }
     }
     private func saveCommunityUsername(_ username: String) {
         var updated = profile; updated.username = username
@@ -425,20 +474,22 @@ struct CommunityChallengesView: View {
     }
     private func createCommunity(name: String, username: String) async throws -> WalkingCommunity {
         let community = try await PausePathAPI.createCommunity(name: name, username: username)
+        communityRevision = UUID()
+        communityLoadMessage = nil
         saveCommunityUsername(username)
         communities.removeAll { $0.id == community.id }
         communities.insert(community, at: 0)
         message = ""
-        Task { await refresh() }
         return community
     }
     private func joinCommunity(code: String, username: String) async throws -> WalkingCommunity {
         let community = try await PausePathAPI.joinCommunity(code: code, username: username)
+        communityRevision = UUID()
+        communityLoadMessage = nil
         saveCommunityUsername(username)
         communities.removeAll { $0.id == community.id }
         communities.insert(community, at: 0)
         message = ""
-        Task { await refresh() }
         return community
     }
     private func createChallenge(communityID: UUID, name: String, metric: String, target: Double) async throws {
@@ -483,7 +534,6 @@ private struct CommunityJoinSheet: View {
     @State private var busy = false
     @State private var submissionError = ""
     @State private var result: WalkingCommunity?
-    @State private var copied = false
 
     var body: some View {
         NavigationStack {
@@ -568,26 +618,12 @@ private struct CommunityJoinSheet: View {
     private func successCard(_ community: WalkingCommunity) -> some View {
         Section {
             VStack(spacing: 16) {
-                Image(systemName: "checkmark.circle.fill").font(.system(size: 44)).foregroundStyle(.green)
+                Image(systemName: "checkmark.seal.fill").font(.system(size: 44)).foregroundStyle(PausePathPalette.teal)
                 Text(isJoining ? "You joined \(community.name)" : "\(community.name) is ready")
                     .font(.title2.bold()).multilineTextAlignment(.center)
                 Text("Share this invite code with someone you want to walk with.")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                VStack(spacing: 6) {
-                    Text("INVITE CODE").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    Text(community.invite_code).font(.system(.largeTitle, design: .monospaced, weight: .bold))
-                        .textSelection(.enabled).minimumScaleFactor(0.6).lineLimit(1)
-                }.frame(maxWidth: .infinity).padding(20)
-                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
-                Button {
-                    UIPasteboard.general.string = community.invite_code; copied = true
-                } label: {
-                    Label(copied ? "Copied" : "Copy invite code", systemImage: copied ? "checkmark" : "doc.on.doc")
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
-                ShareLink(item: "Join my PausePath community with code \(community.invite_code)\nPausePath: pausepath://community/join?code=\(community.invite_code)") {
-                    Label("Share invitation", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.bordered)
+                CommunityInviteCard(code: community.invite_code)
                 Text("They can open Community, choose Join with a code, and enter this code with their own username.")
                     .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }.frame(maxWidth: .infinity).padding(.vertical, 12)
@@ -805,9 +841,53 @@ struct RouteBreaksView: View {
 }
 
 private func communityErrorMessage(_ error: Error) -> String {
-    if let failure = error as? ServiceFailure, failure.status == 404,
-       failure.message.lowercased() == "not found" {
-        return "Community services are not available yet. Your personal challenges still work. Try connecting again later."
+    if let failure = error as? ServiceFailure {
+        switch failure.status {
+        case 401, 403: return "Reconnect your account to continue. Your entries are still here."
+        case 404:
+            if failure.message.localizedCaseInsensitiveContains("invite") {
+                return "That invite code didn’t match a community. Check the code and try again."
+            }
+            return "We couldn’t complete this request. Your entries are still here; please try again."
+        case 409: return "That name or request is already in use. Check your communities or try another name."
+        case 429: return "A few requests arrived together. Give it a moment, then try again."
+        case 500...599: return "We couldn’t confirm the request. Your entries are still here. Check your communities before trying again."
+        case 400, 422: return "Check your community name, username and invite code, then try again."
+        default: break
+        }
     }
-    return error.localizedDescription
+    if let network = error as? URLError, network.code == .notConnectedToInternet {
+        return "You’re offline. Connect to the internet, then try again."
+    }
+    return "We couldn’t confirm the request. Your entries are still here; please try again."
+}
+
+private struct CommunityInviteCard: View {
+    let code: String
+    @State private var copied = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("YOUR INVITE CODE", systemImage: "ticket.fill")
+                .font(.caption.weight(.bold)).tracking(1).foregroundStyle(PausePathPalette.teal)
+            Text(code).font(.system(.title, design: .monospaced).bold())
+                .foregroundStyle(PausePathPalette.teal).textSelection(.enabled)
+                .lineLimit(1).minimumScaleFactor(0.6)
+                .accessibilityLabel("Invite code, \(code)")
+            Text("Friends can enter this in Join with a code.").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                Button {
+                    UIPasteboard.general.string = code; copied = true
+                } label: {
+                    Label(copied ? "Copied" : "Copy code", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .frame(maxWidth: .infinity, minHeight: 32)
+                }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
+                ShareLink(item: "Join my PausePath community with code \(code)\nPausePath: pausepath://community/join?code=\(code)") {
+                    Label("Share", systemImage: "square.and.arrow.up").frame(minHeight: 32)
+                }.buttonStyle(.bordered).tint(PausePathPalette.teal)
+            }.font(.subheadline.weight(.semibold))
+        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            .background(PausePathPalette.teal.opacity(0.07), in: RoundedRectangle(cornerRadius: 18))
+            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(PausePathPalette.teal.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
+            .onChange(of: code) { copied = false }
+    }
 }
