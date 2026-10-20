@@ -1,4 +1,5 @@
 import CoreLocation
+import CoreMotion
 import MapKit
 import Observation
 import AVFoundation
@@ -14,6 +15,15 @@ import UIKit
     var status = "Start navigation when you are at the starting point."
     var isRecalculating = false
     var voiceEnabled = false
+    private(set) var journeySegments: [[Coordinate]] = []
+    private(set) var journeyStartedAt: Date?
+    private var beginsJourneySegment = true
+    private let pedometer = CMPedometer()
+    private var pedometerRunning = false
+    private var previousSteps = 0
+    private var intervalSteps: Int?
+    private var pedometerToken = UUID()
+    var recordedSteps: Int? { intervalSteps.map { previousSteps + $0 } }
     private let manager = CLLocationManager()
     private let speech = AVSpeechSynthesizer()
     private var lastSpoken = ""
@@ -36,6 +46,8 @@ import UIKit
         stop(); self.plan = plan; returnOrigin = plan.start; progress = WalkProgress(paths: plan.paths)
         accumulatedActiveSeconds = 0; activeIntervalStartedAt = nil
         recentGPSCoordinates = []
+        journeySegments = []; journeyStartedAt = nil; beginsJourneySegment = true
+        previousSteps = 0; intervalSteps = nil
         state = .ready; status = "Go to the start marker, then start navigation."
     }
     func locate() { wantsNavigation = false; wantsPosition = true; requestLocation() }
@@ -92,7 +104,15 @@ import UIKit
               (-90...90).contains(rawCoordinate.latitude), (-180...180).contains(rawCoordinate.longitude),
               fix.horizontalAccuracy.isFinite, fix.horizontalAccuracy >= 0, fix.horizontalAccuracy <= 50,
               fixAge.isFinite, fixAge >= -2, fixAge <= 15 else {
+            beginsJourneySegment = true
             status = "GPS is weak or outdated. Waiting for an accurate location…"; return
+        }
+        if journeyStartedAt == nil { journeyStartedAt = fix.timestamp }
+        startStepCounting(at: fix.timestamp)
+        if beginsJourneySegment {
+            journeySegments.append([rawCoordinate]); beginsJourneySegment = false
+        } else {
+            journeySegments[journeySegments.count - 1].append(rawCoordinate)
         }
         let filteredCoordinate = smooth(rawCoordinate, at: fix.timestamp)
         let accepted = progress.update(position: filteredCoordinate, accuracy: fix.horizontalAccuracy, age: fixAge)
@@ -103,6 +123,7 @@ import UIKit
         UIApplication.shared.isIdleTimerDisabled = true
         if progress.arrived {
             finishActiveInterval(at: fix.timestamp)
+            stopStepCounting()
             state = .arrived; wantsNavigation = false; manager.stopUpdatingLocation()
             UIApplication.shared.isIdleTimerDisabled = false; status = "You’ve arrived. Your walk is complete."
         } else if progress.offRoute {
@@ -112,12 +133,31 @@ import UIKit
     }
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { status = "GPS is unavailable. Progress is paused until a fresh location arrives." }
     func pause() {
+        stopStepCounting()
         token = UUID(); routeTask?.cancel(); isRecalculating = false
         finishActiveInterval(at: .now)
         wantsNavigation = false; wantsPosition = false; manager.stopUpdatingLocation(); speech.stopSpeaking(at: .immediate)
         recentGPSCoordinates = []
+        beginsJourneySegment = true
         UIApplication.shared.isIdleTimerDisabled = false
         if state != .arrived { state = .paused; status = "Walk paused. Resume when ready. Location tracking stops while paused." }
+    }
+    private func startStepCounting(at date: Date) {
+        guard !pedometerRunning, CMPedometer.isStepCountingAvailable() else { return }
+        pedometerRunning = true
+        let token = UUID(); pedometerToken = token
+        pedometer.startUpdates(from: date) { [weak self] data, error in
+            let count = data?.numberOfSteps.intValue
+            Task { @MainActor [weak self] in
+                guard let self, self.pedometerToken == token else { return }
+                if error == nil, let count { self.intervalSteps = count }
+            }
+        }
+    }
+    private func stopStepCounting() {
+        guard pedometerRunning else { return }
+        pedometer.stopUpdates(); pedometerRunning = false; pedometerToken = UUID()
+        if let intervalSteps { previousSteps += intervalSteps; self.intervalSteps = 0 }
     }
     func stop() { pause(); state = .ready }
     var elapsedActiveSeconds: TimeInterval {

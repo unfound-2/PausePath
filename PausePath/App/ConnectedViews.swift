@@ -79,7 +79,7 @@ struct AccountView: View {
                             DailyRecapNotifications.disable()
                         }
                     } else {
-                        Text("Your activity recap is available in My progress when you open PausePath.")
+                        Text("Your activity recap is available in My Path when you open PausePath.")
                         Button("Allow an 8 PM reminder", systemImage: "bell.badge") {
                             Task {
                                 let enabled = await DailyRecapNotifications.enable()
@@ -89,7 +89,7 @@ struct AccountView: View {
                             }
                         }
                     }
-                    Text("If enabled, an 8 PM reminder tells you when your walking summary is ready in My progress. It never includes route, location, or Health details. Manage notification access in iOS Settings at any time.").font(.footnote)
+                    Text("If enabled, an 8 PM reminder tells you when your walking summary is ready in My Path. It never includes route, location, or Health details. Manage notification access in iOS Settings at any time.").font(.footnote)
                 }
             }.pausePathSurface()
         .navigationTitle("Account")

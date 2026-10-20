@@ -16,8 +16,10 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>2</string>
+	<key>NSMotionUsageDescription</key>
+	<string>PausePath counts steps during your active journey to show recorded steps in My Path.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>PausePath can read walking activities, walking speed and recorded heart rate to show your activity review and optional time estimates.</string>
+	<string>PausePath reads workouts and their routes, steps, active calories, heart rate, walking speed, weight, height and body fat when you choose to share them, to show My Path history and trends on your device.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>PausePath uses your location when you explore nearby places, create a walking route, or start live GPS navigation.</string>
 	<key>CFBundleURLTypes</key>

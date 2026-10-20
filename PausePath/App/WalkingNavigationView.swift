@@ -12,6 +12,7 @@ struct WalkingNavigationView: View {
     @State private var showEndConfirmation = false
     @State private var showReturnConfirmation = false
     @State private var walkRecorded = false
+    @State private var milestoneMessage: String?
     @AppStorage("pausepath.trackedWalks") private var trackedWalkData = Data()
     @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherGuidanceEnabled = true
     @AppStorage("pausepath.weather.openMeteo.walkUpdates.enabled") private var weatherWalkUpdatesEnabled = true
@@ -100,6 +101,12 @@ struct WalkingNavigationView: View {
                         onDetour: { takingBreak = true; navigator.pause() }, onReturn: { takingBreak = false },
                         onStopsChanged: { suggestedStops = $0 })
                         .id(plan.id)
+                    if let milestoneMessage {
+                        Label(milestoneMessage, systemImage: "trophy.fill").font(.headline)
+                            .padding().frame(maxWidth: .infinity, alignment: .leading)
+                            .foregroundStyle(PausePathPalette.ink)
+                            .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 18))
+                    }
                     Text(navigator.status).font(.callout).foregroundStyle(.secondary)
                     Toggle("Spoken directions", isOn: Binding(get: { navigator.voiceEnabled }, set: { navigator.setVoice($0) }))
                     DisclosureGroup("All walking directions") {
@@ -200,8 +207,21 @@ struct WalkingNavigationView: View {
         var tracked = (try? JSONDecoder().decode([TrackedWalk].self, from: trackedWalkData)) ?? []
         let distance = completed ? plan.distance : navigator.progress.completedMeters
         let activity = TrackedWalk(routeName: plan.name, distanceMeters: distance,
-            activeSeconds: navigator.elapsedActiveSeconds, completed: completed, routeIdentity: plan.routeIdentity)
+            activeSeconds: navigator.elapsedActiveSeconds, completed: completed, routeIdentity: plan.routeIdentity,
+            steps: navigator.recordedSteps, startedAt: navigator.journeyStartedAt, journeySegments: navigator.journeySegments)
+        let previousBest = PathMilestones(walks: tracked).longest
         tracked.insert(activity, at: 0)
+        let defaults = UserDefaults.standard
+        var earned = defaults.data(forKey: "pausepath.earnedBadges.v1")
+            .flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
+        let newBadges = PathMilestones(walks: tracked).badges.filter { $0.earned && earned[$0.id] == nil }
+        for badge in newBadges { earned[badge.id] = Date() }
+        if let data = try? JSONEncoder().encode(earned) { defaults.set(data, forKey: "pausepath.earnedBadges.v1") }
+        if completed, previousBest > 0, distance > previousBest {
+            milestoneMessage = "A new distance PR! " + String(format: "%.2f km", distance / 1000) + ". See your milestones in My Path."
+        } else if completed, let badge = newBadges.first {
+            milestoneMessage = "Badge earned: " + badge.name + ". Find your collection in Profile."
+        }
         trackedWalkData = (try? JSONEncoder().encode(Array(tracked.prefix(500)))) ?? trackedWalkData
         NotificationCenter.default.post(name: .pausePathWalkRecorded, object: activity)
         Task {

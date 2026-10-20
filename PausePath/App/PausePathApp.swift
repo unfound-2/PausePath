@@ -187,7 +187,7 @@ private struct WelcomeSetupView: View {
     @State private var healthRequested = false
     @State private var profile = PausePathProfile()
     @State private var step = 0
-    @State private var notificationStatus = "Daily recap notifications are optional. Your recap will also be available in My progress."
+    @State private var notificationStatus = "Daily recap notifications are optional. Your recap will also be available in My Path."
     @State private var notificationEnabled = false
 
     var body: some View {
@@ -379,7 +379,7 @@ private struct WelcomeSetupView: View {
                     Text("Precise Location is off. Nearby results and route progress may be less accurate. You can change this in Settings.").font(.caption).foregroundStyle(.secondary)
                 }
             }
-            setupCard(title: "Daily progress recap", subtitle: "If enabled, an 8 PM reminder lets you know your walking summary is ready in My progress. It does not include route, location, or Health details.", icon: "bell") {
+            setupCard(title: "Daily progress recap", subtitle: "If enabled, an 8 PM reminder lets you know your walking summary is ready in My Path. It does not include route, location, or Health details.", icon: "bell") {
                 if notificationEnabled {
                     Label("Daily recap reminder is on", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                     Button("Turn off reminder") { notificationEnabled = false; profile.dailyRecapNotifications = false; saveProfile(); DailyRecapNotifications.disable() }.font(.caption)
@@ -389,7 +389,7 @@ private struct WelcomeSetupView: View {
                             let enabled = await DailyRecapNotifications.enable()
                             notificationEnabled = enabled
                             profile.dailyRecapNotifications = enabled
-                            notificationStatus = enabled ? "Reminder set for 8 PM. You can turn it off at any time." : "Notifications are off. Your recap is still available in My progress when you open PausePath."
+                            notificationStatus = enabled ? "Reminder set for 8 PM. You can turn it off at any time." : "Notifications are off. Your recap is still available in My Path when you open PausePath."
                             saveProfile()
                         }
                     }.buttonStyle(.bordered)

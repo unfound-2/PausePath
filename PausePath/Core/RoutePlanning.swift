@@ -190,11 +190,17 @@ public struct TrackedWalk: Identifiable, Codable, Sendable {
     public var activeSeconds: Double
     public var completed: Bool
     public var routeIdentity: String?
+    public var steps: Int?
+    public var startedAt: Date?
+    public var journeySegments: [[Coordinate]]?
     public init(id: UUID = UUID(), date: Date = .now, routeName: String, distanceMeters: Double,
-                activeSeconds: Double, completed: Bool, routeIdentity: String? = nil) {
+                activeSeconds: Double, completed: Bool, routeIdentity: String? = nil,
+                steps: Int? = nil, startedAt: Date? = nil, journeySegments: [[Coordinate]]? = nil) {
         self.id = id; self.date = date; self.routeName = routeName
         self.distanceMeters = max(0, distanceMeters); self.activeSeconds = max(0, activeSeconds)
         self.completed = completed; self.routeIdentity = routeIdentity
+        self.steps = steps
+        self.startedAt = startedAt; self.journeySegments = journeySegments
     }
 }
 
@@ -251,5 +257,73 @@ public struct ChallengeRewardLedger: Codable {
     public mutating func claim(_ key: String, week currentWeek: String) -> Bool {
         if week != currentWeek { week = currentWeek; awarded = [] }
         return awarded.insert(key).inserted
+    }
+}
+
+
+/// Milestones use completed, locally recorded journeys. Health imports stay separate.
+public struct PathMilestones {
+    public let walks: [TrackedWalk]
+    public init(walks: [TrackedWalk]) {
+        self.walks = walks.filter { $0.completed && $0.distanceMeters.isFinite && $0.activeSeconds.isFinite &&
+            $0.distanceMeters > 0 && $0.activeSeconds > 0 }.sorted { $0.date < $1.date }
+    }
+    public var distance: Double { walks.reduce(0) { $0 + $1.distanceMeters } }
+    public var longest: Double { walks.map(\.distanceMeters).max() ?? 0 }
+    public var longestTime: Double { walks.map(\.activeSeconds).max() ?? 0 }
+    public var activeDays: Int { Set(walks.map { Calendar.current.startOfDay(for: $0.date) }).count }
+    public var recordIDs: Set<UUID> {
+        var best = 0.0
+        var result = Set<UUID>()
+        for walk in walks {
+            if best > 0 && walk.distanceMeters > best { result.insert(walk.id) }
+            best = max(best, walk.distanceMeters)
+        }
+        return result
+    }
+    public var badges: [PathBadge] {
+        var result: [PathBadge] = []
+        for (goal, name) in [(1, "First footprint"), (5, "Finding rhythm"), (10, "Path regular"), (25, "Trail keeper")] {
+            result.append(PathBadge(id: "walks-\(goal)", name: name, symbol: "figure.walk", requirement: "Complete \(goal) PausePath journeys", value: Double(walks.count), target: Double(goal)))
+        }
+        for (goal, name) in [(1, "First kilometre"), (5, "Green explorer"), (10, "Winding way"), (25, "Beyond the bend"), (50, "Horizon seeker"), (100, "Path pioneer")] {
+            result.append(PathBadge(id: "distance-\(goal)", name: name, symbol: "point.topleft.down.to.point.bottomright.curvepath", requirement: "Travel \(goal) km across completed journeys", value: distance / 1000, target: Double(goal)))
+        }
+        for (goal, name) in [(3, "Long way home"), (5, "Going the distance")] {
+            result.append(PathBadge(id: "longest-\(goal)", name: name, symbol: "map.fill", requirement: "Complete a \(goal) km journey", value: longest / 1000, target: Double(goal)))
+        }
+        for (goal, name) in [(30, "Time to wander"), (60, "An hour outdoors")] {
+            result.append(PathBadge(id: "minutes-\(goal)", name: name, symbol: "sun.max.fill", requirement: "Complete a journey with \(goal) active minutes", value: longestTime / 60, target: Double(goal)))
+        }
+        for (goal, name) in [(3, "Showing up"), (7, "Seven green days")] {
+            result.append(PathBadge(id: "days-\(goal)", name: name, symbol: "leaf.fill", requirement: "Complete journeys on \(goal) different days", value: Double(activeDays), target: Double(goal)))
+        }
+        for (goal, name) in [(1, "A new personal best"), (5, "Your own trailblazer")] {
+            result.append(PathBadge(id: "pr-\(goal)", name: name, symbol: "trophy.fill", requirement: "Beat your longest journey \(goal) time(s)", value: Double(recordIDs.count), target: Double(goal)))
+        }
+        return result
+    }
+}
+public struct PathBadge: Identifiable {
+    public let id: String
+    public let name: String
+    public let symbol: String
+    public let requirement: String
+    public let value: Double
+    public let target: Double
+    public var earned: Bool { value >= target }
+    public var fraction: Double { min(1, max(0, value / target)) }
+}
+
+public enum PathTrend {
+    /// Equal, completed calendar-day windows exclude today's partial day.
+    public static func distance(walks: [TrackedWalk], days: Int, now: Date = .now, calendar: Calendar = .current) -> (current: Double, previous: Double) {
+        guard days > 0,
+              let start = calendar.date(byAdding: .day, value: -days, to: calendar.startOfDay(for: now)),
+              let prior = calendar.date(byAdding: .day, value: -days, to: start) else { return (0, 0) }
+        let end = calendar.startOfDay(for: now)
+        let valid = walks.filter { $0.distanceMeters.isFinite && $0.distanceMeters >= 0 }
+        return (valid.filter { $0.date >= start && $0.date < end }.reduce(0) { $0 + $1.distanceMeters },
+                valid.filter { $0.date >= prior && $0.date < start }.reduce(0) { $0 + $1.distanceMeters })
     }
 }
