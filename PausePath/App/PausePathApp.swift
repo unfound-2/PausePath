@@ -27,9 +27,25 @@ final class PausePathNotificationDelegate: NSObject, UIApplicationDelegate, UNUs
     }
 }
 
+/// Adaptive brand colors; ink stays dark for readable text on lime controls.
+enum PausePathPalette {
+    static let background = Color("BrandBackground")
+    static let teal = Color("BrandTeal")
+    static let lime = Color("BrandLime")
+    static let ink = Color("BrandInk")
+}
+
+extension View {
+    func pausePathSurface() -> some View {
+        self.scrollContentBackground(.hidden)
+            .background(PausePathPalette.background)
+            .toolbarBackground(PausePathPalette.background, for: .navigationBar)
+    }
+}
+
 @main struct PausePathApp: App {
     @UIApplicationDelegateAdaptor(PausePathNotificationDelegate.self) private var notificationDelegate
-    var body: some Scene { WindowGroup { LaunchExperienceView() } }
+    var body: some Scene { WindowGroup { LaunchExperienceView().tint(PausePathPalette.teal) } }
 }
 
 private struct LaunchExperienceView: View {
@@ -45,9 +61,9 @@ private struct LaunchExperienceView: View {
     @AppStorage("pausepath.onboarding.personal-goals.v2.complete") private var personalizationComplete = false
     @AppStorage("pausepath.personalProfile") private var profileData = Data()
 
-    private let mint = Color(red: 0.92, green: 0.99, blue: 0.96)
-    private let teal = Color(red: 0.01, green: 0.30, blue: 0.35)
-    private let lime = Color(red: 0.70, green: 0.92, blue: 0.08)
+    private let mint = PausePathPalette.background
+    private let teal = PausePathPalette.ink
+    private let lime = PausePathPalette.lime
 
     var body: some View {
         ZStack {
@@ -72,7 +88,7 @@ private struct LaunchExperienceView: View {
                     VStack(spacing: 20) {
                         marker
                             .frame(width: width, height: width * 1.24)
-                        (Text("Pause").foregroundColor(teal) + Text("Path").foregroundColor(lime))
+                        (Text("Pause").foregroundColor(PausePathPalette.teal) + Text("Path").foregroundColor(lime))
                             .font(.system(size: width * 0.22, weight: .black, design: .rounded))
                             .tracking(-width * 0.009)
                             .lineLimit(1)
@@ -190,7 +206,7 @@ private struct WelcomeSetupView: View {
                 }.padding(20).frame(maxWidth: 560)
                     .frame(maxWidth: .infinity, minHeight: 0, alignment: .top)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
+            .background(PausePathPalette.background)
             .toolbar(.hidden, for: .navigationBar)
         }
         .task {
@@ -229,7 +245,7 @@ private struct WelcomeSetupView: View {
             Text("You choose your goal. Sign-in, location, Health, and notifications are optional; PausePath asks for location when you use a location-based feature.")
                 .font(.callout).foregroundStyle(.secondary)
             Button("Get started") { advance(to: 1) }
-                .buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
+                .buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink).frame(maxWidth: .infinity)
         }
     }
 
@@ -240,17 +256,17 @@ private struct WelcomeSetupView: View {
                     Circle().fill(.white.opacity(0.62)).frame(width: 68, height: 68)
                     Image(systemName: "figure.walk")
                         .font(.system(size: 31, weight: .medium))
-                        .foregroundStyle(Color(red: 0.05, green: 0.39, blue: 0.34))
+                        .foregroundStyle(PausePathPalette.teal)
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Your pace. Your plan.").font(.headline)
                     Text("Small steps, chosen by you.").font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "sparkles").font(.title3).foregroundStyle(Color(red: 0.27, green: 0.54, blue: 0.40))
+                Image(systemName: "sparkles").font(.title3).foregroundStyle(PausePathPalette.teal)
             }
             .padding(14)
-            .background(LinearGradient(colors: [Color(red: 0.90, green: 0.97, blue: 0.92), Color(red: 0.96, green: 0.98, blue: 0.93)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 22))
+            .background(LinearGradient(colors: [PausePathPalette.teal.opacity(0.12), PausePathPalette.lime.opacity(0.16)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 22))
             VStack(alignment: .leading, spacing: 6) {
                 Text("What brings you to PausePath?").font(.largeTitle.bold())
                 Text("Choose what matters to you. We’ll use it to shape route suggestions and your progress recap. You can change it any time. Your profile stays on this device, and Health data never chooses it for you.")
@@ -281,7 +297,7 @@ private struct WelcomeSetupView: View {
                     advance(to: 2)
                 } label: {
                     Text("Set a weekly goal").fontWeight(.semibold).frame(maxWidth: .infinity).padding(.vertical, 8)
-                }.buttonStyle(.borderedProminent)
+                }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
             }
         }
     }
@@ -294,7 +310,7 @@ private struct WelcomeSetupView: View {
                 .padding(14).background(.background, in: RoundedRectangle(cornerRadius: 16)).onChange(of: profile.weeklyWalkTarget) { saveProfile() }
             HStack {
                 Button("Back") { advance(to: 1) }.buttonStyle(.bordered)
-                Button("Continue") { saveProfile(); advance(to: 3) }.buttonStyle(.borderedProminent)
+                Button("Continue") { saveProfile(); advance(to: 3) }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
             }.frame(maxWidth: .infinity)
         }
     }
@@ -310,7 +326,7 @@ private struct WelcomeSetupView: View {
                 .accessibilityLabel("PausePath username")
             HStack {
                 Button("Back") { advance(to: 2) }.buttonStyle(.bordered)
-                Button("Continue") { advance(to: 4) }.buttonStyle(.borderedProminent)
+                Button("Continue") { advance(to: 4) }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
             }.frame(maxWidth: .infinity)
         }
     }
@@ -382,7 +398,7 @@ private struct WelcomeSetupView: View {
             }
             Button(action: onContinue) {
                 Text("Continue to Explore").fontWeight(.semibold).frame(maxWidth: .infinity).padding(.vertical, 6)
-            }.buttonStyle(.borderedProminent)
+            }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
             Button("Back to username") { advance(to: 3) }
                 .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity)
             Text("You can connect or change access later in Profile. If Health has no shared data, PausePath still uses walks recorded in the app.").font(.caption).foregroundStyle(.secondary)

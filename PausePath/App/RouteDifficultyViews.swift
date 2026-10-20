@@ -140,7 +140,8 @@ private struct RouteDifficultyDetailView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("Why this rating?")
+            .pausePathSurface()
+        .navigationTitle("Why this rating?")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }

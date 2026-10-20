@@ -155,7 +155,7 @@ struct ExploreRoutePlannerView: View {
                                 .font(.callout).foregroundStyle(.secondary)
                             Button("Find routes", systemImage: "point.topleft.down.to.point.bottomright.curvepath") {
                                 Task { await buildRoutes() }
-                            }.buttonStyle(.borderedProminent)
+                            }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
                                 .disabled(originCoordinate == nil)
                         }
                     } else {
@@ -187,7 +187,8 @@ struct ExploreRoutePlannerView: View {
                             Text("Difficulty is a planning estimate based on route details that are available, such as distance and estimated time. It is not a judgment of your fitness.")
                             Text("Required stops appear first when mapped options include them. Place and amenity data can be incomplete, and opening or accessibility details may be out of date.")
                         }
-                    }.navigationTitle("About route planning")
+                    }.pausePathSurface()
+        .navigationTitle("About route planning")
                         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showHelp = false } } }
                 }.presentationDetents([.medium, .large])
             }
@@ -291,7 +292,7 @@ struct ExploreRoutePlannerView: View {
                     try? await Task.sleep(for: .milliseconds(250))
                     onNavigate(walk)
                 }
-            }.buttonStyle(.borderedProminent).controlSize(.large)
+            }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink).controlSize(.large)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }

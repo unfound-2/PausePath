@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 import MapKit
 import UserNotifications
 
@@ -54,7 +55,9 @@ struct ContentView: View {
             CommunityChallengesView(preferences: preferences).tabItem { Label("Community", systemImage: "person.3.fill") }.tag(1)
             ReviewView(preferences: $preferences, health: health).tabItem { Label("My progress", systemImage: "chart.bar.fill") }.tag(2)
             ProfileSettingsView(preferences: $preferences, health: health).tabItem { Label("Profile", systemImage: "person.crop.circle") }.tag(3)
-        }.tint(Color(red: 0.12, green: 0.40, blue: 0.32))
+        }.tint(PausePathPalette.teal)
+        .toolbarBackground(PausePathPalette.background, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
         .onAppear {
             if !pendingCommunityInvite.isEmpty { selectedTab = 1 }
             if var saved = try? JSONDecoder().decode(RoutePreferences.self, from: preferencesData) {
@@ -76,32 +79,183 @@ struct ProfileSettingsView: View {
     @Binding var preferences: RoutePreferences
     let health: HealthActivityStore
     @AppStorage("pausepath.personalProfile") private var profileData = Data()
+    @AppStorage("pausepath.trackedWalks") private var trackedData = Data()
+    @AppStorage("pausepath.profilePhoto") private var photoData = Data()
+    @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherEnabled = true
+    @AppStorage("pausepath.weather.openMeteo.walkUpdates.enabled") private var weatherUpdates = true
+    @State private var photo: PhotosPickerItem?
+    @State private var photoError: String?
+    @State private var account = PausePathAccount.shared
+    @Environment(\.openURL) private var openURL
     private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
+    private var name: String { profile.username.flatMap { $0.isEmpty ? nil : $0 } ?? "Walker" }
+    private var weeklyWalks: [TrackedWalk] {
+        guard let interval = Calendar.current.dateInterval(of: .weekOfYear, for: Date()) else { return [] }
+        return ((try? JSONDecoder().decode([TrackedWalk].self, from: trackedData)) ?? []).filter { interval.contains($0.date) }
+    }
+    private var minutes: Int { Int(weeklyWalks.reduce(0) { $0 + $1.activeSeconds } / 60) }
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    Text("Welcome, \(profile.username ?? "Walker")").font(.title2.bold())
-                    Text("Your profile and walking choices are yours to update.").foregroundStyle(.secondary)
-                }
-                Section("Profile") {
-                    NavigationLink("Change Username") { ChangeUsernameView() }
-                    if let username = profile.username, !username.isEmpty {
-                        LabeledContent("Current username", value: username)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 26) {
+                    HStack(alignment: .center, spacing: 18) {
+                        PhotosPicker(selection: $photo, matching: .images) {
+                            ZStack(alignment: .bottomTrailing) {
+                                Group {
+                                    if let image = UIImage(data: photoData) {
+                                        Image(uiImage: image).resizable().scaledToFill()
+                                    } else {
+                                        Text(String(name.prefix(1)).uppercased()).font(.system(size: 34, weight: .semibold, design: .rounded))
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                            .background(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
+                                    }
+                                }.frame(width: 76, height: 76).clipShape(Circle())
+                                Image(systemName: "camera.fill").font(.caption).padding(7)
+                                    .background(PausePathPalette.ink, in: Circle()).foregroundStyle(.white)
+                            }
+                        }.accessibilityLabel("Choose profile photo")
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(name).font(.title.bold()).foregroundStyle(PausePathPalette.teal)
+                            Text("Your pace. Your path.").font(.subheadline).foregroundStyle(.secondary)
+                            NavigationLink("Edit profile") { ChangeUsernameView() }.font(.subheadline.weight(.semibold))
+                        }
+                        Spacer(minLength: 0)
                     }
+                    if !photoData.isEmpty {
+                        Button("Remove photo", role: .destructive) { photoData = Data(); photo = nil }.font(.caption)
+                    }
+                    if let photoError { Text(photoError).font(.caption).foregroundStyle(.secondary) }
+
+                    VStack(alignment: .leading, spacing: 20) {
+                        HStack {
+                            Label("This week", systemImage: "sun.horizon.fill").font(.headline)
+                            Spacer()
+                            NavigationLink { GoalPreferencesEditor(preferences: $preferences) } label: {
+                                Text("Adjust goal").font(.caption.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
+                                    .background(PausePathPalette.lime, in: Capsule()).foregroundStyle(PausePathPalette.ink)
+                            }
+                        }
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 24) { walkMetric; minuteMetric }
+                            VStack(alignment: .leading, spacing: 20) { walkMetric; minuteMetric }
+                        }
+                        Text(weeklyWalks.isEmpty ? "A little fresh air is a good place to start. Your tracked walks will appear here." : "Time outside, at your own pace. Keep your goals flexible.")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                        Text("PausePath-tracked walks · This device").font(.caption2).foregroundStyle(.secondary)
+                    }.padding(22).background(PausePathPalette.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 26))
+
+                    section("Made for you") {
+                        NavigationLink { PlannerView(preferences: $preferences, health: health) } label: {
+                            row("Walking preferences", detail: "\(preferences.terrain.rawValue) · Rest every \(Int(preferences.maximumRestGapMeters)) m", icon: "slider.horizontal.3")
+                        }
+                        Divider().padding(.leading, 60)
+                        NavigationLink { GoalPreferencesEditor(preferences: $preferences) } label: {
+                            row("Your goals", detail: profile.goal.rawValue, icon: "scope")
+                        }
+                    }
+                    section("Connected services") {
+                        NavigationLink { healthSettings } label: {
+                            row("Apple Health", detail: health.activities.isEmpty ? "Optional · Review access" : "\(health.activities.count) activities available", icon: "heart")
+                        }
+                        Divider().padding(.leading, 60)
+                        NavigationLink { weatherSettings } label: {
+                            row("Weather", detail: weatherEnabled ? "Forecasts on" : "Forecasts off", icon: "cloud.sun")
+                        }
+                        Divider().padding(.leading, 60)
+                        NavigationLink { locationSettings } label: {
+                            row("Location", detail: "Manage access in iOS Settings", icon: "location")
+                        }
+                    }
+                    section("Account & privacy") {
+                        NavigationLink { AccountView() } label: {
+                            row("Account settings", detail: account.isSignedIn ? account.sessionStatusText : "Sign in to join your community", icon: "person.crop.circle")
+                        }
+                        Divider().padding(.leading, 60)
+                        NavigationLink { privacySettings } label: {
+                            row("Privacy & credits", detail: "Your data, your choices", icon: "hand.raised")
+                        }
+                    }
+                    Text("Built around you, one walk at a time.")
+                        .font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.bottom, 16)
+                }.padding(20).frame(maxWidth: 620).frame(maxWidth: .infinity)
+            }.pausePathSurface().navigationTitle("Profile")
+                .navigationBarTitleDisplayMode(.inline)
+                .task(id: photo) {
+                    guard let photo else { return }
+                    do {
+                        guard let data = try await photo.loadTransferable(type: Data.self), let image = UIImage(data: data) else { throw CocoaError(.fileReadCorruptFile) }
+                        try Task.checkCancellation()
+                        let size = CGSize(width: 256, height: 256)
+                        let renderer = UIGraphicsImageRenderer(size: size)
+                        let scaled = renderer.image { _ in
+                            let factor = max(size.width / image.size.width, size.height / image.size.height)
+                            let target = CGSize(width: image.size.width * factor, height: image.size.height * factor)
+                            image.draw(in: CGRect(x: (256-target.width)/2, y: (256-target.height)/2, width: target.width, height: target.height))
+                        }
+                        photoData = scaled.jpegData(compressionQuality: 0.8) ?? Data(); photoError = nil
+                    } catch { if !Task.isCancelled { photoError = "Couldn’t load that photo. Try another image." } }
                 }
-                Section("Personalize PausePath") {
-                    NavigationLink("Update Walking Preferences") { PlannerView(preferences: $preferences, health: health) }
-                    NavigationLink("Update Goals") { GoalPreferencesEditor(preferences: $preferences) }
-                }
-                Section("Account and privacy") {
-                    NavigationLink("Account settings") { AccountView() }
-                    Text("Your username is shown to members of communities you join. You can use a nickname instead of your real name.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }.navigationTitle("Profile")
         }
+    }
+
+    private var walkMetric: some View { metric(value: weeklyWalks.count, target: profile.weeklyWalkTarget, label: "walks") }
+    private var minuteMetric: some View { metric(value: minutes, target: profile.weeklyMinutesTarget, label: "minutes") }
+    private func metric(value: Int, target: Int, label: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("\(value)").font(.system(.largeTitle, design: .rounded).weight(.semibold))
+                .foregroundStyle(PausePathPalette.teal)
+            Text("of \(target) \(label)").font(.subheadline).foregroundStyle(.secondary)
+            ProgressView(value: Double(min(value, target)), total: Double(max(1, target))).tint(PausePathPalette.teal)
+                .accessibilityLabel("\(label) this week").accessibilityValue("\(value) of \(target)")
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.headline).foregroundStyle(PausePathPalette.teal).padding(.leading, 4)
+            VStack(spacing: 0, content: content).background(.background, in: RoundedRectangle(cornerRadius: 22))
+                .overlay(RoundedRectangle(cornerRadius: 22).stroke(PausePathPalette.teal.opacity(0.10), lineWidth: 1))
+        }.buttonStyle(.plain)
+    }
+    private func row(_ title: String, detail: String, icon: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon).font(.title3).foregroundStyle(PausePathPalette.teal)
+                .frame(width: 40, height: 40).background(PausePathPalette.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 13))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.body.weight(.medium)).foregroundStyle(.primary)
+                Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+        }.padding(16).contentShape(Rectangle())
+    }
+    private var healthSettings: some View {
+        Form {
+            Section { Text(health.status); Button(health.isLoading ? "Reading…" : "Connect / refresh Health") { Task { await health.connect() } }.disabled(health.isLoading) }
+            Section { Text("Health activity stays on this device and is shown separately from PausePath-tracked walks to avoid double counting."); Button("Clear session data", role: .destructive) { health.clear() } }
+        }.pausePathSurface().navigationTitle("Apple Health")
+    }
+    private var weatherSettings: some View {
+        Form {
+            Section { Toggle("Route forecasts", isOn: $weatherEnabled); Toggle("Updates while walking", isOn: $weatherUpdates).disabled(!weatherEnabled) }
+            Section { Text("Forecasts send approximate route locations to Open-Meteo. Walking updates check about every 15 minutes while navigation is active. Forecasts are cached in memory; Open-Meteo may retain request logs for 90 days."); Link("Provider privacy", destination: URL(string: "https://open-meteo.com/en/terms")!) }
+        }.pausePathSurface().navigationTitle("Weather")
+    }
+    private var locationSettings: some View {
+        Form {
+            Section { Text("Location helps find nearby stops and guide your walk. Live tracking runs during an active walk while PausePath is open."); Button("Open iOS Settings") { openURL(URL(string: UIApplication.openSettingsURLString)!) } }
+        }.pausePathSurface().navigationTitle("Location")
+    }
+    private var privacySettings: some View {
+        Form {
+            Section("Your profile") { Text("Your photo stays on this device. Your username is visible to communities you join; a nickname is welcome.") }
+            Section("Your activity") { Text("Health data and tracked walks stay on this device. Community progress is shared only when you submit it. Route planning and nearby searches send the relevant map area or planned route to our services.") }
+            Section("Map credits") {
+                Text("Basemap and navigation: Apple Maps. Facilities: OpenStreetMap, Mapbox and the PausePath community.")
+                Link("OpenStreetMap contributors · ODbL", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
+                Link("Mapbox", destination: URL(string: "https://www.mapbox.com/about/maps/")!)
+            }
+        }.pausePathSurface().navigationTitle("Privacy & credits")
     }
 }
 
@@ -127,6 +281,7 @@ private struct ChangeUsernameView: View {
                     .disabled(cleanUsername.isEmpty || saving)
             }
         }
+        .pausePathSurface()
         .navigationTitle("Change Username")
         .onAppear { username = profile.username ?? "" }
     }
@@ -168,7 +323,8 @@ private struct GoalPreferencesEditor: View {
                 Stepper("Weekly minutes: \(profile.weeklyMinutesTarget)", value: Binding(get: { profile.weeklyMinutesTarget }, set: { value in var updated = profile; updated.weeklyMinutesTarget = value; profileData = (try? JSONEncoder().encode(updated)) ?? profileData }), in: 10...600, step: 10)
             }
             Section { Text("PausePath does not assess medical recovery readiness or safe exertion. Follow your healthcare professional’s advice.").font(.footnote).foregroundStyle(.secondary) }
-        }.navigationTitle("Update Goals")
+        }.pausePathSurface()
+        .navigationTitle("Update Goals")
     }
 }
 
@@ -208,7 +364,8 @@ struct PlannerView: View {
                 }
                 Section { Text("PausePath does not assess medical recovery readiness or safe exertion limits. Medical recovery decisions remain with your healthcare provider.").font(.footnote).foregroundStyle(.secondary) }
             }
-            .navigationTitle("Walking preferences")
+            .pausePathSurface()
+        .navigationTitle("Walking preferences")
             .onChange(of: health.walkingSpeed) {
                 if useHealthSpeed, let speed = health.walkingSpeed { preferences.speedMetersPerSecond = speed }
                 if health.walkingSpeed == nil { useHealthSpeed = false; preferences.speedMetersPerSecond = 1 }
@@ -291,7 +448,8 @@ struct ReviewView: View {
                         }
                     }
                 }
-            }.navigationTitle("My progress")
+            }.pausePathSurface()
+        .navigationTitle("My progress")
         }
     }
 }

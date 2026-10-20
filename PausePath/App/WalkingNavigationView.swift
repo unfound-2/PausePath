@@ -33,7 +33,7 @@ struct WalkingNavigationView: View {
                             }.annotationTitles(.hidden)
                         }
                         ForEach(Array(plan.legs.enumerated()), id: \.offset) { index, leg in
-                            MapPolyline(leg.polyline).stroke(index == navigator.progress.legIndex ? .teal : .blue.opacity(0.5), lineWidth: index == navigator.progress.legIndex ? 7 : 4)
+                            MapPolyline(leg.polyline).stroke(index == navigator.progress.legIndex ? PausePathPalette.teal : .blue.opacity(0.5), lineWidth: index == navigator.progress.legIndex ? 7 : 4)
                         }
                         let endsNearStart = plan.paths.last?.last.map { WalkingGeometry.distance(plan.start, $0) <= 40 } ?? false
                         if endsNearStart, let turnaround = plan.paths.first?.last {
@@ -83,7 +83,7 @@ struct WalkingNavigationView: View {
                         Text("Location updates run only while a walk is active and PausePath is open. Tracking pauses when you pause the walk or leave the app, and ends when you finish.").font(.caption).foregroundStyle(.secondary)
                         Button("Start navigation", systemImage: "figure.walk") {
                             navigator.start(); camera = .userLocation(followsHeading: true, fallback: .automatic)
-                        }.buttonStyle(.borderedProminent).disabled(!acknowledged)
+                        }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink).disabled(!acknowledged)
                     } else {
                         navigationStatus
                         if weatherGuidanceEnabled {
@@ -117,7 +117,8 @@ struct WalkingNavigationView: View {
                         }
                     }
                 }.padding()
-            }.navigationTitle("Your walking route").navigationBarTitleDisplayMode(.inline)
+            }.pausePathSurface()
+        .navigationTitle("Your walking route").navigationBarTitleDisplayMode(.inline)
                 .toolbar { Button(navigator.state == .ready || navigator.state == .arrived ? "Close" : "End walk") {
                     if navigator.state == .ready || navigator.state == .arrived { navigator.stop(); dismiss() }
                     else { showEndConfirmation = true }
@@ -181,7 +182,7 @@ struct WalkingNavigationView: View {
             if navigator.state != .arrived {
                 HStack {
                     Button(navigator.state == .paused ? "Resume" : "Pause") { if navigator.state == .paused { navigator.start() } else { navigator.pause() } }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
                     Button("Return to start") { showReturnConfirmation = true }.disabled(navigator.isRecalculating || navigator.state != .walking)
                 }
                 if navigator.progress.offRoute {

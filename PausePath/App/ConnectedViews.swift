@@ -91,7 +91,8 @@ struct AccountView: View {
                     }
                     Text("If enabled, an 8 PM reminder tells you when your walking summary is ready in My progress. It never includes route, location, or Health details. Manage notification access in iOS Settings at any time.").font(.footnote)
                 }
-            }.navigationTitle("Account")
+            }.pausePathSurface()
+        .navigationTitle("Account")
         }
     }
 }
@@ -145,7 +146,7 @@ struct CommunityChallengesView: View {
                         } label: {
                             Label("Create a community", systemImage: "plus.circle.fill")
                                 .frame(maxWidth: .infinity, minHeight: 44)
-                        }.buttonStyle(.borderedProminent)
+                        }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
                         Button {
                             communityComposerStartsWithJoin = true; showCommunityComposer = true
                         } label: {
@@ -257,7 +258,8 @@ struct CommunityChallengesView: View {
                 }
                 if !message.isEmpty { Section { Text(message).font(.callout); Button("Retry community connection") { Task { await refresh() } }.disabled(busy) } }
             }
-            .navigationTitle("Challenges")
+            .pausePathSurface()
+        .navigationTitle("Challenges")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 4) { Image(systemName: "star.fill"); Text("\(monthlyPoints)") }
@@ -523,7 +525,7 @@ private struct CommunityJoinSheet: View {
                                 Text(busy ? (isJoining ? "Joining…" : "Creating…") : (isJoining ? "Join community" : "Create community"))
                                     .font(.headline)
                             }.frame(maxWidth: .infinity, minHeight: 44)
-                        }.buttonStyle(.borderedProminent).disabled(!canSubmit || busy)
+                        }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink).disabled(!canSubmit || busy)
                         if !submissionError.isEmpty {
                             Label(submissionError, systemImage: "exclamationmark.circle")
                                 .font(.callout).foregroundStyle(.secondary)
@@ -531,7 +533,8 @@ private struct CommunityJoinSheet: View {
                     } footer: { Text("Progress sharing stays optional. Your routes and locations remain private.") }
                 }
             }
-            .navigationTitle(result == nil ? (isJoining ? "Join a community" : "Create a community") : "You're in!")
+            .pausePathSurface()
+        .navigationTitle(result == nil ? (isJoining ? "Join a community" : "Create a community") : "You're in!")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.disabled(busy) } }
             .interactiveDismissDisabled(busy)
@@ -581,7 +584,7 @@ private struct CommunityJoinSheet: View {
                 } label: {
                     Label(copied ? "Copied" : "Copy invite code", systemImage: copied ? "checkmark" : "doc.on.doc")
                         .frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.borderedProminent)
+                }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
                 ShareLink(item: "Join my PausePath community with code \(community.invite_code)\nPausePath: pausepath://community/join?code=\(community.invite_code)") {
                     Label("Share invitation", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity, minHeight: 44)
                 }.buttonStyle(.bordered)
@@ -631,7 +634,8 @@ private struct ChallengeComposer: View {
                 Text("Progress sharing is optional. This task appears to members of the community.")
                     .font(.footnote).foregroundStyle(.secondary)
                 if !submissionError.isEmpty { Text(submissionError).foregroundStyle(.secondary) }
-            }.navigationTitle("Community task")
+            }.pausePathSurface()
+        .navigationTitle("Community task")
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                     ToolbarItem(placement: .confirmationAction) {
@@ -686,7 +690,8 @@ struct StopReportView: View {
                     }.disabled(busy || submitted)
                 }
                 if !message.isEmpty { Text(message) }
-            }.navigationTitle("Community report")
+            }.pausePathSurface()
+        .navigationTitle("Community report")
                 .toolbar { Button("Done") { dismiss() } }
         }
     }

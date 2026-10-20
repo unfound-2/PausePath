@@ -104,7 +104,7 @@ struct DiscoverView: View {
                     Annotation("Selected route start", coordinate: start, anchor: .bottom) {
                         Image(systemName: "location.fill")
                             .font(.headline).foregroundStyle(.white).frame(width: 42, height: 42)
-                            .background(Color(red: 0.02, green: 0.42, blue: 0.34), in: Circle())
+                            .background(PausePathPalette.ink, in: Circle())
                             .overlay(Circle().stroke(.white, lineWidth: 3)).shadow(radius: 4)
                             .accessibilityLabel("Selected route starting point")
                     }.annotationTitles(.hidden)
@@ -143,7 +143,7 @@ struct DiscoverView: View {
                 }
                 if discovery.route != nil {
                     ForEach(Array(discovery.itinerary.enumerated()), id: \.offset) { index, leg in
-                        MapPolyline(leg.polyline).stroke(index == 0 ? .teal : .blue, lineWidth: 6)
+                        MapPolyline(leg.polyline).stroke(index == 0 ? PausePathPalette.teal : .blue, lineWidth: 6)
                     }
                 }
             }
@@ -637,7 +637,7 @@ struct DiscoverView: View {
                 .frame(maxWidth: .infinity, minHeight: 54)
                 .padding(.horizontal, 18)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
             .disabled(((routeDestination == nil && selectedPlace == nil) || routeStartCoordinate == nil) || discovery.isLoading)
             .accessibilityHint("Expand route choices from the selected starting point")
             .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded { value in
@@ -680,7 +680,7 @@ struct DiscoverView: View {
                     Spacer()
                     Button("Navigate", systemImage: "figure.walk") {
                         navigationWalk = GeneratedWalk(name: "Walk to \(place.item.name ?? "destination")", legs: legs, preferences: preferences)
-                    }.buttonStyle(.borderedProminent)
+                    }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
                 }
                 RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: distance, durationSeconds: duration))
                 Text("Start: your current location • End: \(place.item.name ?? "selected destination")")
@@ -741,7 +741,7 @@ struct DiscoverView: View {
                     Button { buildRoute(to: place) } label: {
                     Label(discovery.isLoading ? "Building route…" : "Build route from my location", systemImage: "figure.walk")
                         .frame(maxWidth: .infinity).padding(.vertical, 5)
-                    }.buttonStyle(.borderedProminent).disabled(discovery.isLoading)
+                    }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink).disabled(discovery.isLoading)
                 }
                 if discovery.status.hasPrefix("Walking directions unavailable") || discovery.status.hasPrefix("No walking route") { Text(discovery.status).font(.caption).foregroundStyle(.secondary) }
             }
@@ -769,7 +769,8 @@ struct DiscoverView: View {
                         }.padding(.vertical, 4)
                     }
                 }
-            }.navigationTitle("Nearby pauses").navigationBarTitleDisplayMode(.inline)
+            }.pausePathSurface()
+        .navigationTitle("Nearby pauses").navigationBarTitleDisplayMode(.inline)
                 .toolbar { Button("Done") { showResults = false } }
         }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
     }
