@@ -485,6 +485,10 @@ struct MyPathView: View {
                 PathMetric(title: "Active time", value: "\(Int(recent.reduce(0) { $0 + $1.seconds } / 60)) min", icon: "clock")
                 PathMetric(title: "Sessions", value: "\(recent.count)", icon: "figure.walk")
                 PathMetric(title: "Active days", value: "\(Set(recent.map { Calendar.current.startOfDay(for: $0.date) }).count)", icon: "calendar")
+                if source == "PausePath" {
+                    PathMetric(title: "Recorded steps", value: optionalTotal(recent.compactMap(\.steps)), icon: "shoeprints.fill")
+                    PathMetric(title: "Completed journeys", value: "\(recent.filter { $0.tracked?.completed == true }.count)", icon: "flag.checkered")
+                }
             }
             Text(recent.isEmpty ? "Your next chapter starts with a journey. Track one in Explore or connect Health below." :
                     "\(recent.count) sessions, at your own pace. Tap a journey to see what happened.")
@@ -690,6 +694,16 @@ private struct PathJourneyDetail: View {
     private var steps: Double? { activity.steps ?? intervalSteps }
     private var calories: Double? { activity.calories ?? intervalCalories }
     private var heartRate: Double? { activity.heartRate ?? intervalHeartRate }
+    private var fullSummary: String {
+        var text = activity.summary
+        if let steps { text += String(format: " Recorded steps: %.0f.", steps) }
+        if let calories { text += String(format: " Active energy: %.0f kcal.", calories) }
+        if let heartRate { text += String(format: " Average heart rate: %.0f bpm.", heartRate) }
+        if intervalSteps != nil || intervalCalories != nil || intervalHeartRate != nil {
+            text += " Health readings cover the journey interval, including pauses."
+        }
+        return text
+    }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
@@ -705,8 +719,8 @@ private struct PathJourneyDetail: View {
                 }
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Your session, summarized").font(.headline)
-                    Text(activity.summary)
-                    ShareLink(item: activity.summary) { Label("Share summary", systemImage: "square.and.arrow.up") }
+                    Text(fullSummary)
+                    ShareLink(item: fullSummary) { Label("Share summary", systemImage: "square.and.arrow.up") }
                 }.pathCard()
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 24) {
                     PathMetric(title: "Distance", value: String(format: "%.2f km", activity.meters / 1000), icon: "map")
@@ -726,7 +740,7 @@ private struct PathJourneyDetail: View {
                     }.pathCard()
                 }
                 Text(activity.isHealth ? "Source: Apple Health. Metrics are shown only when recorded with this workout." :
-                    "Source: PausePath GPS and motion tracking. If connected, Health fills available readings during the journey’s start/end interval, including pauses. Values are never estimated from distance.")
+                    "Source: PausePath GPS and motion tracking. Distance counts progress along the navigation route, including earlier sections before recalculation. If connected, Health fills available readings during the journey’s start/end interval, including pauses. Values are never estimated from distance.")
                     .font(.caption).foregroundStyle(.secondary)
                 if let metricError { Text(metricError).font(.caption).foregroundStyle(.secondary) }
                 if !health.hasConnected {

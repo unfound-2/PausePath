@@ -205,7 +205,7 @@ struct WalkingNavigationView: View {
         guard !walkRecorded else { return }
         walkRecorded = true
         var tracked = (try? JSONDecoder().decode([TrackedWalk].self, from: trackedWalkData)) ?? []
-        let distance = completed ? plan.distance : navigator.progress.completedMeters
+        let distance = navigator.recordedDistanceMeters
         let activity = TrackedWalk(routeName: plan.name, distanceMeters: distance,
             activeSeconds: navigator.elapsedActiveSeconds, completed: completed, routeIdentity: plan.routeIdentity,
             steps: navigator.recordedSteps, startedAt: navigator.journeyStartedAt, journeySegments: navigator.journeySegments)

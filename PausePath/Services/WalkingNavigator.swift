@@ -17,6 +17,7 @@ import UIKit
     var voiceEnabled = false
     private(set) var journeySegments: [[Coordinate]] = []
     private(set) var journeyStartedAt: Date?
+    private(set) var recordedDistanceMeters = 0.0
     private var beginsJourneySegment = true
     private let pedometer = CMPedometer()
     private var pedometerRunning = false
@@ -47,7 +48,7 @@ import UIKit
         accumulatedActiveSeconds = 0; activeIntervalStartedAt = nil
         recentGPSCoordinates = []
         journeySegments = []; journeyStartedAt = nil; beginsJourneySegment = true
-        previousSteps = 0; intervalSteps = nil
+        previousSteps = 0; intervalSteps = nil; recordedDistanceMeters = 0
         state = .ready; status = "Go to the start marker, then start navigation."
     }
     func locate() { wantsNavigation = false; wantsPosition = true; requestLocation() }
@@ -115,8 +116,10 @@ import UIKit
             journeySegments[journeySegments.count - 1].append(rawCoordinate)
         }
         let filteredCoordinate = smooth(rawCoordinate, at: fix.timestamp)
+        let previousProgress = progress.completedMeters
         let accepted = progress.update(position: filteredCoordinate, accuracy: fix.horizontalAccuracy, age: fixAge)
         guard accepted else { status = "GPS is weak or outdated. Waiting for an accurate location…"; return }
+        recordedDistanceMeters += max(0, progress.completedMeters - previousProgress)
         displayCoordinate = filteredCoordinate
         state = .walking
         if activeIntervalStartedAt == nil { activeIntervalStartedAt = fix.timestamp }
@@ -131,7 +134,7 @@ import UIKit
         } else { status = "Following your walking route." }
         speakIfNeeded()
     }
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { status = "GPS is unavailable. Progress is paused until a fresh location arrives." }
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { beginsJourneySegment = true; status = "GPS is unavailable. Progress is paused until a fresh location arrives." }
     func pause() {
         stopStepCounting()
         token = UUID(); routeTask?.cancel(); isRecalculating = false
