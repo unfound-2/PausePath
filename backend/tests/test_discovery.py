@@ -162,3 +162,41 @@ def test_worker_drains_without_new_requests(monkeypatch):
     monkeypatch.setattr(discovery,'_run_one',run)
     discovery._worker_loop()
     assert len(calls)==3
+
+
+def test_split_checkpoints_commit_and_retry_only_missing_quarter(monkeypatch):
+    discovery._parts.clear()
+    statements=[]; bounds=[]; failed=[False]
+    class DB:
+        def execute(self,sql,params=None):
+            self.sql=sql; statements.append(sql); return self
+        def fetchone(self):
+            if 'UPDATE discovery_budget' in self.sql:return {'id':1}
+            if 'WITH candidate' in self.sql:return {'x':9000,'y':4500,'attempts':1}
+            return {'bytes':100}
+    @contextmanager
+    def tx():yield DB()
+    def fetch(b):
+        bounds.append((b.west,b.south,b.east,b.north))
+        if len(bounds)==2 and not failed[0]:
+            failed[0]=True
+            raise HTTPException(502,'offline')
+        return []
+    monkeypatch.setattr(discovery,'transaction',tx)
+    monkeypatch.setattr(discovery,'fetch_osm',fetch)
+    monkeypatch.setattr(discovery,'store_osm',lambda *args:None)
+    monkeypatch.setattr(discovery,'_degraded_until',0)
+    for _ in range(5):
+        discovery._worker_lock.acquire(); discovery._run_one()
+    assert bounds[1]==bounds[2] and bounds[0] not in bounds[1:]
+    assert all(e-w==pytest.approx(.01) and n-s==pytest.approx(.01) for w,s,e,n in bounds)
+    assert sum("state='ready'" in sql for sql in statements)==1
+    assert not discovery._parts
+
+
+def test_degraded_admission_queues_only_visible_tiles(database,monkeypatch):
+    monkeypatch.setattr(discovery,'_degraded_until',float('inf'))
+    bounds=IngestRequest(**BOUNDS)
+    discovery.search_area(bounds)
+    params=next(p for sql,p in database[1] if 'INSERT INTO discovery_tiles' in sql)
+    assert len(params[1])==len(discovery.tiles_for(bounds))

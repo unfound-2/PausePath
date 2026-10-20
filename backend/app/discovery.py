@@ -16,6 +16,9 @@ _stop = Event()
 _wake = Event()
 _thread = None
 _active_until = 0.0
+_degraded_until = 0.0
+# Bounded, process-local checkpoints; successful pieces are already stored in PostGIS.
+_parts = {}
 _worker_lock = Lock()
 _log = logging.getLogger('uvicorn.error')
 
@@ -56,6 +59,7 @@ def _worker_loop():
         _wake.clear()
 
 def _run_one():
+    global _degraded_until
     job = None
     started = monotonic()
     fetched = None
@@ -67,11 +71,12 @@ def _run_one():
             if not budget: return
             job = conn.execute('''WITH candidate AS (
                 SELECT x,y FROM discovery_tiles WHERE requested_at>now()-interval '10 minutes'
+                AND (%s = false OR requested_at>now()-interval '2 minutes')
                 AND next_attempt_at<=now() AND (fetched_at IS NULL OR fetched_at<now()-interval '7 days')
                 ORDER BY requested_at DESC, CASE WHEN fetched_at IS NULL THEN 0 ELSE 1 END,x,y
                 FOR UPDATE SKIP LOCKED LIMIT 1)
                 UPDATE discovery_tiles t SET state='loading',next_attempt_at=now()+interval '3 minutes'
-                FROM candidate c WHERE t.x=c.x AND t.y=c.y RETURNING t.x,t.y,t.attempts''').fetchone()
+                FROM candidate c WHERE t.x=c.x AND t.y=c.y RETURNING t.x,t.y,t.attempts''', (monotonic() < _degraded_until,)).fetchone()
             if not job: return
             # Stop growing the cache before consuming the free database's entire budget.
             size = conn.execute("SELECT pg_total_relation_size('pois') AS bytes").fetchone()['bytes']
@@ -80,13 +85,40 @@ def _run_one():
                 return
         # Network access holds no database connection or transaction open.
         fetch_started = monotonic()
-        elements = fetch_osm(tile_bounds(job['x'], job['y']))
+        key = (job['x'],job['y'])
+        bounds = tile_bounds(*key)
+        part = None
+        completed = set()
+        if job['attempts'] > 0 or key in _parts:
+            # Only fetch one missing quarter per job; let other visible tiles run too.
+            previous = _parts.get(key)
+            if previous and monotonic()-previous[0] < 3600: completed = previous[1].copy()
+            part = next(i for i in range(4) if i not in completed)
+            mid_lon = (bounds.west+bounds.east)/2
+            mid_lat = (bounds.south+bounds.north)/2
+            bounds = SimpleNamespace(west=bounds.west if part%2==0 else mid_lon,
+                east=mid_lon if part%2==0 else bounds.east,
+                south=bounds.south if part<2 else mid_lat,
+                north=mid_lat if part<2 else bounds.north)
+        elements = fetch_osm(bounds)
         fetched = monotonic()
+        if part is not None: completed.add(part)
+        complete = part is None or len(completed)==4
         with transaction() as conn:
             store_osm(conn, elements)
-            conn.execute("UPDATE discovery_tiles SET state='ready',fetched_at=now(),attempts=0,next_attempt_at=now()+interval '7 days' WHERE x=%s AND y=%s", (job['x'],job['y']))
-    except Exception:
-        _log.warning('Background amenity tile load failed; retained saved facilities')
+            if complete:
+                conn.execute("UPDATE discovery_tiles SET state='ready',fetched_at=now(),attempts=0,next_attempt_at=now()+interval '7 days' WHERE x=%s AND y=%s", key)
+            else:
+                conn.execute("UPDATE discovery_tiles SET state='queued',attempts=greatest(attempts,1),next_attempt_at=now()+interval '5 seconds' WHERE x=%s AND y=%s", key)
+        # Record a checkpoint only after the POIs commit successfully.
+        if complete: _parts.pop(key, None)
+        else:
+            if key not in _parts and len(_parts)>=256:
+                _parts.pop(min(_parts, key=lambda k: _parts[k][0]))
+            _parts[key] = (monotonic(), completed)
+    except Exception as error:
+        _degraded_until = monotonic() + 300
+        _log.warning('Background amenity tile load failed type=%s; saved facilities retained; prefetch paused', type(error).__name__)
         if job:
             try:
                 with transaction() as conn:
@@ -116,7 +148,7 @@ def search_area(bounds):
             conn.execute("""UPDATE discovery_tiles SET requested_at=now()
                 WHERE (x,y) IN (SELECT * FROM unnest(%s::int[],%s::int[]))""",
                 ([x for x,y in tiles],[y for x,y in tiles]))
-            candidates = tiles + nearby
+            candidates = tiles + (nearby if monotonic() >= _degraded_until else [])
             # Two batched statements replace dozens of round trips per viewport.
             conn.execute("""INSERT INTO discovery_tiles(x,y,requested_at)
                 SELECT q.x,q.y,CASE WHEN q.rank<=%s THEN now() ELSE now()-interval '5 minutes' END

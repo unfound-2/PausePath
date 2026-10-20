@@ -1,4 +1,8 @@
 import os
+import logging
+from time import monotonic
+from threading import Lock
+from urllib.parse import urlsplit
 import httpx
 from fastapi import HTTPException
 from psycopg.types.json import Jsonb
@@ -6,34 +10,69 @@ from .geometry import distance
 
 AMENITIES = {'bench':'bench','toilets':'toilet','drinking_water':'drinking_water','cafe':'cafe'}
 
+_provider_health = {}
+_health_lock = Lock()
+_log = logging.getLogger('uvicorn.error')
+
+
+def _provider_failed(endpoint, reason, retry_after=0):
+    with _health_lock:
+        failures, _ = _provider_health.get(endpoint, (0, 0))
+        failures = min(failures + 1, 6)
+        cooldown = max(retry_after, min(60 * 2**(failures-2), 300) if failures >= 2 else 0)
+        _provider_health[endpoint] = (failures, monotonic() + cooldown)
+    # Never log request coordinates, raw response bodies, credentials or full URLs.
+    _log.warning('osm_provider host=%s failure=%s cooldown_seconds=%d',
+                 urlsplit(endpoint).hostname, reason, cooldown)
+
+
 def fetch_osm(bbox):
     bounds = ','.join(str(getattr(bbox,k)) for k in ('south','west','north','east'))
-    query = '[out:json][timeout:25];nwr["amenity"~"^(bench|toilets|drinking_water|cafe)$"]('+bounds+');out body center;'
-    # Independent public mirrors keep a single upstream outage from hiding node amenities.
-    # An explicitly configured endpoint remains exclusive (for private deployments).
+    query = '[out:json][timeout:12];nwr["amenity"~"^(bench|toilets|drinking_water|cafe)$"]('+bounds+');out body center;'
     configured = os.environ.get('OVERPASS_URL')
     endpoints = [configured] if configured and configured != "https://overpass-api.de/api/interpreter" else [
         'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
         'https://overpass.private.coffee/api/interpreter',
     ]
-    payload = None
     for endpoint in endpoints:
+        with _health_lock:
+            if _provider_health.get(endpoint, (0, 0))[1] > monotonic():
+                continue
+        started = monotonic()
         try:
-            response = httpx.post(endpoint, data={'data': query}, timeout=30,
+            response = httpx.post(endpoint, data={'data': query}, timeout=httpx.Timeout(15, connect=5),
                                   headers={'User-Agent': 'PausePath/0.1'})
             response.raise_for_status()
             candidate = response.json()
             if not isinstance(candidate, dict) or candidate.get('remark'):
-                continue  # Never persist partial responses as a complete area refresh.
-            payload = candidate
-            break
-        except (httpx.HTTPError, ValueError):
-            continue
-    if payload is None:
-        raise HTTPException(502, 'OSM baseline provider unavailable')
-    elements = payload.get('elements',[])
-    if len(elements) > 20000: raise HTTPException(413,'Too many POIs; use a smaller bounding box')
-    return elements
+                _provider_failed(endpoint, 'partial_or_query_error')
+                continue
+            elements = candidate.get('elements')
+            if not isinstance(elements, list) or any(not isinstance(e, dict) for e in elements):
+                _provider_failed(endpoint, 'invalid_payload')
+                continue
+            if len(elements) > 20000:
+                _provider_failed(endpoint, 'response_too_large')
+                continue
+            with _health_lock: _provider_health.pop(endpoint, None)
+            _log.info('osm_provider host=%s success_ms=%.1f elements=%d',
+                      urlsplit(endpoint).hostname, (monotonic()-started)*1000, len(elements))
+            return elements
+        except httpx.HTTPStatusError as error:
+            status = error.response.status_code
+            try: retry = min(900, max(60, int(error.response.headers.get('Retry-After', '60'))))
+            except ValueError: retry = 60
+            _provider_failed(endpoint, 'rate_limit' if status == 429 else 'http_%d' % status,
+                             retry if status in (429,503) else 0)
+        except httpx.TimeoutException:
+            _provider_failed(endpoint, 'timeout')
+        except httpx.ConnectError:
+            _provider_failed(endpoint, 'connection_or_tls')
+        except httpx.HTTPError:
+            _provider_failed(endpoint, 'transport')
+        except ValueError:
+            _provider_failed(endpoint, 'invalid_json')
+    raise HTTPException(502, 'OSM providers unavailable or cooling down; saved stops remain available')
 
 def baseline_osm(conn, bbox):
     return store_osm(conn, fetch_osm(bbox))
