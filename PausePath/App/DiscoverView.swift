@@ -648,7 +648,7 @@ struct DiscoverView: View {
             }
             Text(stopDistance(place)).font(.subheadline)
             VStack(alignment: .leading, spacing: 10) {
-                Label("Accessibility features: unknown", systemImage: "figure.roll")
+                Label(place.shared?.attributes?.summary ?? "Accessibility features: unknown", systemImage: "figure.roll")
                 Label(place.shared?.unavailable == true ? "Reported unavailable · hours unknown" : "Opening hours: unknown", systemImage: "clock")
                 Label("Last community verification: unknown", systemImage: "checkmark.shield")
             }.font(.caption).foregroundStyle(.secondary).padding(12)

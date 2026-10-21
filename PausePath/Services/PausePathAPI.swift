@@ -289,12 +289,24 @@ extension FacilityKind {
     static func fromAPI(_ category: String) -> FacilityKind? { allCases.first { $0.apiCategory == category } }
 }
 struct APIPoint: Decodable { let coordinates: [Double] }
+struct StopAccessibility: Decodable {
+    let wheelchair_accessible: Bool?
+    let backrest: Bool?
+    let shaded: Bool?
+    let access: String?
+    var summary: String {
+        func value(_ flag: Bool?) -> String { flag.map { $0 ? "Yes" : "No" } ?? "Unknown" }
+        return "Wheelchair access: \(value(wheelchair_accessible)) · Backrest: \(value(backrest)) · Shade: \(value(shaded)) · Access: \(access ?? "unknown")"
+    }
+}
+
 struct SharedPOI: Decodable, Identifiable {
     let id: UUID
     let name: String?
     let category: String
     let location: APIPoint
     let confidence_score: Double
+    let attributes: StopAccessibility?
     let source: String
     let is_active: Bool?
     let closed_until: String?
