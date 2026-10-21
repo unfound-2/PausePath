@@ -33,6 +33,7 @@ struct WalkingRouteOption: Identifiable {
     var places: [DiscoveredPlace] = []
     var status = "Search any city or neighborhood to begin."
     var isLoading = false
+    var areaLoadIncomplete = false
     var route: MKRoute?
     var itinerary: [MKRoute] = []
     var routeOptions: [WalkingRouteOption] = []
@@ -89,9 +90,7 @@ struct WalkingRouteOption: Identifiable {
     }
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
-        generation = UUID(); route = nil; itinerary = []; routeOptions = []; selectedRouteOptionID = nil; isLoading = false
         currentLocation = location
-        region.center = location.coordinate
         status = "Location found. Explore nearby places or plan a route from here."
     }
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
@@ -116,7 +115,7 @@ struct WalkingRouteOption: Identifiable {
             guard token == generation else { return false }
             guard let first = response.mapItems.first else { status = "No matching place found. Try a nearby city."; return false }
             region = MKCoordinateRegion(center: first.placemark.coordinate, span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02))
-            places = []; status = "Area found. Tap Search this area to find facilities."
+            status = "Area found. Tap Search this area to find facilities."
             return true
         } catch { if token == generation { status = "Place search failed. Check your connection and try again." }; return false }
     }
@@ -126,11 +125,8 @@ struct WalkingRouteOption: Identifiable {
         let token = UUID(); generation = token; isLoading = true; route = nil
         let key = areaKey(searchRegion)
         let cached = recentAreas.first { $0.key == key && Date().timeIntervalSince($0.savedAt) < 300 }
-        places = cached?.places ?? places.filter { place in
-            let point = place.item.placemark.coordinate
-            return abs(point.latitude - searchRegion.center.latitude) <= searchRegion.span.latitudeDelta / 2 &&
-                abs(point.longitude - searchRegion.center.longitude) <= searchRegion.span.longitudeDelta / 2
-        }
+        if let cached, places.isEmpty { places = cached.places }
+        areaLoadIncomplete = false
         status = cached == nil ? "Updating nearby stops…" : "Showing recent stops while checking for updates…"
         defer { if generation == token { isLoading = false } }
         guard !kinds.isEmpty else { status = "Select at least one facility filter."; return false }
@@ -227,6 +223,7 @@ struct WalkingRouteOption: Identifiable {
             recentAreas.insert(AreaSnapshot(key: key, places: places, savedAt: Date()), at: 0)
             recentAreas = Array(recentAreas.prefix(8))
         }
+        areaLoadIncomplete = !sharedSucceeded || !cafeSucceeded
         status = "\(places.count) possible stops. " + sharedWarning + " " + cafeWarning
         return sharedSucceeded && cafeSucceeded
     }

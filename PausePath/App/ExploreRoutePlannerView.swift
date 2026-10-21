@@ -32,6 +32,8 @@ struct ExploreRoutePlannerView: View {
     let usesCurrentLocation: Bool
     let customOrigin: CLLocationCoordinate2D?
     let customOriginName: String
+    let plannedStops: [DiscoveredPlace]
+    let planningControls: () -> AnyView
     let onNavigate: (GeneratedWalk) -> Void
 
     let onClose: () -> Void
@@ -109,6 +111,7 @@ struct ExploreRoutePlannerView: View {
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
+                    planningControls()
                     if usesCurrentLocation && originCoordinate == nil {
                             Label("Getting your location…", systemImage: "location.slash").font(.caption).foregroundStyle(.secondary)
                             Button("Try location again", systemImage: "location.fill") { discovery.useLocation() }.buttonStyle(.bordered)
@@ -273,7 +276,8 @@ struct ExploreRoutePlannerView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 80), spacing: 8)], spacing: 8) {
                     routeMetric("Distance", value: String(format: "%.1f km", option.distance / 1000))
                     routeMetric("Est. time", value: "\(max(1, Int(ceil(option.duration / 60)))) min")
-                    routeMetric("Stops", value: "\(option.stops.count)")
+                    routeMetric("Planned breaks", value: "\(option.stops.count)")
+                    routeMetric("Longest break gap", value: String(format: "%.1f km", (option.legs.map(\.distance).max() ?? option.distance) / 1000))
                 }
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityAddTraits(isSelected ? [.isSelected] : [])
@@ -282,6 +286,10 @@ struct ExploreRoutePlannerView: View {
                 Text("Does not include: \(missing.joined(separator: ", "))")
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             }
+            Text("Terrain: unknown · Seating and accessibility at breaks: unverified")
+                .font(.caption).foregroundStyle(.secondary)
+            Text(option.stops.isEmpty ? "No planned breaks; the gap is the full route." : "Breaks: " + option.stops.map { $0.item.name ?? $0.kind.chipTitle }.joined(separator: " → "))
+                .font(.caption).foregroundStyle(.secondary)
             RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: option.distance, durationSeconds: option.duration), compact: true)
             if isSelected {
             if weatherGuidanceEnabled { WeatherGuidanceCard(store: routeWeather) }
@@ -343,7 +351,14 @@ struct ExploreRoutePlannerView: View {
         }
 
         status = "Building direct and stop-based route options…"
+        if !plannedStops.isEmpty { candidates = plannedStops.filter { $0.item.placemark.coordinate.latitude != destination.placemark.coordinate.latitude || $0.item.placemark.coordinate.longitude != destination.placemark.coordinate.longitude } }
         await discovery.walkingDirections(to: destination, destinationName: destination.name ?? destinationQuery, from: origin, via: candidates)
+        if !plannedStops.isEmpty {
+            let requiredIDs = Set(candidates.map(\.id))
+            discovery.routeOptions.removeAll { !requiredIDs.isSubset(of: Set($0.stops.map(\.id))) }
+            if let first = discovery.routeOptions.first { discovery.selectRouteOption(first.id) }
+            else { discovery.route = nil; discovery.itinerary = []; discovery.selectedRouteOptionID = nil }
+        }
         if discovery.routeOptions.isEmpty {
             status = mandatoryKinds.isEmpty
                 ? "No walking route was found. Try another destination or start."
