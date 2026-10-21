@@ -71,7 +71,14 @@ struct DiscoverView: View {
     private var visiblePlaces: [DiscoveredPlace] {
         let center = visibleRegion?.center ?? discovery.region.center
         let origin = CLLocation(latitude: center.latitude, longitude: center.longitude)
-        return discovery.places.filter { kinds.contains($0.kind) }.sorted {
+        let bounds = visibleRegion ?? discovery.region
+        return discovery.places.filter { place in
+            let point = place.item.placemark.coordinate
+            let delta = abs(point.longitude - bounds.center.longitude)
+            return kinds.contains(place.kind) &&
+                abs(point.latitude - bounds.center.latitude) <= bounds.span.latitudeDelta / 2 &&
+                min(delta, 360 - delta) <= bounds.span.longitudeDelta / 2
+        }.sorted {
             let left = CLLocation(latitude: $0.item.placemark.coordinate.latitude, longitude: $0.item.placemark.coordinate.longitude)
             let right = CLLocation(latitude: $1.item.placemark.coordinate.latitude, longitude: $1.item.placemark.coordinate.longitude)
             return left.distance(from: origin) < right.distance(from: origin)
@@ -750,6 +757,7 @@ struct DiscoverView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Label(place.shared?.hoursDescription ?? "Opening hours unknown", systemImage: "clock")
                 Label("Wheelchair access: \(place.shared?.accessibilityDescription ?? "Unknown")", systemImage: "figure.roll")
+                Label("Access: \(place.shared?.attributes?.access ?? "Unknown")", systemImage: "door.left.hand.open")
                 Label("Backrest: \(place.shared?.backrestDescription ?? "Unknown") · Shade: \(place.shared?.shadeDescription ?? "Unknown")", systemImage: "sun.max")
                 Label("Last community verification: \(place.shared?.verificationDescription ?? "Unknown")", systemImage: "checkmark.shield")
             }.font(.caption).frame(maxWidth: .infinity, alignment: .leading).padding(14)

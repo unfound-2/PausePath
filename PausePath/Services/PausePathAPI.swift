@@ -299,6 +299,24 @@ struct POIMetadataValue: Decodable {
         flag = try? value.decode(Bool.self)
     }
 }
+struct StopAccessibility: Decodable {
+    let wheelchair_accessible: Bool?
+    let backrest: Bool?
+    let shaded: Bool?
+    let access: String?
+    init(from decoder: Decoder) throws {
+        let values = try decoder.singleValueContainer().decode([String: POIMetadataValue].self)
+        wheelchair_accessible = values["wheelchair_accessible"]?.flag
+        backrest = values["backrest"]?.flag
+        shaded = values["shaded"]?.flag
+        access = values["access"]?.text
+    }
+    var summary: String {
+        func value(_ flag: Bool?) -> String { flag.map { $0 ? "Yes" : "No" } ?? "Unknown" }
+        return "Wheelchair access: \(value(wheelchair_accessible)) · Backrest: \(value(backrest)) · Shade: \(value(shaded)) · Access: \(access ?? "unknown")"
+    }
+}
+
 struct SharedPOI: Decodable, Identifiable {
     let id: UUID
     let name: String?
@@ -308,7 +326,7 @@ struct SharedPOI: Decodable, Identifiable {
     let source: String
     let is_active: Bool?
     let closed_until: String?
-    let attributes: [String: POIMetadataValue]?
+    let attributes: StopAccessibility?
     let operating_hours: [String: POIMetadataValue]?
     let last_verified_at: String?
     var hoursDescription: String {
@@ -317,7 +335,14 @@ struct SharedPOI: Decodable, Identifiable {
         return raw == "24/7" ? "Listed as open 24 hours · not live-verified" : "Listed hours: " + raw + " · current status unknown"
     }
     private func attribute(_ key: String) -> String {
-        guard let flag = attributes?[key]?.flag else { return "Unknown" }
+        let flag: Bool?
+        switch key {
+        case "wheelchair_accessible": flag = attributes?.wheelchair_accessible
+        case "backrest": flag = attributes?.backrest
+        case "shaded": flag = attributes?.shaded
+        default: flag = nil
+        }
+        guard let flag else { return "Unknown" }
         return flag ? "Yes" : "No"
     }
     var accessibilityDescription: String { attribute("wheelchair_accessible") }
