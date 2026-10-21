@@ -47,10 +47,17 @@ struct DiscoverView: View {
     @State private var routeRequestID = UUID()
     @State private var kinds = Set(FacilityKind.allCases)
     @State private var selectedID: UUID?
-    @State private var selectedStopIDs: [UUID] = []
     @State private var showRoutePlanner = false
-    @State private var showResults = false
-    @State private var cardCollapsed = false
+    @State private var sheetLevel = 0
+    @GestureState private var sheetDrag: CGFloat = 0
+    @ScaledMetric(relativeTo: .body) private var compactSheetHeight: CGFloat = 100
+    @State private var browseQuery = ""
+    @State private var browseMatches: [MKMapItem] = []
+    @State private var browseTask: Task<Void, Never>?
+    @State private var browseLoading = false
+    @State private var browseMessage = ""
+    @State private var pinnedStops: [DiscoveredPlace] = []
+    @State private var didPositionMap = false
     @State private var navigationWalk: GeneratedWalk?
     @State private var searched = false
     @State private var showReport = false
@@ -59,10 +66,17 @@ struct DiscoverView: View {
     @Environment(\.openURL) private var openURL
     @State private var areaRefreshTask: Task<Void, Never>?
     @State private var lastRequestedRegion: MKCoordinateRegion?
-    @State private var isPreviewingRoute = false
     @FocusState private var searchFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private var visiblePlaces: [DiscoveredPlace] { discovery.places.filter { kinds.contains($0.kind) } }
+    private var visiblePlaces: [DiscoveredPlace] {
+        let center = visibleRegion?.center ?? discovery.region.center
+        let origin = CLLocation(latitude: center.latitude, longitude: center.longitude)
+        return discovery.places.filter { kinds.contains($0.kind) }.sorted {
+            let left = CLLocation(latitude: $0.item.placemark.coordinate.latitude, longitude: $0.item.placemark.coordinate.longitude)
+            let right = CLLocation(latitude: $1.item.placemark.coordinate.latitude, longitude: $1.item.placemark.coordinate.longitude)
+            return left.distance(from: origin) < right.distance(from: origin)
+        }
+    }
     private struct StopCluster: Identifiable {
         let id: String
         let places: [DiscoveredPlace]
@@ -77,7 +91,7 @@ struct DiscoverView: View {
         let lonStep = max(region.span.longitudeDelta / 7, 0.00001)
         let displayed = visiblePlaces
         let grouped = Dictionary(grouping: displayed) { place in
-            if displayed.count < 150 || place.id == selectedID { return place.id.uuidString }
+            if displayed.count < 70 || place.id == selectedID { return place.id.uuidString }
             let c = place.item.placemark.coordinate
             return "\(place.kind.rawValue)-\(Int(floor(c.latitude / latStep)))-\(Int(floor(c.longitude / lonStep)))"
         }
@@ -151,10 +165,11 @@ struct DiscoverView: View {
             .mapControls { MapCompass(); MapScaleView() }
             .onMapCameraChange(frequency: .onEnd) { context in
                 visibleRegion = context.region
+                if camera.positionedByUser { didPositionMap = true }
                 // Programmatic camera changes (such as fitting a route) must not
                 // replace the selected stop or erase its directions.
-                guard camera.positionedByUser, !isPreviewingRoute,
-                      discovery.route == nil, !showReport, !showResults, !showRoutePlanner, navigationWalk == nil else { return }
+                guard camera.positionedByUser,
+                      discovery.route == nil, !showReport, !showRoutePlanner, navigationWalk == nil else { return }
                 scheduleAreaRefresh(context.region)
             }
             .ignoresSafeArea(edges: .top)
@@ -166,20 +181,19 @@ struct DiscoverView: View {
                 if showRoutePlanner { Color.clear.frame(height: geometry.size.height * 0.5) }
             }
             .overlay(alignment: .bottom) {
-                if !showRoutePlanner { bottomControls }
+                if !showRoutePlanner { bottomControls(availableHeight: geometry.size.height) }
             }
             .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: showRoutePlanner)
             .toolbarBackground(.hidden, for: .tabBar)
             .task {
-                camera = .automatic
+                if !didPositionMap { camera = .automatic }
             }
             .task {
-                discovery.places = []; selectedID = nil; discovery.route = nil
+                // Preserve saved pins when returning to Explore.
                 while !Task.isCancelled {
                     do { try await Task.sleep(for: .seconds(60)) } catch { return }
                     guard scenePhase == .active, !discovery.isLoading,
-                          discovery.route == nil, selectedID == nil, !showReport, !showResults, !showRoutePlanner, navigationWalk == nil else { continue }
-                    guard let location = discovery.currentLocation, isFresh(location) else { continue }
+                          discovery.route == nil, selectedID == nil, !showReport, !showRoutePlanner, navigationWalk == nil else { continue }
                     await loadArea(visibleRegion ?? discovery.region)
                 }
             }
@@ -191,35 +205,35 @@ struct DiscoverView: View {
             }
             .onChange(of: [discovery.region.center.latitude, discovery.region.center.longitude]) { moveToDiscoveredArea() }
             .onChange(of: discovery.currentLocation?.timestamp) { _, _ in
-                guard usesCurrentRouteStart, let location = discovery.currentLocation, isFresh(location) else { return }
+                guard let location = discovery.currentLocation, isFresh(location),
+                      currentLocationRequested || (!didPositionMap && !camera.positionedByUser) else { return }
+                currentLocationRequested = false
+                didPositionMap = true
                 let region = MKCoordinateRegion(center: location.coordinate, latitudinalMeters: 1_400, longitudinalMeters: 1_400)
                 visibleRegion = region
                 camera = .region(region)
-                clearRoutePreview()
                 Task { await loadArea(region) }
-                if !routeDestinationQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Task { await searchRouteDestinations(routeDestinationQuery) }
-                }
             }
             .onDisappear {
                 cancelAreaRefresh()
                 routeStartSearchTask?.cancel()
                 routeSearchTask?.cancel()
+                browseTask?.cancel()
+                browseLoading = false
                 discovery.cancelPending()
             }
-            .onChange(of: showResults) { if showResults { cancelAreaRefresh() } }
             .onChange(of: showRoutePlanner) { if showRoutePlanner { cancelAreaRefresh() } }
             .onChange(of: navigationWalk?.id) { if navigationWalk != nil { cancelAreaRefresh() } }
             .onChange(of: discovery.selectedRouteOptionID) { fitRouteInMap() }
-            .sheet(isPresented: $showResults) { resultsSheet }
             .sheet(isPresented: $showRoutePlanner) {
                 ExploreRoutePlannerView(discovery: discovery, preferences: preferences, profile: profile, initialDestination: selectedPlace,
                     destinationQuery: $routeDestinationQuery, destination: $routeDestination,
                     mandatoryKinds: $mandatoryRouteStops, difficultyFilter: $routeDifficultyFilter,
                     routeRequestID: $routeRequestID, usesCurrentLocation: usesCurrentRouteStart,
                     customOrigin: routeStartCoordinate, customOriginName: routeStartTitle,
+                    planningControls: AnyView(planningControls), chosenStops: pinnedStops,
                     onNavigate: { navigationWalk = $0 }, onClose: { showRoutePlanner = false })
-                    .presentationDetents([.fraction(0.5)])
+                    .presentationDetents([.fraction(0.5), .large])
                     .presentationContentInteraction(.scrolls)
                     .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.5)))
                     .presentationDragIndicator(.visible)
@@ -229,7 +243,7 @@ struct DiscoverView: View {
         }
     }
 
-    private var topControls: some View {
+    private var planningControls: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
                 Label("Start", systemImage: "location.fill").font(.subheadline.weight(.semibold))
@@ -320,16 +334,7 @@ struct DiscoverView: View {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }.accessibilityLabel("Clear destination search")
                 }
-                Menu {
-                    ForEach(FacilityKind.allCases, id: \.self) { kind in
-                        Toggle(kind.chipTitle, isOn: Binding(get: { kinds.contains(kind) }, set: { selected in
-                            if selected { kinds.insert(kind) } else { kinds.remove(kind) }
-                            if let selectedID, let selectedKind = discovery.places.first(where: { $0.id == selectedID })?.kind,
-                               !kinds.contains(selectedKind) { self.selectedID = nil; discovery.route = nil }
-                        }))
-                    }
-                } label: { Image(systemName: "checklist").font(.title3).frame(width: 40, height: 40) }
-                    .accessibilityLabel("Choose which stop categories appear on the map")
+
             }.padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
 
             HStack(spacing: 8) {
@@ -546,233 +551,229 @@ struct DiscoverView: View {
         return meters < 1000 ? String(format: "%.0f m away", meters) : String(format: "%.1f km away", meters / 1000)
     }
 
-    private var bottomControls: some View {
-        VStack(spacing: 12) {
-            HStack(alignment: .bottom) {
-                Spacer()
-                Button { Task { await refresh() } } label: {
-                    HStack(spacing: 8) {
-                        if discovery.isLoading { ProgressView().controlSize(.small) }
-                        else { Image(systemName: "arrow.clockwise") }
-                        Text(discovery.isLoading ? "Searching…" : "Refresh this area").font(.subheadline.weight(.semibold))
-                    }.padding(.horizontal, 18).frame(minHeight: 44)
-                        .background(.regularMaterial, in: Capsule())
-                        .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
-                }.disabled(discovery.isLoading)
-                Spacer()
-                Button {
-                    searchFocused = false; cancelAreaRefresh(); discovery.cancelPending(); selectedID = nil; discovery.route = nil; requestLocationAccess()
-                } label: {
-                    Image(systemName: "location.fill").font(.title3).frame(width: 48, height: 48)
-                        .background(.regularMaterial, in: Circle()).shadow(color: .black.opacity(0.12), radius: 8, y: 3)
-                }.accessibilityLabel("Center map on my location")
-                Button {
-                    cancelAreaRefresh(); discovery.cancelPending()
-                    reportPlace = nil; showReport = true
-                } label: {
-                    Image(systemName: "exclamationmark")
-                        .font(.title3.weight(.semibold)).frame(width: 48, height: 48)
-                        .background(.regularMaterial, in: Circle())
-                        .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
-                }.accessibilityLabel("Suggest a stop at map center")
-                    .accessibilityHint("Report a missing bench, bathroom, fountain or café")
-            }
-            if !searchFocused {
-                VStack(alignment: .leading, spacing: 6) {
-                    Button { animate { cardCollapsed.toggle() } } label: {
-                        Image(systemName: cardCollapsed ? "chevron.up" : "chevron.down")
-                            .font(.caption.weight(.semibold))
-                            .frame(maxWidth: .infinity).frame(height: 32)
-                            .contentShape(Rectangle())
-                    }.buttonStyle(.plain)
-                        .accessibilityLabel(cardCollapsed ? "Show stop card" : "Hide stop card")
-                    if !cardCollapsed {
-                    if let place = selectedPlace { selectedCard(place) }
-                    else if let option = discovery.routeOptions.first(where: { $0.id == discovery.selectedRouteOptionID }) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("\(option.title) to \(option.destinationName)").font(.headline)
-                            Text("\(option.distance / 1000, specifier: "%.1f") km • about \(Int(option.duration / 60)) min")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                            RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: option.distance, durationSeconds: option.duration))
-                            Button("Navigate this route", systemImage: "figure.walk") {
-                                navigationWalk = GeneratedWalk(name: "Walk to \(option.destinationName)", legs: option.legs, preferences: preferences)
-                            }.buttonStyle(.bordered)
-                        }
-                    }
-                    else {
-                        HStack(spacing: 10) {
-                            Text(kinds.isEmpty ? "Choose a stop filter" : "\(visiblePlaces.count) stops nearby")
-                                .font(.caption.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
-                            Spacer(minLength: 0)
-                            Button { showResults = true } label: {
-                                Image(systemName: "list.bullet").font(.body.weight(.semibold)).frame(width: 36, height: 36)
-                            }.accessibilityLabel("Show stops as a list")
-                        }
+    private var topControls: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass").foregroundStyle(PausePathPalette.teal)
+                TextField("Search places or areas", text: $browseQuery)
+                    .focused($searchFocused).submitLabel(.search)
+                    .onSubmit { searchBrowse() }
+                    .onChange(of: browseQuery) { _, _ in if searchFocused { searchBrowse() } }
+                if browseLoading { ProgressView().controlSize(.small) }
+                if !browseQuery.isEmpty {
+                    Button { browseQuery = ""; browseMatches = []; browseMessage = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }.frame(minWidth: 44, minHeight: 44).accessibilityLabel("Clear search")
+                }
+            }.padding(.horizontal, 14).frame(minHeight: 54)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(FacilityKind.allCases, id: \.self) { kind in
+                        Button {
+                            if kinds.contains(kind) { kinds.remove(kind) } else { kinds.insert(kind) }
+                            if let selectedID, let place = discovery.places.first(where: { $0.id == selectedID }), !kinds.contains(place.kind) { self.selectedID = nil }
+                        } label: {
+                            Label(filterTitle(kind), systemImage: kind.symbol)
+                                .font(.caption.weight(.semibold)).padding(.horizontal, 10).frame(minHeight: 44)
+                                .foregroundStyle(kinds.contains(kind) ? Color.white : Color.primary)
+                                .background(kinds.contains(kind) ? kind.mapColor : Color(.secondarySystemBackground), in: Capsule())
+                        }.buttonStyle(.plain)
+                            .accessibilityLabel(filterTitle(kind))
+                            .accessibilityValue(kinds.contains(kind) ? "Shown" : "Hidden")
+                            .accessibilityAddTraits(kinds.contains(kind) ? [.isSelected] : [])
                     }
                 }
-                }.padding(.horizontal, 12).padding(.bottom, cardCollapsed ? 0 : 10)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
-                    .simultaneousGesture(DragGesture(minimumDistance: 20).onEnded { value in
-                        guard abs(value.translation.height) > abs(value.translation.width) else { return }
-                        if value.translation.height > 25 { animate { cardCollapsed = true } }
-                        else if value.translation.height < -25 { animate { cardCollapsed = false } }
-                    })
-                    .shadow(color: .black.opacity(0.12), radius: 16, y: 5)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            Button {
-                searchFocused = false
-                routeStartSearchTask?.cancel()
-                routeSearchTask?.cancel()
-                routeRequestID = UUID()
-                showRoutePlanner = true
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
-                    Text(discovery.isLoading ? "Finding routes…" : "Search routes")
-                    Spacer()
-                    Image(systemName: "chevron.up")
-                }
-                .font(.headline.weight(.semibold))
-                .frame(maxWidth: .infinity, minHeight: 54)
-                .padding(.horizontal, 18)
+            if searchFocused && !browseMatches.isEmpty {
+                destinationSuggestions(browseMatches, selecting: selectBrowseResult)
+            } else if !browseMessage.isEmpty {
+                Text(browseMessage).font(.caption).padding(8).background(.regularMaterial, in: Capsule())
             }
-            .buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
-            .disabled(((routeDestination == nil && selectedPlace == nil) || routeStartCoordinate == nil) || discovery.isLoading)
-            .accessibilityHint("Expand route choices from the selected starting point")
-            .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded { value in
-                guard value.translation.height < -40, routeStartCoordinate != nil,
-                      routeDestination != nil || selectedPlace != nil else { return }
-                searchFocused = false
-                routeRequestID = UUID()
-                showRoutePlanner = true
-            })
-        }.padding(.horizontal, 16).padding(.bottom, 12)
+        }.padding(.horizontal, 16).padding(.top, 8)
     }
 
-    private func selectedCard(_ place: DiscoveredPlace) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                Label(place.item.name ?? "Possible stop", systemImage: place.kind.symbol)
-                    .font(.headline).foregroundStyle(place.kind.mapColor).lineLimit(2)
-                Spacer()
-                Button { discovery.cancelPending(); animate { selectedID = nil; discovery.route = nil } } label: {
-                    Image(systemName: "xmark").font(.subheadline.bold()).frame(width: 44, height: 44).background(.quaternary, in: Circle())
-                }.accessibilityLabel("Close stop details")
-            }
-            Text("\(place.provider) • \(place.kind.rawValue) • Seating and hours unverified")
-                .font(.caption).foregroundStyle(.secondary)
-            if let summary = place.businessSummary { Text(summary).font(.caption) }
-            if let website = place.website { Link("Business website", destination: website) }
-            if let poi = place.shared {
-                HStack {
-                    Text("Community confidence: \(Int(poi.confidence_score * 100))%").font(.caption)
-                    Button("Report status") { reportPlace = place; showReport = true }
-                }
-            }
-            if let route = discovery.route {
-                let legs = discovery.itinerary.isEmpty ? [route] : discovery.itinerary
-                let distance = legs.reduce(0) { $0 + $1.distance }
-                let duration = legs.reduce(0) { $0 + $1.expectedTravelTime }
-                let activeStops = discovery.routeOptions.first { $0.id == discovery.selectedRouteOptionID }?.stops
-                HStack {
-                    Text("\(distance / 1000, specifier: "%.1f") km • about \(Int(duration / 60)) min").font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Button("Navigate", systemImage: "figure.walk") {
-                        navigationWalk = GeneratedWalk(name: "Walk to \(place.item.name ?? "destination")", legs: legs, preferences: preferences)
-                    }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
-                }
-                RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: distance, durationSeconds: duration))
-                Text("Start: your current location • End: \(place.item.name ?? "selected destination")")
-                    .font(.caption2).foregroundStyle(.secondary)
-                if let activeStops, !activeStops.isEmpty {
-                    let names = activeStops.compactMap { $0.item.name }
-                    Text("Stops: \(names.joined(separator: " → "))").font(.caption).foregroundStyle(.secondary)
-                }
-                if discovery.routeOptions.count > 1 {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Choose a route").font(.subheadline.weight(.semibold))
-                        ForEach(discovery.routeOptions) { option in
-                            Button { discovery.selectRouteOption(option.id) } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: option.id == discovery.selectedRouteOptionID ? "largecircle.fill.circle" : "circle")
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(option.title).font(.subheadline.weight(.semibold))
-                                        Text("\(option.distance / 1000, specifier: "%.1f") km • about \(Int(option.duration / 60)) min")
-                                            .font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    Spacer(minLength: 0)
-                                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                            }.buttonStyle(.plain).frame(minHeight: 44)
-                        }
-                    }
-                }
-                Button("Change stops") {
-                    discovery.route = nil; discovery.itinerary = []; discovery.routeOptions = []; discovery.selectedRouteOptionID = nil
-                }
-                    .font(.subheadline).buttonStyle(.plain)
-            } else {
-                Text("End destination: \(place.item.name ?? "selected place")")
-                    .font(.subheadline.weight(.semibold))
-                if !selectedStopIDs.isEmpty {
-                    Text("Stops are visited in the order you select them.").font(.caption).foregroundStyle(.secondary)
-                }
-                ForEach(visiblePlaces.filter { $0.id != place.id }) { stop in
-                    Button {
-                        if let index = selectedStopIDs.firstIndex(of: stop.id) {
-                            selectedStopIDs.remove(at: index)
-                        } else if selectedStopIDs.count < 3 {
-                            selectedStopIDs.append(stop.id)
-                        } else {
-                            discovery.status = "Choose up to three optional stops for one route."
-                        }
-                    } label: {
-                        Label("\(selectedStopIDs.contains(stop.id) ? "Remove" : "Add") stop: \(stop.item.name ?? stop.kind.rawValue)",
-                              systemImage: selectedStopIDs.contains(stop.id) ? "checkmark.circle.fill" : stop.kind.symbol)
-                            .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                    }.buttonStyle(.plain).frame(minHeight: 40)
-                }
-                if discovery.currentLocation == nil || !isFresh(discovery.currentLocation) {
-                    Button { discovery.useLocation() } label: {
-                        Label("Use my current location", systemImage: "location.fill")
-                            .frame(maxWidth: .infinity).padding(.vertical, 5)
-                    }.buttonStyle(.bordered)
-                } else {
-                    Button { buildRoute(to: place) } label: {
-                    Label(discovery.isLoading ? "Building route…" : "Build route from my location", systemImage: "figure.walk")
-                        .frame(maxWidth: .infinity).padding(.vertical, 5)
-                    }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink).disabled(discovery.isLoading)
-                }
-                if discovery.status.hasPrefix("Walking directions unavailable") || discovery.status.hasPrefix("No walking route") { Text(discovery.status).font(.caption).foregroundStyle(.secondary) }
+    private func filterTitle(_ kind: FacilityKind) -> String {
+        switch kind { case .bench: "Benches"; case .bathroom: "Bathrooms"; case .fountain: "Water"; case .cafe: "Cafés" }
+    }
+
+    private func searchBrowse() {
+        browseTask?.cancel()
+        let query = browseQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        browseMatches = []; browseMessage = ""; browseLoading = !query.isEmpty
+        guard !query.isEmpty else { return }
+        browseTask = Task {
+            do {
+                try await Task.sleep(for: .milliseconds(350))
+                let request = MKLocalSearch.Request()
+                request.naturalLanguageQuery = query
+                request.resultTypes = [.pointOfInterest, .address]
+                if let visibleRegion { request.region = visibleRegion }
+                let response = try await MKLocalSearch(request: request).start()
+                guard !Task.isCancelled, browseQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
+                browseMatches = response.mapItems
+                browseMessage = browseMatches.isEmpty ? "No matching places. Try a city or full address." : ""
+                browseLoading = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                browseLoading = false
+                browseMessage = "Search is unavailable. You can still explore the map."
             }
         }
     }
 
-    private var resultsSheet: some View {
-        NavigationStack {
-            List {
-                Section {
-                    Text("Possible facilities from map search. Confirm seating, access and opening hours before relying on a stop.").font(.callout).foregroundStyle(.secondary)
-                }
-                if visiblePlaces.isEmpty { Text("No stops for the selected filters. Search a different area or enable another category.") }
-                ForEach(visiblePlaces) { place in
-                    Button {
-                        showResults = false; select(place)
-                        camera = .region(MKCoordinateRegion(center: place.item.placemark.coordinate, latitudinalMeters: 800, longitudinalMeters: 800))
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: place.kind.symbol).foregroundStyle(.white).frame(width: 36, height: 36).background(place.kind.mapColor, in: Circle())
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(place.item.name ?? "Possible stop").font(.headline).foregroundStyle(.primary)
-                                Text(place.kind.rawValue).font(.caption).foregroundStyle(.secondary)
+    private func selectBrowseResult(_ item: MKMapItem) {
+        browseTask?.cancel(); browseLoading = false; browseMatches = []; searchFocused = false
+        browseQuery = item.name ?? "Selected place"
+        routeDestination = item; routeDestinationQuery = item.name ?? "Selected place"
+        clearRoutePreview(); selectedID = nil; didPositionMap = true
+        let region = MKCoordinateRegion(center: item.placemark.coordinate, latitudinalMeters: 2_000, longitudinalMeters: 2_000)
+        visibleRegion = region; camera = .region(region)
+        Task { await loadArea(region) }
+    }
+
+    private var areaIsUpdating: Bool { discovery.isLoading || discovery.areaLoadState == "loading" }
+
+    private var areaMessage: String {
+        if areaIsUpdating { return "Updating this area…" }
+        if kinds.isEmpty { return "Choose a category to show stops" }
+        if visiblePlaces.isEmpty {
+            if !searched { return "Search an area or use your location" }
+            return discovery.areaLoadState == "ready" ? "No mapped stops for these filters" : "Stops could not finish loading. Try refreshing."
+        }
+        return "\(visiblePlaces.count) mapped stops" + (discovery.areaLoadState == "ready" ? "" : " · More may be available")
+    }
+
+    private func bottomControls(availableHeight: CGFloat) -> some View {
+        let heights: [CGFloat] = [compactSheetHeight, max(compactSheetHeight, availableHeight * 0.43), max(compactSheetHeight, availableHeight * 0.73)]
+        let height = min(max(heights[sheetLevel] - sheetDrag, compactSheetHeight), availableHeight * 0.78)
+        return VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                HStack(spacing: 6) {
+                    if discovery.isLoading { ProgressView().controlSize(.mini) }
+                    Text(areaMessage).font(.caption.weight(.medium)).lineLimit(2)
+                }.padding(10).background(.regularMaterial, in: Capsule())
+                    .accessibilityElement(children: .combine)
+                Spacer(minLength: 0)
+                Button { Task { await refresh() } } label: { Image(systemName: "arrow.clockwise").frame(width: 44, height: 44) }
+                    .disabled(discovery.isLoading).accessibilityLabel("Refresh visible area")
+                    .background(.regularMaterial, in: Circle())
+                Button { searchFocused = false; requestLocationAccess() } label: { Image(systemName: "location.fill").frame(width: 44, height: 44) }
+                    .accessibilityLabel("Center map on my location").background(.regularMaterial, in: Circle())
+                Button { reportPlace = nil; showReport = true } label: { Image(systemName: "exclamationmark").frame(width: 44, height: 44) }
+                    .accessibilityLabel("Suggest a stop at map center").background(.regularMaterial, in: Circle())
+            }.foregroundStyle(PausePathPalette.teal)
+            VStack(spacing: 0) {
+                VStack(spacing: 5) {
+                    Capsule().fill(.secondary.opacity(0.4)).frame(width: 36, height: 5).padding(.top, 10)
+                    HStack {
+                        Button { animate { sheetLevel = (sheetLevel + 1) % 3 } } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(selectedPlace == nil ? "Find your next pause" : "Your selected stop").font(.headline)
+                                Text(sheetLevel == 0 ? "Swipe up to explore stops" : "Swipe the handle to resize").font(.caption).foregroundStyle(.secondary)
+                            }.frame(maxWidth: .infinity, alignment: .leading).frame(minHeight: 60)
+                        }.buttonStyle(.plain).accessibilityLabel("Resize stops panel")
+                            .accessibilityAdjustableAction { direction in
+                                animate { sheetLevel = min(2, max(0, sheetLevel + (direction == .increment ? 1 : -1))) }
                             }
-                        }.padding(.vertical, 4)
-                    }
+                        Button { openPlanner() } label: {
+                            Label("Plan a walk", systemImage: "figure.walk").font(.subheadline.bold())
+                                .padding(.horizontal, 12).frame(minHeight: 44)
+                        }.buttonStyle(.plain).foregroundStyle(PausePathPalette.ink)
+                            .background(PausePathPalette.lime, in: Capsule())
+                    }.padding(.horizontal, 16)
+                }.contentShape(Rectangle())
+                    .simultaneousGesture(DragGesture(minimumDistance: 12)
+                        .updating($sheetDrag) { value, state, _ in state = value.translation.height }
+                        .onEnded { value in
+                            let projected = heights[sheetLevel] - value.predictedEndTranslation.height
+                            animate { sheetLevel = heights.indices.min(by: { abs(heights[$0]-projected) < abs(heights[$1]-projected) }) ?? sheetLevel }
+                        })
+                if sheetLevel > 0 || sheetDrag < -20 {
+                    Divider().padding(.horizontal, 16)
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 14) {
+                            if let place = selectedPlace { selectedCard(place) }
+                            else {
+                                if !pinnedStops.isEmpty {
+                                    Text("\(pinnedStops.count) stops added to your route").font(.subheadline.weight(.semibold))
+                                    ForEach(pinnedStops) { stop in
+                                        HStack { Text(stop.item.name ?? stop.kind.rawValue).font(.caption); Spacer(); Button("Remove") { pinnedStops.removeAll { $0.id == stop.id }; clearRoutePreview() } }
+                                    }
+                                }
+                                if visiblePlaces.isEmpty {
+                                    ContentUnavailableView(areaIsUpdating ? "Finding stops" : areaMessage, systemImage: areaIsUpdating ? "map" : "mappin.slash", description: Text(areaIsUpdating ? "Saved stops will appear as data arrives." : "Try another category or move the map."))
+                                }
+                                ForEach(visiblePlaces) { place in
+                                    Button { select(place) } label: {
+                                        HStack(spacing: 12) {
+                                            Image(systemName: place.kind.symbol).foregroundStyle(.white).frame(width: 42, height: 42).background(place.kind.mapColor, in: Circle())
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(place.item.name ?? place.kind.rawValue).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                                                Text(distanceLabel(place)).font(.caption).foregroundStyle(.secondary)
+                                            }
+                                            Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                                        }.padding(.vertical, 6).contentShape(Rectangle())
+                                    }.buttonStyle(.plain)
+                                }
+                            }
+                        }.padding(16)
+                    }.scrollDismissesKeyboard(.interactively)
                 }
-            }.pausePathSurface()
-        .navigationTitle("Nearby pauses").navigationBarTitleDisplayMode(.inline)
-                .toolbar { Button("Done") { showResults = false } }
-        }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+                Spacer(minLength: 0)
+            }.frame(height: searchFocused ? compactSheetHeight : height)
+                .background(PausePathPalette.background, in: RoundedRectangle(cornerRadius: 26))
+                .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(PausePathPalette.teal.opacity(0.12)))
+                .shadow(color: .black.opacity(0.12), radius: 16, y: 4)
+        }.padding(.horizontal, 12).padding(.bottom, 8)
+    }
+
+    private func openPlanner() {
+        searchFocused = false
+        if let place = selectedPlace { routeDestination = place.item; routeDestinationQuery = place.item.name ?? "Selected stop" }
+        routeRequestID = UUID(); showRoutePlanner = true
+    }
+
+    private func distanceLabel(_ place: DiscoveredPlace) -> String {
+        guard let location = discovery.currentLocation, isFresh(location) else { return "Distance from you unknown" }
+        return distanceText(from: location.coordinate, to: place.item.placemark.coordinate) + " · straight-line"
+    }
+
+    private func selectedCard(_ place: DiscoveredPlace) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                Label(place.item.name ?? place.kind.rawValue, systemImage: place.kind.symbol).font(.title3.bold()).foregroundStyle(PausePathPalette.teal)
+                Spacer()
+                Button { animate { selectedID = nil } } label: { Image(systemName: "xmark").frame(width: 44, height: 44).background(.quaternary, in: Circle()) }.accessibilityLabel("Close stop details")
+            }
+            Text(distanceLabel(place)).font(.subheadline).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 10) {
+                Label(place.shared?.hoursDescription ?? "Opening hours unknown", systemImage: "clock")
+                Label("Wheelchair access: \(place.shared?.accessibilityDescription ?? "Unknown")", systemImage: "figure.roll")
+                Label("Backrest: \(place.shared?.backrestDescription ?? "Unknown") · Shade: \(place.shared?.shadeDescription ?? "Unknown")", systemImage: "sun.max")
+                Label("Last community verification: \(place.shared?.verificationDescription ?? "Unknown")", systemImage: "checkmark.shield")
+            }.font(.caption).frame(maxWidth: .infinity, alignment: .leading).padding(14)
+                .background(PausePathPalette.teal.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+            if let summary = place.businessSummary { Text(summary).font(.caption).foregroundStyle(.secondary) }
+            if let website = place.website { Link("Business website", destination: website).font(.subheadline) }
+            Button { routeDestination = place.item; routeDestinationQuery = place.item.name ?? "Selected stop"; openPlanner() } label: {
+                Label("Navigate here", systemImage: "arrow.triangle.turn.up.right.diamond.fill").frame(maxWidth: .infinity, minHeight: 48)
+            }.buttonStyle(.plain).font(.headline).foregroundStyle(PausePathPalette.ink)
+                .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 16))
+                .accessibilityHint("Review a walking route before starting navigation")
+            HStack {
+                Button {
+                    if pinnedStops.contains(where: { $0.id == place.id }) { pinnedStops.removeAll { $0.id == place.id } }
+                    else if pinnedStops.count < 3 { pinnedStops.append(place) }
+                    clearRoutePreview()
+                } label: { Label(pinnedStops.contains(where: { $0.id == place.id }) ? "Remove from route" : "Add to route", systemImage: "plus.circle") }
+                    .disabled(pinnedStops.count >= 3 && !pinnedStops.contains(where: { $0.id == place.id }))
+                Spacer()
+                Button { reportPlace = place; showReport = true } label: { Label("Report", systemImage: "exclamationmark.bubble") }
+            }.font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+            if pinnedStops.count >= 3 { Text("Three stops added. Remove one to choose another.").font(.caption).foregroundStyle(.secondary) }
+            Text("\(place.provider) · Hours and access may change.").font(.caption2).foregroundStyle(.secondary)
+        }
     }
 
     private func animate(_ action: () -> Void) {
@@ -782,7 +783,7 @@ struct DiscoverView: View {
         searchFocused = false
         cancelAreaRefresh()
         discovery.cancelPending()
-        animate { cardCollapsed = false; selectedID = place.id; selectedStopIDs = []; discovery.route = nil; discovery.itinerary = []; discovery.routeOptions = []; discovery.selectedRouteOptionID = nil }
+        animate { sheetLevel = 1; selectedID = place.id; discovery.route = nil; discovery.itinerary = []; discovery.routeOptions = []; discovery.selectedRouteOptionID = nil }
     }
     private func cancelAreaRefresh() {
         areaRefreshTask?.cancel()
@@ -813,14 +814,15 @@ struct DiscoverView: View {
     }
 
     private func moveToDiscoveredArea() {
+        // GPS updates never move a map the user is browsing.
+        guard !didPositionMap else { return }
         camera = .region(discovery.region)
-        // Also refresh after the user recenters on their location.
         if selectedID == nil { scheduleAreaRefresh(discovery.region) }
     }
 
     private func loadArea(_ region: MKCoordinateRegion) async {
         guard !Task.isCancelled else { return }
-        searchFocused = false; selectedID = nil; searched = true
+        searched = true
         lastRequestedRegion = nil
         // Only remember a successfully completed area. A cancelled request
         // must not suppress the next refresh for the same viewport.
@@ -831,30 +833,8 @@ struct DiscoverView: View {
 
     private func refresh() async {
         cancelAreaRefresh()
-        guard let location = discovery.currentLocation, isFresh(location) else {
-            discovery.status = "Waiting for your device location. Allow location access or search for an area."
-            discovery.useLocation()
-            return
-        }
         await loadArea(visibleRegion ?? discovery.region)
     }
-    private func buildRoute(to place: DiscoveredPlace) {
-        cancelAreaRefresh()
-        isPreviewingRoute = true
-        guard let location = discovery.currentLocation, isFresh(location) else {
-            discovery.status = "A fresh location is needed. Tap Use my current location and allow location access."
-            isPreviewingRoute = false
-            return
-        }
-        let origin = location.coordinate
-        let stops = selectedStopIDs.compactMap { id in visiblePlaces.first { $0.id == id } }
-        Task {
-            defer { isPreviewingRoute = false }
-            await discovery.walkingDirections(to: place, from: origin, via: stops)
-            fitRouteInMap()
-        }
-    }
-
     private func fitRouteInMap() {
         let rect = discovery.itinerary.reduce(MKMapRect.null) { $0.union($1.polyline.boundingMapRect) }
         if !rect.isNull { camera = .rect(rect) }

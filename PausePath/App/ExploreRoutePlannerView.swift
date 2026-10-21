@@ -32,6 +32,8 @@ struct ExploreRoutePlannerView: View {
     let usesCurrentLocation: Bool
     let customOrigin: CLLocationCoordinate2D?
     let customOriginName: String
+    let planningControls: AnyView
+    let chosenStops: [DiscoveredPlace]
     let onNavigate: (GeneratedWalk) -> Void
 
     let onClose: () -> Void
@@ -40,6 +42,7 @@ struct ExploreRoutePlannerView: View {
     @State private var showHelp = false
     @State private var sortOrder: RouteSortOrder = .recommended
     @State private var lastBuiltRequestID: UUID?
+    @State private var routeTask: Task<Void, Never>?
     @State private var routeWeather = WeatherGuidanceStore()
     @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherGuidanceEnabled = true
     @AppStorage(RouteDifficultyPreferences.storageKey)
@@ -93,7 +96,7 @@ struct ExploreRoutePlannerView: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Route options").font(.headline)
+                    Text("Plan your walk").font(.title3.bold()).foregroundStyle(PausePathPalette.teal)
                     Text("From \(originTitle)").font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer()
@@ -109,10 +112,7 @@ struct ExploreRoutePlannerView: View {
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    if usesCurrentLocation && originCoordinate == nil {
-                            Label("Getting your location…", systemImage: "location.slash").font(.caption).foregroundStyle(.secondary)
-                            Button("Try location again", systemImage: "location.fill") { discovery.useLocation() }.buttonStyle(.bordered)
-                    }
+                    planningControls
 
                     if !status.isEmpty { Text(status).font(.callout).foregroundStyle(.secondary) }
                     if !discovery.routeOptions.isEmpty {
@@ -154,12 +154,12 @@ struct ExploreRoutePlannerView: View {
                             Text("Choose a starting point and review route options for this destination.")
                                 .font(.callout).foregroundStyle(.secondary)
                             Button("Find routes", systemImage: "point.topleft.down.to.point.bottomright.curvepath") {
-                                Task { await buildRoutes() }
+                                requestRoutes(for: UUID())
                             }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
                                 .disabled(originCoordinate == nil)
                         }
                     } else {
-                        Label("Close route options to choose a destination on the map.", systemImage: "magnifyingglass")
+                        Label("Choose a destination above or on the map.", systemImage: "magnifyingglass")
                             .font(.callout).foregroundStyle(.secondary)
                     }
                 }.padding()
@@ -174,7 +174,7 @@ struct ExploreRoutePlannerView: View {
             }
             .onChange(of: routeRequestID) { _, requestID in requestRoutes(for: requestID) }
             .onChange(of: destination?.name) {
-                if destination != nil { Task { await buildRoutes() } }
+                if destination != nil { requestRoutes(for: UUID()) }
             }
             .sheet(isPresented: $showHelp) {
                 NavigationStack {
@@ -195,10 +195,13 @@ struct ExploreRoutePlannerView: View {
             .onChange(of: discovery.currentLocation?.timestamp) {
                 if isFresh(discovery.currentLocation) && discovery.routeOptions.isEmpty && !discovery.isLoading {
                     status = "Starting point: your current location."
+                    if destination != nil { requestRoutes(for: UUID()) }
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(PausePathPalette.background)
+        .onDisappear { routeTask?.cancel() }
         .task(id: "\(discovery.selectedRouteOptionID?.uuidString ?? "none")-\(weatherGuidanceEnabled)") {
             guard weatherGuidanceEnabled,
                   let option = discovery.routeOptions.first(where: { $0.id == discovery.selectedRouteOptionID }) else {
@@ -264,7 +267,7 @@ struct ExploreRoutePlannerView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(option.title).font(.headline).foregroundStyle(.primary)
                         if profileMatches(option) {
-                            Label("Recommended for you", systemImage: "sparkles")
+                            Label("Matches your preferences", systemImage: "sparkles")
                                 .font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
                         }
                     }
@@ -273,7 +276,9 @@ struct ExploreRoutePlannerView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 80), spacing: 8)], spacing: 8) {
                     routeMetric("Distance", value: String(format: "%.1f km", option.distance / 1000))
                     routeMetric("Est. time", value: "\(max(1, Int(ceil(option.duration / 60)))) min")
-                    routeMetric("Stops", value: "\(option.stops.count)")
+                    routeMetric("Planned stops", value: "\(option.stops.count)")
+                    routeMetric("Longest bench gap", value: longestBenchGap(option))
+                    routeMetric("Terrain", value: "Unknown")
                 }
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityAddTraits(isSelected ? [.isSelected] : [])
@@ -281,6 +286,12 @@ struct ExploreRoutePlannerView: View {
             if !missing.isEmpty {
                 Text("Does not include: \(missing.joined(separator: ", "))")
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            Text("Bench gap includes the start and finish. Only mapped benches count; seating and accessibility are not verified.")
+                .font(.caption2).foregroundStyle(.secondary)
+            if !option.stops.isEmpty {
+                Text(option.stops.enumerated().map { "\($0.offset + 1). \($0.element.item.name ?? $0.element.kind.rawValue)" }.joined(separator: " → "))
+                    .font(.caption).foregroundStyle(PausePathPalette.teal)
             }
             RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: option.distance, durationSeconds: option.duration), compact: true)
             if isSelected {
@@ -305,6 +316,11 @@ struct ExploreRoutePlannerView: View {
         }
     }
 
+    private func longestBenchGap(_ option: WalkingRouteOption) -> String {
+        guard let meters = RoutePreviewMetrics.maximumMappedBenchGap(legDistances: option.legs.map(\.distance), stopKinds: option.stops.map(\.kind)) else { return "Unknown" }
+        return meters < 1000 ? String(format: "%.0f m", meters) : String(format: "%.1f km", meters / 1000)
+    }
+
     private func routeMetric(_ title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title).font(.caption2).foregroundStyle(.secondary)
@@ -318,11 +334,13 @@ struct ExploreRoutePlannerView: View {
 
     private func buildRoutes() async {
         guard let origin = originCoordinate, let destination else { return }
+        guard !Task.isCancelled else { return }
         clearRouteOptions()
         status = "Looking for stops near the route…"
         let region = corridorRegion(from: origin, to: destination.placemark.coordinate)
-        _ = await discovery.discover(kinds: Set(FacilityKind.allCases), region: region)
+        _ = await discovery.discover(kinds: Set(FacilityKind.allCases), region: region, waitForRefresh: false)
 
+        guard !Task.isCancelled else { return }
         let allPlaces = discovery.places
         let corridorPlaces = allPlaces
             .map { (place: $0, distance: distanceFromDirectLine($0.item.placemark.coordinate, from: origin, to: destination.placemark.coordinate)) }
@@ -330,12 +348,14 @@ struct ExploreRoutePlannerView: View {
             .sorted { $0.distance < $1.distance }
             .map { $0.place }
 
-        var candidates: [DiscoveredPlace] = []
+        var candidates = chosenStops.filter { stop in
+            CLLocation(latitude: stop.item.placemark.coordinate.latitude, longitude: stop.item.placemark.coordinate.longitude).distance(from: CLLocation(latitude: destination.placemark.coordinate.latitude, longitude: destination.placemark.coordinate.longitude)) > 15
+        }
         if mandatoryKinds.isEmpty {
-            candidates = Array(corridorPlaces.prefix(3))
+            for candidate in corridorPlaces where candidates.count < 3 && !candidates.contains(where: { $0.id == candidate.id }) { candidates.append(candidate) }
         } else {
             for kind in mandatoryKinds.sorted(by: { $0.rawValue < $1.rawValue }) {
-                if let candidate = corridorPlaces.first(where: { $0.kind == kind }) { candidates.append(candidate) }
+                if candidates.count < 3, !candidates.contains(where: { $0.kind == kind }), let candidate = corridorPlaces.first(where: { $0.kind == kind }) { candidates.append(candidate) }
             }
             for candidate in corridorPlaces where candidates.count < 3 && !candidates.contains(where: { $0.id == candidate.id }) {
                 candidates.append(candidate)
@@ -344,6 +364,13 @@ struct ExploreRoutePlannerView: View {
 
         status = "Building direct and stop-based route options…"
         await discovery.walkingDirections(to: destination, destinationName: destination.name ?? destinationQuery, from: origin, via: candidates)
+        guard !Task.isCancelled else { return }
+        let chosenIDs = Set(candidates.filter { candidate in chosenStops.contains(where: { $0.id == candidate.id }) }.map(\.id))
+        if !chosenIDs.isEmpty {
+            discovery.routeOptions.removeAll { !chosenIDs.isSubset(of: Set($0.stops.map(\.id))) }
+            if let first = discovery.routeOptions.first { discovery.selectRouteOption(first.id) }
+            else { discovery.route = nil; discovery.itinerary = []; discovery.selectedRouteOptionID = nil }
+        }
         if discovery.routeOptions.isEmpty {
             status = mandatoryKinds.isEmpty
                 ? "No walking route was found. Try another destination or start."
@@ -360,7 +387,8 @@ struct ExploreRoutePlannerView: View {
     private func requestRoutes(for requestID: UUID) {
         guard lastBuiltRequestID != requestID else { return }
         lastBuiltRequestID = requestID
-        Task { await buildRoutes() }
+        routeTask?.cancel()
+        routeTask = Task { await buildRoutes() }
     }
 
     private func difficulty(of option: WalkingRouteOption) -> RouteDifficultyLevel? {

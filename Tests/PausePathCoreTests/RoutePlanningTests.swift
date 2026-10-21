@@ -50,4 +50,18 @@ final class RoutePlanningTests: XCTestCase {
         RouteAdjustment.longer.apply(to: &p)
         XCTAssertEqual(p.distanceMeters, original + 200)
     }
+    func testMappedBenchGapIncludesFinalLeg() {
+        XCTAssertEqual(RoutePreviewMetrics.maximumMappedBenchGap(legDistances: [200, 300, 700], stopKinds: [.bench, .bench]), 700)
+    }
+    func testOtherAmenitiesDoNotImplySeating() {
+        XCTAssertEqual(RoutePreviewMetrics.maximumMappedBenchGap(legDistances: [200, 300, 400], stopKinds: [.cafe, .bathroom]), 900)
+    }
+    func testDirectRouteGapIsFullRouteDistance() {
+        XCTAssertEqual(RoutePreviewMetrics.maximumMappedBenchGap(legDistances: [1200], stopKinds: []), 1200)
+    }
+    func testMissingOrInvalidLegDataStaysUnknown() {
+        XCTAssertNil(RoutePreviewMetrics.maximumMappedBenchGap(legDistances: [200], stopKinds: [.bench]))
+        XCTAssertNil(RoutePreviewMetrics.maximumMappedBenchGap(legDistances: [.nan], stopKinds: []))
+    }
+
 }

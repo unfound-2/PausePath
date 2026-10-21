@@ -289,6 +289,16 @@ extension FacilityKind {
     static func fromAPI(_ category: String) -> FacilityKind? { allCases.first { $0.apiCategory == category } }
 }
 struct APIPoint: Decodable { let coordinates: [Double] }
+// Only known scalar metadata is displayed; unfamiliar shapes stay unknown.
+struct POIMetadataValue: Decodable {
+    let text: String?
+    let flag: Bool?
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer()
+        text = try? value.decode(String.self)
+        flag = try? value.decode(Bool.self)
+    }
+}
 struct SharedPOI: Decodable, Identifiable {
     let id: UUID
     let name: String?
@@ -298,6 +308,28 @@ struct SharedPOI: Decodable, Identifiable {
     let source: String
     let is_active: Bool?
     let closed_until: String?
+    let attributes: [String: POIMetadataValue]?
+    let operating_hours: [String: POIMetadataValue]?
+    let last_verified_at: String?
+    var hoursDescription: String {
+        if unavailable { return "Reported unavailable" }
+        guard let raw = operating_hours?["raw"]?.text, !raw.isEmpty else { return "Opening hours unknown" }
+        return raw == "24/7" ? "Listed as open 24 hours · not live-verified" : "Listed hours: " + raw + " · current status unknown"
+    }
+    private func attribute(_ key: String) -> String {
+        guard let flag = attributes?[key]?.flag else { return "Unknown" }
+        return flag ? "Yes" : "No"
+    }
+    var accessibilityDescription: String { attribute("wheelchair_accessible") }
+    var backrestDescription: String { attribute("backrest") }
+    var shadeDescription: String { attribute("shaded") }
+    var verificationDescription: String {
+        guard let raw = last_verified_at else { return "Unknown" }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = formatter.date(from: raw) ?? ISO8601DateFormatter().date(from: raw) else { return "Unknown" }
+        return date.formatted(date: .abbreviated, time: .omitted)
+    }
     var unavailable: Bool {
         if is_active == false { return true }
         guard let closed_until else { return false }

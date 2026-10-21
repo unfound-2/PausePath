@@ -327,3 +327,22 @@ public enum PathTrend {
                 valid.filter { $0.date >= prior && $0.date < start }.reduce(0) { $0 + $1.distanceMeters })
     }
 }
+
+/// Distances along actual route legs, with the start and finish as boundaries.
+/// A café or bathroom is not assumed to provide seating.
+public enum RoutePreviewMetrics {
+    public static func maximumMappedBenchGap(legDistances: [Double], stopKinds: [FacilityKind]) -> Double? {
+        guard legDistances.count == stopKinds.count + 1,
+              legDistances.allSatisfy({ $0.isFinite && $0 >= 0 }) else { return nil }
+        var gap = 0.0
+        var longest = 0.0
+        for (index, meters) in legDistances.enumerated() {
+            gap += meters
+            if index < stopKinds.count && stopKinds[index] == .bench {
+                longest = max(longest, gap)
+                gap = 0
+            }
+        }
+        return max(longest, gap)
+    }
+}

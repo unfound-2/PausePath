@@ -31,6 +31,7 @@ struct WalkingRouteOption: Identifiable {
     // A neutral map region for first launch; never imply this is the user's location.
     var region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 0, longitude: 0), span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02))
     var places: [DiscoveredPlace] = []
+    var areaLoadState = "idle"
     var status = "Search any city or neighborhood to begin."
     var isLoading = false
     var route: MKRoute?
@@ -89,9 +90,8 @@ struct WalkingRouteOption: Identifiable {
     }
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
-        generation = UUID(); route = nil; itinerary = []; routeOptions = []; selectedRouteOptionID = nil; isLoading = false
         currentLocation = location
-        region.center = location.coordinate
+        // The Explore view decides whether an explicit recenter is appropriate.
         status = "Location found. Explore nearby places or plan a route from here."
     }
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
@@ -108,7 +108,7 @@ struct WalkingRouteOption: Identifiable {
 
     @discardableResult func findArea(_ query: String) async -> Bool {
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        let token = UUID(); generation = token; isLoading = true; route = nil
+        let token = UUID(); generation = token; isLoading = true; areaLoadState = "loading"; route = nil
         defer { if generation == token { isLoading = false } }
         let request = MKLocalSearch.Request(); request.naturalLanguageQuery = query
         do {
@@ -121,9 +121,9 @@ struct WalkingRouteOption: Identifiable {
         } catch { if token == generation { status = "Place search failed. Check your connection and try again." }; return false }
     }
 
-    @discardableResult func discover(kinds: Set<FacilityKind>, region searchRegion: MKCoordinateRegion) async -> Bool {
+    @discardableResult func discover(kinds: Set<FacilityKind>, region searchRegion: MKCoordinateRegion, waitForRefresh: Bool = true) async -> Bool {
         cancelPending()
-        let token = UUID(); generation = token; isLoading = true; route = nil
+        let token = UUID(); generation = token; isLoading = true; areaLoadState = "loading"; route = nil
         let key = areaKey(searchRegion)
         let cached = recentAreas.first { $0.key == key && Date().timeIntervalSince($0.savedAt) < 300 }
         places = cached?.places ?? places.filter { place in
@@ -146,6 +146,7 @@ struct WalkingRouteOption: Identifiable {
         let sharedTask = Task { @MainActor in
             let publish: (SharedSearch) -> Void = { [self] page in
                 guard token == generation, !Task.isCancelled else { return }
+                areaLoadState = page.loading_state ?? (page.warning == nil ? "ready" : "loading")
                 let updates = page.pois.compactMap(\.place)
                 receivedSharedPins = receivedSharedPins || !updates.isEmpty
                 let ids = Set(updates.map(\.id))
@@ -160,7 +161,7 @@ struct WalkingRouteOption: Identifiable {
             }
             var result = await sharedStops(in: searchRegion, onPage: publish)
             // A busy ingestion response is not an authoritative empty area.
-            for attempt in 0..<24 {
+            for attempt in 0..<(waitForRefresh ? 24 : 0) {
                 guard token == generation, !Task.isCancelled else { return }
                 guard case .success(let response) = result,
                       response.loading_state == "loading" || (response.loading_state == nil && response.warning != nil) else { break }
@@ -179,6 +180,7 @@ struct WalkingRouteOption: Identifiable {
             sharedFinished = true
             switch result {
             case .success(let response):
+                areaLoadState = response.loading_state ?? (response.warning == nil ? "ready" : "unavailable")
                 sharedSucceeded = response.warning == nil
                 let updates = response.pois.compactMap(\.place)
                 receivedSharedPins = receivedSharedPins || !updates.isEmpty
@@ -188,6 +190,7 @@ struct WalkingRouteOption: Identifiable {
                 places.insert(contentsOf: updates, at: 0)
                 sharedWarning = (response.warning ?? "") + (response.truncated ? " Zoom in for all stops." : "")
             case .failure:
+                areaLoadState = "unavailable"
                 sharedWarning = "Shared stops could not refresh; existing pins may be outdated."
             }
             status = cafeFinished ? sharedWarning : "Updating cafés… " + sharedWarning
