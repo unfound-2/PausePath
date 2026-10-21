@@ -42,6 +42,8 @@ struct ExploreRoutePlannerView: View {
     @State private var showHelp = false
     @State private var sortOrder: RouteSortOrder = .recommended
     @State private var lastBuiltRequestID: UUID?
+    @State private var requestedRestGap = 400.0
+    @State private var allowUnknownRestStops = true
     @State private var routeTask: Task<Void, Never>?
     @State private var routeWeather = WeatherGuidanceStore()
     @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherGuidanceEnabled = true
@@ -63,13 +65,24 @@ struct ExploreRoutePlannerView: View {
         usesCurrentLocation ? (isFresh(discovery.currentLocation) ? discovery.currentLocation?.coordinate : nil) : customOrigin
     }
 
+    private var routePreferences: RoutePreferences {
+        var value = preferences; value.maximumRestGapMeters = requestedRestGap; return value
+    }
     private var originTitle: String { usesCurrentLocation ? "Current location" : customOriginName }
 
     private var visibleOptions: [WalkingRouteOption] {
+        let selectedPreferences = routePreferences
+        let includeUnknown = allowUnknownRestStops
         let filtered = difficultyFilter.level.map { level in discovery.routeOptions.filter { difficulty(of: $0) == level } } ?? discovery.routeOptions
         return filtered.sorted { left, right in
             switch sortOrder {
             case .recommended:
+                func restRank(_ option: WalkingRouteOption) -> Int {
+                    switch option.restAssessment(selectedPreferences, allowUnknown: includeUnknown).status {
+                    case .meets: 0; case .unverified: 1; case .exceeds: 2; case .unknown: 3
+                    }
+                }
+                if restRank(left) != restRank(right) { return restRank(left) < restRank(right) }
                 let leftRecommended = profileMatches(left)
                 let rightRecommended = profileMatches(right)
                 if leftRecommended != rightRecommended { return leftRecommended }
@@ -113,6 +126,12 @@ struct ExploreRoutePlannerView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     planningControls
+                    VStack(alignment: .leading, spacing: 8) {
+                        Stepper("Rest gap: at most \(Int(requestedRestGap)) m", value: $requestedRestGap, in: 100...1000, step: 50)
+                        Toggle("Include benches with unknown hours or access", isOn: $allowUnknownRestStops)
+                        Text("Known private, customer-only, closed or reported-unavailable benches never count as rest stops. Unknown availability is clearly marked.").font(.caption).foregroundStyle(.secondary)
+                        Button("Update route choices") { requestRoutes(for: UUID()) }.disabled(discovery.isLoading || destination == nil)
+                    }.padding(14).background(PausePathPalette.teal.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
 
                     if !status.isEmpty { Text(status).font(.callout).foregroundStyle(.secondary) }
                     if !discovery.routeOptions.isEmpty {
@@ -165,6 +184,7 @@ struct ExploreRoutePlannerView: View {
                 }.padding()
             }
             .onAppear {
+                if lastBuiltRequestID == nil { requestedRestGap = preferences.maximumRestGapMeters }
                 if destination == nil, let initialDestination {
                     destination = initialDestination.item
                     destinationQuery = initialDestination.item.name ?? "Selected place"
@@ -267,7 +287,7 @@ struct ExploreRoutePlannerView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(option.title).font(.headline).foregroundStyle(.primary)
                         if profileMatches(option) {
-                            Label("Matches your preferences", systemImage: "sparkles")
+                            Label("Fits distance & mapped rest gap", systemImage: "sparkles")
                                 .font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
                         }
                     }
@@ -275,7 +295,7 @@ struct ExploreRoutePlannerView: View {
                 }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 80), spacing: 8)], spacing: 8) {
                     routeMetric("Distance", value: String(format: "%.1f km", option.distance / 1000))
-                    routeMetric("Est. time", value: "\(max(1, Int(ceil(option.duration / 60)))) min")
+                    routeMetric("Est. time", value: "\(max(1, Int(ceil(option.distance / max(0.3, routePreferences.speedMetersPerSecond) / 60)))) min")
                     routeMetric("Planned stops", value: "\(option.stops.count)")
                     routeMetric("Longest bench gap", value: longestBenchGap(option))
                     routeMetric("Terrain", value: "Unknown")
@@ -287,6 +307,7 @@ struct ExploreRoutePlannerView: View {
                 Text("Does not include: \(missing.joined(separator: ", "))")
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             }
+            RestGapStatusCard(assessment: option.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops), limit: requestedRestGap)
             Text("Bench gap includes the start and finish. Only mapped benches count; seating and accessibility are not verified.")
                 .font(.caption2).foregroundStyle(.secondary)
             if !option.stops.isEmpty {
@@ -297,7 +318,7 @@ struct ExploreRoutePlannerView: View {
             if isSelected {
             if weatherGuidanceEnabled { WeatherGuidanceCard(store: routeWeather) }
             Button("Navigate this route", systemImage: "figure.walk") {
-                let walk = GeneratedWalk(name: "Walk to \(option.destinationName)", legs: option.legs, preferences: preferences)
+                let walk = GeneratedWalk(name: "Walk to \(option.destinationName)", legs: option.legs, preferences: routePreferences, stops: option.stops, allowUnknownRestStops: allowUnknownRestStops)
                 onClose()
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(250))
@@ -317,7 +338,7 @@ struct ExploreRoutePlannerView: View {
     }
 
     private func longestBenchGap(_ option: WalkingRouteOption) -> String {
-        guard let meters = RoutePreviewMetrics.maximumMappedBenchGap(legDistances: option.legs.map(\.distance), stopKinds: option.stops.map(\.kind)) else { return "Unknown" }
+        guard let meters = option.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops).longestGap else { return "Unknown" }
         return meters < 1000 ? String(format: "%.0f m", meters) : String(format: "%.1f km", meters / 1000)
     }
 
@@ -363,7 +384,7 @@ struct ExploreRoutePlannerView: View {
         }
 
         status = "Building direct and stop-based route options…"
-        await discovery.walkingDirections(to: destination, destinationName: destination.name ?? destinationQuery, from: origin, via: candidates)
+        await discovery.walkingDirections(to: destination, destinationName: destination.name ?? destinationQuery, from: origin, via: candidates, preferences: routePreferences, allowUnknownRestStops: allowUnknownRestStops)
         guard !Task.isCancelled else { return }
         let chosenIDs = Set(candidates.filter { candidate in chosenStops.contains(where: { $0.id == candidate.id }) }.map(\.id))
         if !chosenIDs.isEmpty {
@@ -379,8 +400,10 @@ struct ExploreRoutePlannerView: View {
         }
         let availableKinds = Set(candidates.map(\.kind))
         let unavailable = mandatoryKinds.subtracting(availableKinds)
+        let unmet = discovery.routeOptions.allSatisfy { $0.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops).status == .exceeds }
+        let gapWarning = unmet ? "No route meets your requested rest gap with the available mapped data. Choose another destination, a shorter walk, or change your preference." : ""
         let unavailableText = unavailable.isEmpty ? "" : " No mapped \(unavailable.map(\.chipTitle).sorted().joined(separator: " or ")) was found near the route."
-        status = unavailableText.trimmingCharacters(in: .whitespaces)
+        status = ([gapWarning, unavailableText].filter { !$0.isEmpty }).joined(separator: " ")
         savedRouteCount = SavedRouteStore.load().count
     }
 
@@ -402,7 +425,8 @@ struct ExploreRoutePlannerView: View {
         let withinDistance = abs(option.distance - preferences.distanceMeters) <= preferences.distanceMeters * 0.25
         let matchesStops = preferences.facilities.isEmpty || preferences.facilities.isSubset(of: Set(option.stops.map(\.kind)))
         let withinGentleRange = !profile.goal.prefersGentlerRoutes || difficulty(of: option) == .easy || difficulty(of: option) == .moderate
-        return withinDistance && matchesStops && withinGentleRange
+        let restStatus = option.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops).status
+        return withinDistance && matchesStops && withinGentleRange && (restStatus == .meets || restStatus == .unverified)
     }
 
     private func sortRank(_ level: RouteDifficultyLevel?) -> Int {

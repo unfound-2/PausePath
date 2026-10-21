@@ -52,6 +52,7 @@ struct AccountView: View {
                 Section("How connected features work") {
                     Text("Explore shares the visible map area to load OSM, community stops and Mapbox cafés. It refreshes as you move the map and once a minute while Explore is open.")
                     Text("Finding route breaks shares the planned path, departure time and stop preferences. Arrival estimates on the server use a standard walking speed. Health data and your recorded activities stay on this device.")
+                    Text("Recently explored public stops can be saved on this phone for seven days. Clear them in Profile’s Saved areas & navigation. Starting a walk can keep location guidance running while locked; Pause and End stop tracking.")
                     Text("Reports are linked to your account. New stops need review before appearing for others. Provider coverage and opening hours vary by location.")
                 }.font(.footnote)
                 Section("Map credits") {

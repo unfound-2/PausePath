@@ -33,6 +33,8 @@ enum PausePathPalette {
     static let teal = Color("BrandTeal")
     static let lime = Color("BrandLime")
     static let ink = Color("BrandInk")
+    static let surface = Color(.secondarySystemGroupedBackground)
+    static let corner: CGFloat = 22
 }
 
 extension View {
@@ -40,6 +42,9 @@ extension View {
         self.scrollContentBackground(.hidden)
             .background(PausePathPalette.background)
             .toolbarBackground(PausePathPalette.background, for: .navigationBar)
+            .tint(PausePathPalette.teal)
+            .fontDesign(.rounded)
+            .buttonBorderShape(.roundedRectangle(radius: 14))
     }
 }
 
@@ -103,13 +108,17 @@ private struct LaunchExperienceView: View {
             }
         }
         .onOpenURL { url in
+            if url.scheme == "pausepath", url.host == "walk" || url.host == "explore" {
+                NotificationCenter.default.post(name: .pausePathOpenExplore, object: nil)
+                return
+            }
             guard url.scheme == "pausepath", url.host == "community", url.path == "/join",
                   let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "code" })?.value,
                   !code.isEmpty else { return }
             UserDefaults.standard.set(code, forKey: "pausepath.pendingCommunityInvite")
             NotificationCenter.default.post(name: .pausePathJoinCommunity, object: nil, userInfo: ["code": code])
         }
-        .task { await runIntro() }
+        .task { await WalkLiveActivity.endOrphanedActivities(); await runIntro() }
     }
 
     private var marker: some View {

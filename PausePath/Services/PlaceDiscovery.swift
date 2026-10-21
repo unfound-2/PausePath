@@ -33,6 +33,8 @@ struct WalkingRouteOption: Identifiable {
     var places: [DiscoveredPlace] = []
     var areaLoadState = "idle"
     var areaLoadIncomplete = false
+    var savedAreaDate: Date?
+    var showingSavedArea = false
     var status = "Search any city or neighborhood to begin."
     var isLoading = false
     var route: MKRoute?
@@ -55,11 +57,23 @@ struct WalkingRouteOption: Identifiable {
         [region.center.latitude, region.center.longitude, region.span.latitudeDelta, region.span.longitudeDelta]
             .map { String(format: "%.4f", $0) }.joined(separator: ":")
     }
+    private func contains(_ point: CLLocationCoordinate2D, in region: MKCoordinateRegion) -> Bool {
+        let longitudeDistance = abs((point.longitude - region.center.longitude + 540).truncatingRemainder(dividingBy: 360) - 180)
+        return abs(point.latitude - region.center.latitude) <= region.span.latitudeDelta / 2 && longitudeDistance <= region.span.longitudeDelta / 2
+    }
     override init() {
         super.init()
         locationManager.delegate = self
         authorizationStatus = locationManager.authorizationStatus
         accuracyAuthorization = locationManager.accuracyAuthorization
+        if let saved = PersistentAreaCache.mostRecent {
+            let values = saved.key.split(separator: ":").compactMap { Double($0) }
+            if values.count == 4, values[2] > 0, values[3] > 0 {
+                region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: values[0], longitude: values[1]), span: MKCoordinateSpan(latitudeDelta: values[2], longitudeDelta: values[3]))
+                places = saved.places; savedAreaDate = saved.savedAt; showingSavedArea = true
+                status = "Saved stops shown. Availability may have changed."
+            }
+        }
     }
 
     func requestLocationAccess() {
@@ -126,7 +140,11 @@ struct WalkingRouteOption: Identifiable {
         cancelPending()
         let token = UUID(); generation = token; isLoading = true; areaLoadState = "loading"; route = nil
         let key = areaKey(searchRegion)
+        let disk = PersistentAreaCache.load(key)
         let cached = recentAreas.first { $0.key == key && Date().timeIntervalSince($0.savedAt) < 300 }
+            ?? disk.map { AreaSnapshot(key: key, places: $0.places, savedAt: $0.savedAt) }
+        showingSavedArea = cached != nil
+        savedAreaDate = cached?.savedAt
         // Keep existing pins until a successful response replaces them. Cached
         // areas become visible immediately when returning to an earlier city.
         if let cached {
@@ -150,6 +168,8 @@ struct WalkingRouteOption: Identifiable {
         let sharedTask = Task { @MainActor in
             let publish: (SharedSearch) -> Void = { [self] page in
                 guard token == generation, !Task.isCancelled else { return }
+                showingSavedArea = false
+                savedAreaDate = Date()
                 areaLoadState = page.loading_state ?? (page.warning == nil ? "ready" : "loading")
                 let updates = page.pois.compactMap(\.place)
                 receivedSharedPins = receivedSharedPins || !updates.isEmpty
@@ -161,6 +181,7 @@ struct WalkingRouteOption: Identifiable {
                     recentAreas.removeAll { $0.key == key }
                     recentAreas.insert(AreaSnapshot(key: key, places: places, savedAt: Date()), at: 0)
                     recentAreas = Array(recentAreas.prefix(8))
+                    PersistentAreaCache.save(key: key, places: places.filter { contains($0.item.placemark.coordinate, in: searchRegion) })
                 }
             }
             var result = await sharedStops(in: searchRegion, onPage: publish)
@@ -233,11 +254,16 @@ struct WalkingRouteOption: Identifiable {
             recentAreas.removeAll { $0.key == key }
             recentAreas.insert(AreaSnapshot(key: key, places: places, savedAt: Date()), at: 0)
             recentAreas = Array(recentAreas.prefix(8))
+            PersistentAreaCache.save(key: key, places: places.filter { contains($0.item.placemark.coordinate, in: searchRegion) })
+            showingSavedArea = false; savedAreaDate = Date()
         }
+        if !sharedSucceeded && !receivedSharedPins && cached != nil { showingSavedArea = true }
         areaLoadIncomplete = !sharedSucceeded || !cafeSucceeded
         status = "\(places.count) possible stops. " + sharedWarning + " " + cafeWarning
         return sharedSucceeded && cafeSucceeded
     }
+
+    func clearAreaMemory() { recentAreas = []; savedAreaDate = nil; showingSavedArea = false }
 
     private func sharedStops(in region: MKCoordinateRegion, onPage: ((SharedSearch) -> Void)? = nil) async -> Result<SharedSearch, Error> {
         do { return .success(try await PausePathAPI.search(region, onPage: onPage)) }
@@ -248,24 +274,15 @@ struct WalkingRouteOption: Identifiable {
         catch { return .failure(error) }
     }
 
-    func walkingDirections(to place: DiscoveredPlace, from origin: CLLocationCoordinate2D, via stops: [DiscoveredPlace] = []) async {
-        await walkingDirections(to: place.item, destinationName: place.item.name ?? "Destination", from: origin, via: stops)
+    func walkingDirections(to place: DiscoveredPlace, from origin: CLLocationCoordinate2D, via stops: [DiscoveredPlace] = [], preferences: RoutePreferences? = nil, allowUnknownRestStops: Bool = true) async {
+        await walkingDirections(to: place.item, destinationName: place.item.name ?? "Destination", from: origin, via: stops, preferences: preferences, allowUnknownRestStops: allowUnknownRestStops)
     }
 
-    func walkingDirections(to destination: MKMapItem, destinationName: String, from origin: CLLocationCoordinate2D, via stops: [DiscoveredPlace] = []) async {
+    func walkingDirections(to destination: MKMapItem, destinationName: String, from origin: CLLocationCoordinate2D, via stops: [DiscoveredPlace] = [], preferences: RoutePreferences? = nil, allowUnknownRestStops: Bool = true) async {
         let token = UUID(); generation = token; route = nil; itinerary = []; routeOptions = []; selectedRouteOptionID = nil; isLoading = true
         defer { if token == generation { isLoading = false } }
         var options: [WalkingRouteOption] = []
-        var stopSets: [[DiscoveredPlace]] = [[]]
-        for stop in stops { stopSets.append([stop]) }
-        if stops.count >= 2 {
-            for first in stops.indices {
-                for second in stops.indices where second > first {
-                    stopSets.append([stops[first], stops[second]])
-                }
-            }
-        }
-        if stops.count == 3 { stopSets.append(stops) }
+        let stopSets: [[DiscoveredPlace]] = stops.isEmpty ? [[]] : [[], stops]
 
         var directDistance: Double?
         for stopSet in stopSets {
@@ -279,7 +296,8 @@ struct WalkingRouteOption: Identifiable {
                     request.destination = waypoint.item
                     request.transportType = .walking
                     let response = try await MKDirections(request: request).calculate()
-                    guard let leg = response.routes.first else { throw RouteBuildError.noRoute }
+                    guard let leg = response.routes.first, let endpoint = leg.polyline.walkingCoordinates.last,
+                          WalkingGeometry.distance(endpoint, Coordinate(waypoint.item.placemark.coordinate.latitude, waypoint.item.placemark.coordinate.longitude)) <= 30 else { throw RouteBuildError.noRoute }
                     legs.append(leg)
                     start = leg.polyline.walkingCoordinates.last?.mapCoordinate ?? waypoint.item.placemark.coordinate
                 }
@@ -301,9 +319,29 @@ struct WalkingRouteOption: Identifiable {
             }
         }
         guard token == generation else { return }
-        routeOptions = options.sorted { $0.distance < $1.distance }
+        if let preferences {
+            var improved: [WalkingRouteOption] = []
+            for option in options.prefix(2) {
+                let revised = await RestAwareRouteBuilder.improve(option, candidates: places, preferences: preferences, allowUnknown: allowUnknownRestStops)
+                guard token == generation, !Task.isCancelled else { return }
+                if revised.id != option.id { improved.append(revised) }
+            }
+            options += improved
+        }
+        routeOptions = options.sorted {
+            if let preferences {
+                func rank(_ option: WalkingRouteOption) -> Int {
+                    switch option.restAssessment(preferences, allowUnknown: allowUnknownRestStops).status {
+                    case .meets: 0; case .unverified: 1; case .exceeds: 2; case .unknown: 3
+                    }
+                }
+                if rank($0) != rank($1) { return rank($0) < rank($1) }
+            }
+            return $0.distance < $1.distance
+        }
         SavedRouteStore.save(routeOptions, origin: origin, destination: destination.placemark.coordinate)
-        if let direct = routeOptions.first(where: { $0.stops.isEmpty }) {
+        if preferences != nil, let first = routeOptions.first { selectRouteOption(first.id) }
+        else if let direct = routeOptions.first(where: { $0.stops.isEmpty }) {
             selectRouteOption(direct.id)
         } else if let first = routeOptions.first {
             selectRouteOption(first.id)

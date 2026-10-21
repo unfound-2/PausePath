@@ -10,6 +10,7 @@ import logging
 from time import monotonic
 from .db import transaction
 from .providers import fetch_osm, store_osm
+from .hours import enrich_poi
 
 STEP = .02  # 2.2 km north/south; longitude distance shrinks toward the poles.
 _stop = Event()
@@ -165,12 +166,16 @@ def search_area(bounds):
     with transaction() as conn:
         rows = conn.execute('''SELECT id,source,external_id,name,category,
             ST_AsGeoJSON(geom)::jsonb AS location,is_active,confidence_score,
-            operating_hours,attributes,closed_until,source_updated_at
+            operating_hours,attributes,closed_until,source_updated_at,
+            (SELECT max(r.created_at) FROM poi_reports r WHERE r.poi_id=pois.id AND r.report_type='confirm_exists') AS last_verified_at,
+            (SELECT r.created_at FROM poi_reports r WHERE r.poi_id=pois.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS last_reported_at,
+            (SELECT r.report_type FROM poi_reports r WHERE r.poi_id=pois.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS last_report_type
             FROM pois WHERE is_active AND (closed_until IS NULL OR closed_until <= now())
             AND geom && ST_MakeEnvelope(%s,%s,%s,%s,4326)
             AND (%s::uuid IS NULL OR id > %s::uuid)
             ORDER BY id LIMIT 501''',
             (bounds.west,bounds.south,bounds.east,bounds.north,cursor,cursor)).fetchall()
+    rows = [enrich_poi(row, getattr(bounds, 'arrival_at', None)) for row in rows]
     wake_worker()
     state = 'ready' if complete else ('unavailable' if unavailable else 'loading')
     warning = None if complete else ('Some facilities are temporarily unavailable. Saved stops remain visible; retry is automatic.' if unavailable else 'Loading facilities for this area. Saved stops are shown now.')

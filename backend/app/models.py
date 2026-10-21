@@ -96,6 +96,12 @@ class IngestRequest(StrictModel):
 
 class DiscoveryRequest(IngestRequest):
     cursor: Optional[UUID] = None
+    arrival_at: Optional[datetime] = None
+    @field_validator('arrival_at')
+    @classmethod
+    def aware_arrival(cls, value):
+        if value is not None and value.tzinfo is None: raise ValueError('arrival_at must include a timezone')
+        return value
 
 class Review(StrictModel):
     decision: Literal['approve','reject']
@@ -199,6 +205,11 @@ class DiscoveryPOI(POISummary):
     operating_hours: Optional[Dict[str, Any]] = None
     closed_until: Optional[datetime] = None
     source_updated_at: Optional[datetime] = None
+    last_verified_at: Optional[datetime] = None
+    last_reported_at: Optional[datetime] = None
+    last_report_type: Optional[Literal['confirm_exists','broken_or_empty','temporarily_closed','removed']] = None
+    hours_status: Literal['open','closed','unknown'] = 'unknown'
+    hours_evaluated_at: Optional[datetime] = None
 
 class DiscoveryResponse(StrictModel):
     loading_state: Literal['ready', 'loading', 'unavailable'] = 'ready'

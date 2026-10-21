@@ -12,6 +12,8 @@ struct WalkingNavigationView: View {
     @State private var showEndConfirmation = false
     @State private var showReturnConfirmation = false
     @State private var walkRecorded = false
+    @AppStorage("pausepath.walk.background") private var backgroundWalks = true
+    @AppStorage("pausepath.walk.liveActivity") private var liveActivities = true
     @State private var milestoneMessage: String?
     @AppStorage("pausepath.trackedWalks") private var trackedWalkData = Data()
     @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherGuidanceEnabled = true
@@ -66,7 +68,8 @@ struct WalkingNavigationView: View {
                         Text("\(plan.distance / 1000, specifier: "%.1f") km • about \(Int(plan.duration / 60)) min").font(.title2.bold())
                         RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: plan.distance, durationSeconds: plan.duration))
                         Text(plan.requirements).font(.subheadline)
-                        Text("This route follows Apple walking directions. Terrain, distance between seats, and facility opening hours are unverified; it is not a confirmed match for those requirements.").font(.callout)
+                        RestGapStatusCard(assessment: plan.restAssessment, limit: plan.preferences.maximumRestGapMeters)
+                        Text("This route follows Apple walking directions. Rest gaps use the mapped stops shown above. Terrain and unverified facility details remain unknown; real-world conditions can change.").font(.callout)
                         if weatherGuidanceEnabled {
                             WeatherGuidanceCard(store: weatherGuidance)
                         } else {
@@ -81,8 +84,11 @@ struct WalkingNavigationView: View {
                         Text("Updates appear in PausePath while navigation is active and the app is open.")
                             .font(.caption).foregroundStyle(.secondary)
                         Toggle("Use this route with those details unverified", isOn: $acknowledged)
-                        Text("Location updates run only while a walk is active and PausePath is open. Tracking pauses when you pause the walk or leave the app, and ends when you finish.").font(.caption).foregroundStyle(.secondary)
+                        Toggle("Keep navigating with the phone locked", isOn: $backgroundWalks)
+                        Toggle("Show a Live Activity on the Lock Screen", isOn: $liveActivities)
+                        Text("Starting a walk allows location updates while locked when enabled. Pause or End stops tracking. The Live Activity can show route instructions and the next stop on your Lock Screen; you can turn it off here.").font(.caption).foregroundStyle(.secondary)
                         Button("Start navigation", systemImage: "figure.walk") {
+                            navigator.backgroundEnabled = backgroundWalks; navigator.liveActivityEnabled = liveActivities
                             navigator.start(); camera = .userLocation(followsHeading: true, fallback: .automatic)
                         }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink).disabled(!acknowledged)
                     } else {
@@ -97,6 +103,8 @@ struct WalkingNavigationView: View {
                             }
                         }
                     }
+                    NextPauseCard(navigator: navigator)
+                    if let message = navigator.liveActivityMessage { Text(message).font(.caption).foregroundStyle(.secondary) }
                     RouteBreaksView(walk: plan, currentLocation: navigator.freshLocation() ? navigator.location?.coordinate : nil,
                         onDetour: { takingBreak = true; navigator.pause() }, onReturn: { takingBreak = false },
                         onStopsChanged: { suggestedStops = $0 })
@@ -155,13 +163,13 @@ struct WalkingNavigationView: View {
                 await weatherGuidance.checkForMeaningfulChange(at: coordinate)
             }
         }
-        .onDisappear { if !takingBreak { navigator.stop() } }
+        .onDisappear { if !takingBreak && scenePhase == .active { navigator.stop() } }
         .onChange(of: navigator.plan?.id) { camera = .automatic; suggestedStops = [] }
         .onChange(of: navigator.state) { _, state in
             if state == .arrived { finishWalk(completed: true) }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active, navigator.state == .walking || navigator.state == .locating {
+            if phase != .active, !navigator.backgroundEnabled, navigator.state == .walking || navigator.state == .locating {
                 navigator.pause()
             }
         }
@@ -186,6 +194,8 @@ struct WalkingNavigationView: View {
             Text("\(navigator.progress.completedMeters / 1000, specifier: "%.2f") km completed • \(navigator.remainingMeters / 1000, specifier: "%.2f") km remaining • about \(Int(navigator.remainingMeters / max(0.3, plan.preferences.speedMetersPerSecond) / 60)) min")
                 .font(.subheadline)
             Text("Leg \(min(navigator.progress.legIndex + 1, plan.legs.count)) of \(plan.legs.count) • time excludes breaks").font(.caption)
+            Text("Remaining walk").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            RestGapStatusCard(assessment: navigator.remainingRestAssessment, limit: plan.preferences.maximumRestGapMeters)
             if navigator.state != .arrived {
                 HStack {
                     Button(navigator.state == .paused ? "Resume" : "Pause") { if navigator.state == .paused { navigator.start() } else { navigator.pause() } }
@@ -194,7 +204,7 @@ struct WalkingNavigationView: View {
                 }
                 if navigator.progress.offRoute {
                     Button("Recalculate remaining walk") { navigator.recalculate(returnToStart: false) }.disabled(navigator.isRecalculating || navigator.state != .walking)
-                    Text("Recalculation changes distance. Terrain and rest-stop requirements remain unverified.").font(.caption)
+                    Text("Recalculation changes distance. Review the updated rest gap below.").font(.caption)
                 }
                 if navigator.isRecalculating { ProgressView("Finding a new walking path…") }
             }

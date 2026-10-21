@@ -14,14 +14,6 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
-	<key>CFBundleVersion</key>
-	<string>2</string>
-	<key>NSMotionUsageDescription</key>
-	<string>PausePath counts steps during your active journey to show recorded steps in My Path.</string>
-	<key>NSHealthShareUsageDescription</key>
-	<string>PausePath reads workouts and their routes, steps, active calories, heart rate, walking speed, weight, height and body fat when you choose to share them, to show My Path history and trends on your device.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>PausePath uses your location when you explore nearby places, create a walking route, or start live GPS navigation.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -33,11 +25,21 @@
 			</array>
 		</dict>
 	</array>
+	<key>CFBundleVersion</key>
+	<string>2</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>PausePath reads workouts and their routes, steps, active calories, heart rate, walking speed, weight, height and body fat when you choose to share them, to show My Path history and trends on your device.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>PausePath currently reads Health data to review your walks and does not save or change Health records.</string>
 	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
 	<dict>
 		<key>ActiveWalk</key>
 		<string>Precise location keeps your position and progress aligned with the walking route during an active walk.</string>
 	</dict>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>PausePath uses your location to explore stops and navigate walks. An explicitly started walk can continue while your phone is locked; Pause or End stops its location updates.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>PausePath counts steps during your active journey to show recorded steps in My Path.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -51,8 +53,6 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>NSHealthUpdateUsageDescription</key>
-	<string>PausePath currently reads Health data to review your walks and does not save or change Health records.</string>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
@@ -60,5 +60,12 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>location</string>
+	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 </dict>
 </plist>

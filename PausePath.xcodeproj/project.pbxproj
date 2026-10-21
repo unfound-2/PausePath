@@ -1,282 +1,701 @@
 // !$*UTF8*$!
 {
-	archiveVersion = 1;
-	classes = {
+	"classes" = {
 	};
-	objectVersion = 56;
-	objects = {
-
-/* Begin PBXBuildFile section */
-000000000000000000000035 = {isa = PBXBuildFile; fileRef = 000000000000000000000036; };
-		000000000000000000000034 /* PausePath/Resources/PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000033 /* PausePath/Resources/PrivacyInfo.xcprivacy */; };
-		0000000000000000000000C8 /* PausePath/App/ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000064 /* PausePath/App/ContentView.swift */; };
-		0000000000000000000000C9 /* PausePath/App/DemoRoutes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000065 /* PausePath/App/DemoRoutes.swift */; };
-		0000000000000000000000CA /* PausePath/App/DiscoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000066 /* PausePath/App/DiscoverView.swift */; };
-		0000000000000000000000CB /* PausePath/App/PausePathApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000067 /* PausePath/App/PausePathApp.swift */; };
-		0000000000000000000000CC /* PausePath/App/WalkingNavigationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000068 /* PausePath/App/WalkingNavigationView.swift */; };
-		0000000000000000000000CD /* PausePath/Core/NavigationProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000069 /* PausePath/Core/NavigationProgress.swift */; };
-		0000000000000000000000CE /* PausePath/Core/RoutePlanning.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006A /* PausePath/Core/RoutePlanning.swift */; };
-		0000000000000000000000CF /* PausePath/Services/HealthActivityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006B /* PausePath/Services/HealthActivityStore.swift */; };
-		0000000000000000000000D0 /* PausePath/Services/PlaceDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006C /* PausePath/Services/PlaceDiscovery.swift */; };
-		0000000000000000000000D1 /* PausePath/Services/WalkingNavigator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006D /* PausePath/Services/WalkingNavigator.swift */; };
-		0000000000000000000000D2 /* PausePath/Services/WalkingRouteBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006E /* PausePath/Services/WalkingRouteBuilder.swift */; };
-		0000000000000000000002C6 /* PausePath/Services/PausePathAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002BC /* PausePath/Services/PausePathAPI.swift */; };
-		0000000000000000000002C7 /* PausePath/App/ConnectedViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002BD /* PausePath/App/ConnectedViews.swift */; };
-		0000000000000000000002C8 /* PausePath/Core/AppleSignInChallenge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002BE /* PausePath/Core/AppleSignInChallenge.swift */; };
-		0000000000000000000002CA /* PausePath/Services/WeatherGuidance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002C9 /* PausePath/Services/WeatherGuidance.swift */; };
-		0000000000000000000002D0 /* PausePath/Core/RouteDifficulty.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002D1 /* PausePath/Core/RouteDifficulty.swift */; };
-		0000000000000000000002D2 /* PausePath/App/RouteDifficultyViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002D3 /* PausePath/App/RouteDifficultyViews.swift */; };
-		0000000000000000000002D4 /* PausePath/App/ExploreRoutePlannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000002D5 /* PausePath/App/ExploreRoutePlannerView.swift */; };
-/* End PBXBuildFile section */
-
-/* Begin PBXFileReference section */
-000000000000000000000036 = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = PausePath/Resources/Assets.xcassets; sourceTree = SOURCE_ROOT; };
-		000000000000000000000032 /* PausePath.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = PausePath.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		000000000000000000000033 /* PausePath/Resources/PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PausePath/Resources/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
-		000000000000000000000064 /* PausePath/App/ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/App/ContentView.swift; sourceTree = SOURCE_ROOT; };
-		000000000000000000000065 /* PausePath/App/DemoRoutes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/App/DemoRoutes.swift; sourceTree = SOURCE_ROOT; };
-		000000000000000000000066 /* PausePath/App/DiscoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/App/DiscoverView.swift; sourceTree = SOURCE_ROOT; };
-		000000000000000000000067 /* PausePath/App/PausePathApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/App/PausePathApp.swift; sourceTree = SOURCE_ROOT; };
-		000000000000000000000068 /* PausePath/App/WalkingNavigationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/App/WalkingNavigationView.swift; sourceTree = SOURCE_ROOT; };
-		000000000000000000000069 /* PausePath/Core/NavigationProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/Core/NavigationProgress.swift; sourceTree = SOURCE_ROOT; };
-		00000000000000000000006A /* PausePath/Core/RoutePlanning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/Core/RoutePlanning.swift; sourceTree = SOURCE_ROOT; };
-		00000000000000000000006B /* PausePath/Services/HealthActivityStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/Services/HealthActivityStore.swift; sourceTree = SOURCE_ROOT; };
-		00000000000000000000006C /* PausePath/Services/PlaceDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/Services/PlaceDiscovery.swift; sourceTree = SOURCE_ROOT; };
-		00000000000000000000006D /* PausePath/Services/WalkingNavigator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/Services/WalkingNavigator.swift; sourceTree = SOURCE_ROOT; };
-		00000000000000000000006E /* PausePath/Services/WalkingRouteBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/Services/WalkingRouteBuilder.swift; sourceTree = SOURCE_ROOT; };
-		0000000000000000000002BC /* PausePath/Services/PausePathAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/Services/PausePathAPI.swift; sourceTree = SOURCE_ROOT; };
-		0000000000000000000002BD /* PausePath/App/ConnectedViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/App/ConnectedViews.swift; sourceTree = SOURCE_ROOT; };
-		0000000000000000000002BE /* PausePath/Core/AppleSignInChallenge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/Core/AppleSignInChallenge.swift; sourceTree = SOURCE_ROOT; };
-		0000000000000000000002C9 /* PausePath/Services/WeatherGuidance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/Services/WeatherGuidance.swift; sourceTree = SOURCE_ROOT; };
-		0000000000000000000002D1 /* PausePath/Core/RouteDifficulty.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/Core/RouteDifficulty.swift; sourceTree = SOURCE_ROOT; };
-		0000000000000000000002D3 /* PausePath/App/RouteDifficultyViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/App/RouteDifficultyViews.swift; sourceTree = SOURCE_ROOT; };
-		0000000000000000000002D5 /* PausePath/App/ExploreRoutePlannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PausePath/App/ExploreRoutePlannerView.swift; sourceTree = SOURCE_ROOT; };
-/* End PBXFileReference section */
-
-/* Begin PBXFrameworksBuildPhase section */
-		000000000000000000000006 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
+	"objectVersion" = "56";
+	"archiveVersion" = "1";
+	"objects" = {
+		"0000000000000000000000CD" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "000000000000000000000069";
 		};
-/* End PBXFrameworksBuildPhase section */
-
-/* Begin PBXGroup section */
-		000000000000000000000002 = {
-			isa = PBXGroup;
-			children = (
-000000000000000000000036,
-				0000000000000000000002BE /* PausePath/Core/AppleSignInChallenge.swift */,
-				0000000000000000000002C9 /* PausePath/Services/WeatherGuidance.swift */,
-				0000000000000000000002D1 /* PausePath/Core/RouteDifficulty.swift */,
-				0000000000000000000002D3 /* PausePath/App/RouteDifficultyViews.swift */,
-				0000000000000000000002D5 /* PausePath/App/ExploreRoutePlannerView.swift */,
-				0000000000000000000002BD /* PausePath/App/ConnectedViews.swift */,
-				0000000000000000000002BC /* PausePath/Services/PausePathAPI.swift */,
-				000000000000000000000064 /* PausePath/App/ContentView.swift */,
-				000000000000000000000065 /* PausePath/App/DemoRoutes.swift */,
-				000000000000000000000066 /* PausePath/App/DiscoverView.swift */,
-				000000000000000000000067 /* PausePath/App/PausePathApp.swift */,
-				000000000000000000000068 /* PausePath/App/WalkingNavigationView.swift */,
-				000000000000000000000069 /* PausePath/Core/NavigationProgress.swift */,
-				00000000000000000000006A /* PausePath/Core/RoutePlanning.swift */,
-				00000000000000000000006B /* PausePath/Services/HealthActivityStore.swift */,
-				00000000000000000000006C /* PausePath/Services/PlaceDiscovery.swift */,
-				00000000000000000000006D /* PausePath/Services/WalkingNavigator.swift */,
-				00000000000000000000006E /* PausePath/Services/WalkingRouteBuilder.swift */,
-				000000000000000000000033 /* PausePath/Resources/PrivacyInfo.xcprivacy */,
-				000000000000000000000003 /* Products */,
-			);
-			sourceTree = "<group>";
+		"0D7522B8FF505DBC17EB96CC" = {
+			"path" = "PausePath/Services/PersistentAreaCache.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
 		};
-		000000000000000000000003 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				000000000000000000000032 /* PausePath.app */,
-			);
-			name = Products;
-			sourceTree = "<group>";
+		"0000000000000000000000C8" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "000000000000000000000064";
 		};
-/* End PBXGroup section */
-
-/* Begin PBXNativeTarget section */
-		000000000000000000000004 /* PausePath */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 000000000000000000000008 /* Build configuration list for PBXNativeTarget "PausePath" */;
-			buildPhases = (
-				000000000000000000000005 /* Sources */,
-				000000000000000000000006 /* Frameworks */,
-				000000000000000000000007 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = PausePath;
-			productName = PausePath;
-			productReference = 000000000000000000000032 /* PausePath.app */;
-			productType = "com.apple.product-type.application";
+		"0000000000000000000002D4" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "0000000000000000000002D5";
 		};
-/* End PBXNativeTarget section */
-
-/* Begin PBXProject section */
-		000000000000000000000001 /* Project object */ = {
-			isa = PBXProject;
-			attributes = {
-				LastUpgradeCheck = 2700;
-				TargetAttributes = {
-					000000000000000000000004 = {
-						SystemCapabilities = {
-							com.apple.SignInWithApple = {
-								enabled = 1;
+		"303D23F6A4FA5B3DE1D2D9CE" = {
+			"isa" = "PBXContainerItemProxy";
+			"containerPortal" = "000000000000000000000001";
+			"proxyType" = 1;
+			"remoteGlobalIDString" = "73674CCAEDD83420E5919116";
+			"remoteInfo" = "PausePathWidgets";
+		};
+		"00000000000000000000006B" = {
+			"path" = "PausePath/Services/HealthActivityStore.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"4B792871FAACA8078503DD14" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "6A5D13928443573078CD612A";
+		};
+		"00000000000000000000000D" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CLANG_ENABLE_MODULES" = "YES";
+				"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "";
+			};
+			"name" = "Release";
+		};
+		"000000000000000000000066" = {
+			"path" = "PausePath/App/DiscoverView.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"000000000000000000000008" = {
+			"isa" = "XCConfigurationList";
+			"defaultConfigurationIsVisible" = "0";
+			"defaultConfigurationName" = "Release";
+			"buildConfigurations" = (
+				"00000000000000000000000A",
+				"00000000000000000000000B",
+			);
+		};
+		"000000000000000000000002" = {
+			"isa" = "PBXGroup";
+			"sourceTree" = "<group>";
+			"children" = (
+				"000000000000000000000036",
+				"0000000000000000000002BE",
+				"0000000000000000000002C9",
+				"0000000000000000000002D1",
+				"0000000000000000000002D3",
+				"0000000000000000000002D5",
+				"0000000000000000000002BD",
+				"0000000000000000000002BC",
+				"000000000000000000000064",
+				"000000000000000000000065",
+				"000000000000000000000066",
+				"000000000000000000000067",
+				"000000000000000000000068",
+				"000000000000000000000069",
+				"00000000000000000000006A",
+				"00000000000000000000006B",
+				"00000000000000000000006C",
+				"00000000000000000000006D",
+				"00000000000000000000006E",
+				"000000000000000000000033",
+				"000000000000000000000003",
+				"C89C930E93A851FC25E9B369",
+				"9706625350B59ABF8BD2970B",
+				"576719CE77960E6462BD4E17",
+				"0D7522B8FF505DBC17EB96CC",
+				"4E9A73DE9ED1F54738D131DF",
+				"D7E1FB8A917295BA98CBBEE2",
+				"6A5D13928443573078CD612A",
+				"9A6985BBAD9B28604CD43DB3",
+				"BCF0E2FA5A4B4A71AF7CAB08",
+				"8CDBF86980C1317FCD60D440",
+				"D49453F355A248A68C1422A1",
+			);
+		};
+		"6A5D13928443573078CD612A" = {
+			"path" = "PausePath/Shared/PauseWalkIntent.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"C89C930E93A851FC25E9B369" = {
+			"path" = "PausePath/App/RestGapStatusCard.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"0000000000000000000000D1" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "00000000000000000000006D";
+		};
+		"8CDBF86980C1317FCD60D440" = {
+			"path" = "PausePath/App/NextPauseCard.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"0959012505306D94101534D9" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "6A5D13928443573078CD612A";
+		};
+		"9706625350B59ABF8BD2970B" = {
+			"path" = "PausePath/Core/FacilityHours.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"3A0312CD35A84E4EAE95513F" = {
+			"isa" = "XCBuildConfiguration";
+			"name" = "Debug";
+			"buildSettings" = {
+				"CODE_SIGN_STYLE" = "Automatic";
+				"DEVELOPMENT_TEAM" = "74SA4D686B";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.unfound2.PausePath.WalkWidgets";
+				"PRODUCT_NAME" = "PausePathWidgets";
+				"INFOPLIST_FILE" = "PausePath/Widgets/Info.plist";
+				"GENERATE_INFOPLIST_FILE" = "NO";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "17.0";
+				"SDKROOT" = "iphoneos";
+				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
+				"SWIFT_VERSION" = "5.0";
+				"APPLICATION_EXTENSION_API_ONLY" = "YES";
+				"SKIP_INSTALL" = "YES";
+				"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "$(inherited) PAUSEPATH_WIDGET";
+				"CURRENT_PROJECT_VERSION" = "2";
+				"MARKETING_VERSION" = "1.0";
+				"LD_RUNPATH_SEARCH_PATHS" = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf";
+			};
+		};
+		"0000000000000000000000CC" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "000000000000000000000068";
+		};
+		"8350120F96C9BBB04844961D" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "9706625350B59ABF8BD2970B";
+		};
+		"0000000000000000000002D3" = {
+			"path" = "PausePath/App/RouteDifficultyViews.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"BCF0E2FA5A4B4A71AF7CAB08" = {
+			"path" = "PausePath/Widgets/PausePathWidgets.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"149BA29A36E9B7CB5FE77E42" = {
+			"isa" = "PBXCopyFilesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"dstPath" = "";
+			"dstSubfolderSpec" = 13;
+			"files" = (
+				"EF259B9064FEE0BD1FC94125",
+			);
+			"name" = "Embed App Extensions";
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"C44E0C22C1F02CE529E58124" = {
+			"isa" = "XCBuildConfiguration";
+			"name" = "Release";
+			"buildSettings" = {
+				"CODE_SIGN_STYLE" = "Automatic";
+				"DEVELOPMENT_TEAM" = "74SA4D686B";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.unfound2.PausePath.WalkWidgets";
+				"PRODUCT_NAME" = "PausePathWidgets";
+				"INFOPLIST_FILE" = "PausePath/Widgets/Info.plist";
+				"GENERATE_INFOPLIST_FILE" = "NO";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "17.0";
+				"SDKROOT" = "iphoneos";
+				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
+				"SWIFT_VERSION" = "5.0";
+				"APPLICATION_EXTENSION_API_ONLY" = "YES";
+				"SKIP_INSTALL" = "YES";
+				"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "$(inherited) PAUSEPATH_WIDGET";
+				"CURRENT_PROJECT_VERSION" = "2";
+				"MARKETING_VERSION" = "1.0";
+				"LD_RUNPATH_SEARCH_PATHS" = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf-with-dsym";
+			};
+		};
+		"0000000000000000000002C9" = {
+			"path" = "PausePath/Services/WeatherGuidance.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"00000000000000000000006A" = {
+			"path" = "PausePath/Core/RoutePlanning.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"00000000000000000000000C" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CLANG_ENABLE_MODULES" = "YES";
+				"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "DEBUG";
+			};
+			"name" = "Debug";
+		};
+		"000000000000000000000065" = {
+			"path" = "PausePath/App/DemoRoutes.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"000000000000000000000007" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+				"000000000000000000000034",
+				"000000000000000000000035",
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"000000000000000000000036" = {
+			"path" = "PausePath/Resources/Assets.xcassets";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "folder.assetcatalog";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"2395D2591DBE1659D6D9305B" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+				"6F724C61BA6CBFA3BAF373AD",
+				"B90CDD33ACC39BEC827D9F28",
+				"0959012505306D94101534D9",
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"0000000000000000000002BE" = {
+			"path" = "PausePath/Core/AppleSignInChallenge.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"0000000000000000000000D0" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "00000000000000000000006C";
+		};
+		"000000000000000000000001" = {
+			"buildConfigurationList" = "000000000000000000000009";
+			"targets" = (
+				"000000000000000000000004",
+				"73674CCAEDD83420E5919116",
+			);
+			"developmentRegion" = "en";
+			"knownRegions" = (
+				"en",
+				"Base",
+			);
+			"isa" = "PBXProject";
+			"compatibilityVersion" = "Xcode 14.0";
+			"productRefGroup" = "000000000000000000000003";
+			"projectDirPath" = "";
+			"attributes" = {
+				"LastUpgradeCheck" = "2700";
+				"TargetAttributes" = {
+					"000000000000000000000004" = {
+						"SystemCapabilities" = {
+							"com.apple.SignInWithApple" = {
+								"enabled" = "1";
+							};
+							"com.apple.BackgroundModes" = {
+								"enabled" = 1;
 							};
 						};
 					};
 				};
 			};
-			buildConfigurationList = 000000000000000000000009 /* Build configuration list for PBXProject "PausePath" */;
-			compatibilityVersion = "Xcode 14.0";
-			developmentRegion = en;
-			hasScannedForEncodings = 0;
-			knownRegions = (
-				en,
-				Base,
-			);
-			mainGroup = 000000000000000000000002;
-			productRefGroup = 000000000000000000000003 /* Products */;
-			projectDirPath = "";
-			projectRoot = "";
-			targets = (
-				000000000000000000000004 /* PausePath */,
-			);
+			"hasScannedForEncodings" = "0";
+			"projectRoot" = "";
+			"mainGroup" = "000000000000000000000002";
 		};
-/* End PBXProject section */
-
-/* Begin PBXResourcesBuildPhase section */
-		000000000000000000000007 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				000000000000000000000034 /* PausePath/Resources/PrivacyInfo.xcprivacy in Resources */,
-000000000000000000000035,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
+		"BFC95103BCF2428F543A6457" = {
+			"isa" = "PBXTargetDependency";
+			"target" = "73674CCAEDD83420E5919116";
+			"targetProxy" = "303D23F6A4FA5B3DE1D2D9CE";
 		};
-/* End PBXResourcesBuildPhase section */
-
-/* Begin PBXSourcesBuildPhase section */
-		000000000000000000000005 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				0000000000000000000002C8 /* PausePath/Core/AppleSignInChallenge.swift in Sources */,
-				0000000000000000000002CA /* PausePath/Services/WeatherGuidance.swift in Sources */,
-				0000000000000000000002D0 /* PausePath/Core/RouteDifficulty.swift in Sources */,
-				0000000000000000000002D2 /* PausePath/App/RouteDifficultyViews.swift in Sources */,
-				0000000000000000000002D4 /* PausePath/App/ExploreRoutePlannerView.swift in Sources */,
-				0000000000000000000002C7 /* PausePath/App/ConnectedViews.swift in Sources */,
-				0000000000000000000002C6 /* PausePath/Services/PausePathAPI.swift in Sources */,
-				0000000000000000000000C8 /* PausePath/App/ContentView.swift in Sources */,
-				0000000000000000000000C9 /* PausePath/App/DemoRoutes.swift in Sources */,
-				0000000000000000000000CA /* PausePath/App/DiscoverView.swift in Sources */,
-				0000000000000000000000CB /* PausePath/App/PausePathApp.swift in Sources */,
-				0000000000000000000000CC /* PausePath/App/WalkingNavigationView.swift in Sources */,
-				0000000000000000000000CD /* PausePath/Core/NavigationProgress.swift in Sources */,
-				0000000000000000000000CE /* PausePath/Core/RoutePlanning.swift in Sources */,
-				0000000000000000000000CF /* PausePath/Services/HealthActivityStore.swift in Sources */,
-				0000000000000000000000D0 /* PausePath/Services/PlaceDiscovery.swift in Sources */,
-				0000000000000000000000D1 /* PausePath/Services/WalkingNavigator.swift in Sources */,
-				0000000000000000000000D2 /* PausePath/Services/WalkingRouteBuilder.swift in Sources */,
+		"BE5E24ACD6DA19E093C45AD9" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
 			);
-			runOnlyForDeploymentPostprocessing = 0;
+			"runOnlyForDeploymentPostprocessing" = 0;
 		};
-/* End PBXSourcesBuildPhase section */
-
-/* Begin XCBuildConfiguration section */
-		00000000000000000000000A /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = PausePath/Resources/PausePath.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = 74SA4D686B;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = PausePath/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = PausePath;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.unfound2.PausePath;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+		"0000000000000000000000CB" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "000000000000000000000067";
+		};
+		"CCC5C0D8C1830F21C37694FA" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "D7E1FB8A917295BA98CBBEE2";
+		};
+		"0000000000000000000002D2" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "0000000000000000000002D3";
+		};
+		"EF259B9064FEE0BD1FC94125" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "92FD0FB42D1BF0462DDC350F";
+			"settings" = {
+				"ATTRIBUTES" = (
+					"RemoveHeadersOnCopy",
+				);
 			};
-			name = Debug;
 		};
-		00000000000000000000000B /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = PausePath/Resources/PausePath.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = 74SA4D686B;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = PausePath/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = PausePath;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.unfound2.PausePath;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SWIFT_OPTIMIZATION_LEVEL = "-O";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+		"4E9A73DE9ED1F54738D131DF" = {
+			"path" = "PausePath/Services/RestAwareRouteBuilder.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"0000000000000000000002C8" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "0000000000000000000002BE";
+		};
+		"00000000000000000000000B" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.unfound2.PausePath";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf-with-dsym";
+				"DEVELOPMENT_TEAM" = "74SA4D686B";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
+				"INFOPLIST_FILE" = "PausePath/Resources/Info.plist";
+				"GENERATE_INFOPLIST_FILE" = "NO";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
+				"INFOPLIST_KEY_CFBundleDisplayName" = "PausePath";
+				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
+				"CODE_SIGN_ENTITLEMENTS" = "PausePath/Resources/PausePath.entitlements";
+				"SDKROOT" = "iphoneos";
+				"SWIFT_VERSION" = "5.0";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "17.0";
 			};
-			name = Release;
+			"name" = "Release";
 		};
-		00000000000000000000000C /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CLANG_ENABLE_MODULES = YES;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
-			};
-			name = Debug;
+		"000000000000000000000064" = {
+			"path" = "PausePath/App/ContentView.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
 		};
-		00000000000000000000000D /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CLANG_ENABLE_MODULES = YES;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
-			};
-			name = Release;
-		};
-/* End XCBuildConfiguration section */
-
-/* Begin XCConfigurationList section */
-		000000000000000000000008 /* Build configuration list for PBXNativeTarget "PausePath" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				00000000000000000000000A /* Debug */,
-				00000000000000000000000B /* Release */,
+		"000000000000000000000006" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
 			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
+			"runOnlyForDeploymentPostprocessing" = "0";
 		};
-		000000000000000000000009 /* Build configuration list for PBXProject "PausePath" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				00000000000000000000000C /* Debug */,
-				00000000000000000000000D /* Release */,
+		"000000000000000000000035" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "000000000000000000000036";
+		};
+		"D49453F355A248A68C1422A1" = {
+			"path" = "PausePath/App/SavedAreasSettingsView.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"0000000000000000000002BD" = {
+			"path" = "PausePath/App/ConnectedViews.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"37966082F217796C98E955C7" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "0D7522B8FF505DBC17EB96CC";
+		};
+		"0000000000000000000000CA" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "000000000000000000000066";
+		};
+		"0000000000000000000002D1" = {
+			"path" = "PausePath/Core/RouteDifficulty.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"FBB392209BE3105B6BE911AF" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
 			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
+			"runOnlyForDeploymentPostprocessing" = 0;
 		};
-/* End XCConfigurationList section */
+		"0000000000000000000002C7" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "0000000000000000000002BD";
+		};
+		"00000000000000000000006E" = {
+			"path" = "PausePath/Services/WalkingRouteBuilder.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"000000000000000000000069" = {
+			"path" = "PausePath/Core/NavigationProgress.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"00000000000000000000000A" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.unfound2.PausePath";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf";
+				"DEVELOPMENT_TEAM" = "74SA4D686B";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
+				"INFOPLIST_FILE" = "PausePath/Resources/Info.plist";
+				"GENERATE_INFOPLIST_FILE" = "NO";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+				"INFOPLIST_KEY_CFBundleDisplayName" = "PausePath";
+				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
+				"CODE_SIGN_ENTITLEMENTS" = "PausePath/Resources/PausePath.entitlements";
+				"SDKROOT" = "iphoneos";
+				"SWIFT_VERSION" = "5.0";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "17.0";
+			};
+			"name" = "Debug";
+		};
+		"000000000000000000000034" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "000000000000000000000033";
+		};
+		"000000000000000000000005" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+				"0000000000000000000002C8",
+				"0000000000000000000002CA",
+				"0000000000000000000002D0",
+				"0000000000000000000002D2",
+				"0000000000000000000002D4",
+				"0000000000000000000002C7",
+				"0000000000000000000002C6",
+				"0000000000000000000000C8",
+				"0000000000000000000000C9",
+				"0000000000000000000000CA",
+				"0000000000000000000000CB",
+				"0000000000000000000000CC",
+				"0000000000000000000000CD",
+				"0000000000000000000000CE",
+				"0000000000000000000000CF",
+				"0000000000000000000000D0",
+				"0000000000000000000000D1",
+				"0000000000000000000000D2",
+				"352F484892D81C27C2473334",
+				"8350120F96C9BBB04844961D",
+				"6DD4DC7DDC713813A205D71B",
+				"37966082F217796C98E955C7",
+				"5738AA6BCA820B618551BAD4",
+				"CCC5C0D8C1830F21C37694FA",
+				"4B792871FAACA8078503DD14",
+				"0128A092101E582F51A121C2",
+				"3CA787D58657BDE08155D767",
+				"358F0499DC125530736D0CE4",
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"358F0499DC125530736D0CE4" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "D49453F355A248A68C1422A1";
+		};
+		"0000000000000000000002BC" = {
+			"path" = "PausePath/Services/PausePathAPI.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"6F724C61BA6CBFA3BAF373AD" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "BCF0E2FA5A4B4A71AF7CAB08";
+		};
+		"0000000000000000000000CF" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "00000000000000000000006B";
+		};
+		"D7E1FB8A917295BA98CBBEE2" = {
+			"path" = "PausePath/Services/WalkLiveActivity.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"92FD0FB42D1BF0462DDC350F" = {
+			"isa" = "PBXFileReference";
+			"explicitFileType" = "wrapper.app-extension";
+			"path" = "PausePathWidgets.appex";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		"0000000000000000000002D0" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "0000000000000000000002D1";
+		};
+		"FDEFCD2761F9987959215046" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"3A0312CD35A84E4EAE95513F",
+				"C44E0C22C1F02CE529E58124",
+			);
+			"defaultConfigurationIsVisible" = 0;
+			"defaultConfigurationName" = "Release";
+		};
+		"5738AA6BCA820B618551BAD4" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "4E9A73DE9ED1F54738D131DF";
+		};
+		"0000000000000000000002C6" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "0000000000000000000002BC";
+		};
+		"00000000000000000000006D" = {
+			"path" = "PausePath/Services/WalkingNavigator.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"3CA787D58657BDE08155D767" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "8CDBF86980C1317FCD60D440";
+		};
+		"000000000000000000000068" = {
+			"path" = "PausePath/App/WalkingNavigationView.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"000000000000000000000033" = {
+			"path" = "PausePath/Resources/PrivacyInfo.xcprivacy";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "text.xml";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"000000000000000000000004" = {
+			"productType" = "com.apple.product-type.application";
+			"productReference" = "000000000000000000000032";
+			"buildConfigurationList" = "000000000000000000000008";
+			"productName" = "PausePath";
+			"isa" = "PBXNativeTarget";
+			"buildPhases" = (
+				"000000000000000000000005",
+				"000000000000000000000006",
+				"000000000000000000000007",
+				"149BA29A36E9B7CB5FE77E42",
+			);
+			"dependencies" = (
+				"BFC95103BCF2428F543A6457",
+			);
+			"name" = "PausePath";
+			"buildRules" = (
+			);
+		};
+		"0000000000000000000000CE" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "00000000000000000000006A";
+		};
+		"0128A092101E582F51A121C2" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "9A6985BBAD9B28604CD43DB3";
+		};
+		"352F484892D81C27C2473334" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "C89C930E93A851FC25E9B369";
+		};
+		"0000000000000000000000C9" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "000000000000000000000065";
+		};
+		"B90CDD33ACC39BEC827D9F28" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "9A6985BBAD9B28604CD43DB3";
+		};
+		"0000000000000000000002D5" = {
+			"path" = "PausePath/App/ExploreRoutePlannerView.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"73674CCAEDD83420E5919116" = {
+			"isa" = "PBXNativeTarget";
+			"buildConfigurationList" = "FDEFCD2761F9987959215046";
+			"buildPhases" = (
+				"2395D2591DBE1659D6D9305B",
+				"FBB392209BE3105B6BE911AF",
+				"BE5E24ACD6DA19E093C45AD9",
+			);
+			"buildRules" = (
+			);
+			"dependencies" = (
+			);
+			"name" = "PausePathWidgets";
+			"productName" = "PausePathWidgets";
+			"productReference" = "92FD0FB42D1BF0462DDC350F";
+			"productType" = "com.apple.product-type.app-extension";
+		};
+		"0000000000000000000002CA" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "0000000000000000000002C9";
+		};
+		"9A6985BBAD9B28604CD43DB3" = {
+			"path" = "PausePath/Shared/WalkActivityAttributes.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"576719CE77960E6462BD4E17" = {
+			"path" = "PausePath/Core/RestGapAssessment.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"00000000000000000000006C" = {
+			"path" = "PausePath/Services/PlaceDiscovery.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"000000000000000000000067" = {
+			"path" = "PausePath/App/PausePathApp.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"6DD4DC7DDC713813A205D71B" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "576719CE77960E6462BD4E17";
+		};
+		"000000000000000000000009" = {
+			"isa" = "XCConfigurationList";
+			"defaultConfigurationIsVisible" = "0";
+			"defaultConfigurationName" = "Release";
+			"buildConfigurations" = (
+				"00000000000000000000000C",
+				"00000000000000000000000D",
+			);
+		};
+		"000000000000000000000003" = {
+			"isa" = "PBXGroup";
+			"name" = "Products";
+			"children" = (
+				"000000000000000000000032",
+				"92FD0FB42D1BF0462DDC350F",
+			);
+			"sourceTree" = "<group>";
+		};
+		"000000000000000000000032" = {
+			"path" = "PausePath.app";
+			"isa" = "PBXFileReference";
+			"explicitFileType" = "wrapper.application";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		"0000000000000000000000D2" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "00000000000000000000006E";
+		};
 	};
-	rootObject = 000000000000000000000001 /* Project object */;
+	"rootObject" = "000000000000000000000001";
 }

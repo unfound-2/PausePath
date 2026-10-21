@@ -6,7 +6,7 @@ import httpx
 from fastapi import HTTPException
 from .db import transaction
 from .geometry import densify,at_distance
-from .hours import open_during
+from .hours import open_during, normalize_osm_hours
 from .providers import pedestrian_connector
 
 QUERY = Path(__file__).with_name('candidates.sql').read_text()
@@ -52,7 +52,7 @@ def curate(request, connector=pedestrian_connector):
             if access is None: continue
             arrival=request.departure_at+timedelta(seconds=(row['marker_m']+extra+access['outbound_meters'])/speed+elapsed_breaks)
             if row['closed_until'] and row['closed_until']>arrival: continue
-            availability=open_during(row['operating_hours'],arrival,request.preferences.break_duration_seconds)
+            availability=open_during(normalize_osm_hours(row['operating_hours'],*row['location']['coordinates']),arrival,request.preferences.break_duration_seconds)
             if availability is False: continue
             known_open=availability is True
             if not known_open and not request.preferences.allow_unknown_hours: continue

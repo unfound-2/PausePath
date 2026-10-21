@@ -18,7 +18,7 @@ The Plan screen now replaces sample cards with real out-and-back route creation.
 
 A foreground navigation screen tracks GPS against the current leg, shows current instructions and remaining distance/time, optionally speaks directions, supports pause/resume, and detects arrival. Each leg has independent progress so overlapping outbound/return paths do not cause immediate completion. Stale or inaccurate fixes cannot advance progress. Off-route users can explicitly recalculate the remaining waypoints or choose a return to their original start. Revised routes disclose changed distance and unverified requirements.
 
-Users must acknowledge unverified terrain, seating gaps and hours before starting. This does not modify their saved preferences or mark these routes as satisfying the full constraint engine. Navigation pauses in the background and is not a substitute for a field-tested, background-capable navigation release. Device/field validation remains required.
+Users must acknowledge unverified terrain, seating gaps and hours before starting. This does not modify their saved preferences or mark these routes as satisfying the full constraint engine. Foreground-started walks can now continue while locked, with optional speech and a Live Activity. Device/field validation remains required.
 
 ## Milestone 1 — facility and terrain data foundation
 

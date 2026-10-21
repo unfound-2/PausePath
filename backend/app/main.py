@@ -5,7 +5,7 @@ import hmac
 import secrets
 import json
 import os
-from typing import Annotated, Union
+from typing import Annotated, Union, Optional
 from uuid import UUID
 from fastapi import FastAPI, Body, Depends, HTTPException, Response, Request
 from fastapi.encoders import jsonable_encoder
@@ -18,6 +18,8 @@ from .models import (ExistingReport,Suggestion,ReportReceipt,IngestRequest,Disco
 from .providers import baseline_osm
 from .discovery import search_area, start_worker, stop_worker
 from . import mapbox
+from .hours import enrich_poi
+from datetime import datetime
 from .curation import curate
 
 @asynccontextmanager
@@ -223,14 +225,18 @@ def discover_pois(body: DiscoveryRequest,response: Response,user=Depends(public_
     return search_area(body)
 
 @app.get('/api/v1/pois/{poi_id}',tags=['pois'])
-def get_poi(poi_id: UUID,user=Depends(public_reader)):
+def get_poi(poi_id: UUID,arrival_at: Optional[datetime] = None,user=Depends(public_reader)):
+    if arrival_at is not None and arrival_at.tzinfo is None: raise HTTPException(422,"arrival_at must include a timezone")
     rate_limit(user,'poi',60)
     with transaction() as conn:
         row=conn.execute('''SELECT id,source,external_id,name,category,ST_AsGeoJSON(geom)::jsonb AS location,
-                           is_active,confidence_score,operating_hours,attributes,closed_until,source_updated_at
+                           is_active,confidence_score,operating_hours,attributes,closed_until,source_updated_at,
+                           (SELECT max(r.created_at) FROM poi_reports r WHERE r.poi_id=pois.id AND r.report_type='confirm_exists') AS last_verified_at,
+                           (SELECT r.created_at FROM poi_reports r WHERE r.poi_id=pois.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS last_reported_at,
+                           (SELECT r.report_type FROM poi_reports r WHERE r.poi_id=pois.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS last_report_type
                            FROM pois WHERE id=%s''',(poi_id,)).fetchone()
     if not row: raise HTTPException(404,'POI not found')
-    return row
+    return enrich_poi(row, arrival_at)
 
 @app.post('/api/v1/suggestions/{suggestion_id}/review',tags=['moderation'])
 def review_suggestion(suggestion_id: UUID,body: Review,user=Depends(reviewer)):

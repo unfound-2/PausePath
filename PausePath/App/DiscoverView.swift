@@ -193,7 +193,12 @@ struct DiscoverView: View {
             .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: showRoutePlanner)
             .toolbarBackground(.hidden, for: .tabBar)
             .task {
-                if !didPositionMap { camera = .automatic }
+                if !didPositionMap {
+                    if discovery.showingSavedArea {
+                        visibleRegion = discovery.region; camera = .region(discovery.region); didPositionMap = true
+                        await loadArea(discovery.region)
+                    } else { camera = .automatic }
+                }
             }
             .task {
                 // Preserve saved pins when returning to Explore.
@@ -221,6 +226,7 @@ struct DiscoverView: View {
                 camera = .region(region)
                 Task { await loadArea(region) }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .pausePathSavedAreasCleared)) { _ in discovery.clearAreaMemory() }
             .onDisappear {
                 cancelAreaRefresh()
                 routeStartSearchTask?.cancel()
@@ -592,7 +598,7 @@ struct DiscoverView: View {
                     }
                 }
             }
-            if searchFocused && !browseMatches.isEmpty {
+            if !browseMatches.isEmpty {
                 destinationSuggestions(browseMatches, selecting: selectBrowseResult)
             } else if !browseMessage.isEmpty {
                 Text(browseMessage).font(.caption).padding(8).background(.regularMaterial, in: Capsule())
@@ -642,6 +648,9 @@ struct DiscoverView: View {
     private var areaIsUpdating: Bool { discovery.isLoading || discovery.areaLoadState == "loading" }
 
     private var areaMessage: String {
+        if discovery.showingSavedArea, let date = discovery.savedAreaDate {
+            return "Saved " + date.formatted(date: .abbreviated, time: .shortened) + " · availability may have changed"
+        }
         if areaIsUpdating { return "Updating this area…" }
         if kinds.isEmpty { return "Choose a category to show stops" }
         if visiblePlaces.isEmpty {

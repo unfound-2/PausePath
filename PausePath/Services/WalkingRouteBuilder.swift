@@ -18,6 +18,9 @@ struct GeneratedWalk: Identifiable {
     let name: String
     let legs: [MKRoute]
     let preferences: RoutePreferences
+    var stops: [DiscoveredPlace] = []
+    var allowUnknownRestStops = true
+    var restAssessment: RestGapAssessment { WalkingRouteOption(id: id, title: name, destinationName: name, stops: stops, legs: legs).restAssessment(preferences, allowUnknown: allowUnknownRestStops) }
     var distance: Double { legs.reduce(0) { $0 + $1.distance } }
     var duration: Double { distance / max(0.3, preferences.speedMetersPerSecond) }
     var paths: [[Coordinate]] { legs.map { $0.polyline.walkingCoordinates } }

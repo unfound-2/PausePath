@@ -71,6 +71,7 @@ struct ContentView: View {
         .task {
             await PausePathAccount.shared.restoreSessionIfNeeded()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pausePathOpenExplore)) { _ in selectedTab = 0 }
         .onReceive(NotificationCenter.default.publisher(for: .pausePathShowProgress)) { _ in selectedTab = 2 }
         .onChange(of: preferences) { preferencesData = (try? JSONEncoder().encode(preferences)) ?? Data() }
     }
@@ -168,6 +169,11 @@ struct ProfileSettingsView: View {
                             row("Location", detail: "Manage access in iOS Settings", icon: "location")
                         }
                     }
+                    section("Saved areas & navigation") {
+                        NavigationLink { SavedAreasSettingsView() } label: {
+                            row("Saved map areas", detail: "On this device · up to 5 MB", icon: "square.and.arrow.down")
+                        }
+                    }
                     section("Account & privacy") {
                         NavigationLink { AccountView() } label: {
                             row("Account settings", detail: account.isSignedIn ? account.sessionStatusText : "Sign in to join your community", icon: "person.crop.circle")
@@ -215,7 +221,7 @@ struct ProfileSettingsView: View {
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title).font(.headline).foregroundStyle(PausePathPalette.teal).padding(.leading, 4)
-            VStack(spacing: 0, content: content).background(.background, in: RoundedRectangle(cornerRadius: 22))
+            VStack(spacing: 0, content: content).background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: PausePathPalette.corner))
                 .overlay(RoundedRectangle(cornerRadius: 22).stroke(PausePathPalette.teal.opacity(0.10), lineWidth: 1))
         }.buttonStyle(.plain)
     }
@@ -245,13 +251,13 @@ struct ProfileSettingsView: View {
     }
     private var locationSettings: some View {
         Form {
-            Section { Text("Location helps find nearby stops and guide your walk. Live tracking runs during an active walk while PausePath is open."); Button("Open iOS Settings") { openURL(URL(string: UIApplication.openSettingsURLString)!) } }
+            Section { Text("Location helps find nearby stops and guide your walk. An explicitly started walk can continue with the phone locked when enabled. Pause or End stops location tracking. Resume opens the app."); Button("Open iOS Settings") { openURL(URL(string: UIApplication.openSettingsURLString)!) } }
         }.pausePathSurface().navigationTitle("Location")
     }
     private var privacySettings: some View {
         Form {
             Section("Your profile") { Text("Your photo stays on this device. Your username is visible to communities you join; a nickname is welcome.") }
-            Section("Your activity") { Text("Health data and tracked walks stay on this device. Community progress is shared only when you submit it. Route planning and nearby searches send the relevant map area or planned route to our services.") }
+            Section("Your activity") { Text("Health data and tracked walks stay on this device. Community progress is shared only when you submit it. Route planning and nearby searches send the relevant map area or planned route to our services. Public stop snapshots are saved on this phone for up to seven days and can be cleared in Saved areas & navigation. Temporary Mapbox business results are not saved.") }
             Section("Map credits") {
                 Text("Basemap and navigation: Apple Maps. Facilities: OpenStreetMap, Mapbox and the PausePath community.")
                 Link("OpenStreetMap contributors · ODbL", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
@@ -412,6 +418,7 @@ private struct PathActivity: Identifiable {
 }
 
 struct MyPathView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let health: HealthActivityStore
     @AppStorage("pausepath.trackedWalks") private var trackedData = Data()
     @State private var source = "PausePath"
@@ -480,7 +487,7 @@ struct MyPathView: View {
     private var summary: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("YOUR LAST \(period) DAYS").font(.caption.weight(.bold)).tracking(1.5)
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 20) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 280 : 140))], alignment: .leading, spacing: 20) {
                 PathMetric(title: "Distance", value: String(format: "%.2f km", recent.reduce(0) { $0 + $1.meters } / 1000), icon: "point.topleft.down.to.point.bottomright.curvepath")
                 PathMetric(title: "Active time", value: "\(Int(recent.reduce(0) { $0 + $1.seconds } / 60)) min", icon: "clock")
                 PathMetric(title: "Sessions", value: "\(recent.count)", icon: "figure.walk")
@@ -663,7 +670,7 @@ private struct PathMetric: View {
 private extension View {
     func pathCard() -> some View {
         self.padding(20).frame(maxWidth: .infinity, alignment: .leading)
-            .background(.background, in: RoundedRectangle(cornerRadius: 24))
+            .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: PausePathPalette.corner))
             .overlay(RoundedRectangle(cornerRadius: 24).stroke(PausePathPalette.teal.opacity(0.12), lineWidth: 1))
     }
 }
@@ -686,6 +693,7 @@ private struct PathJourneyDetail: View {
     let health: HealthActivityStore
     @State private var segments: [[CLLocationCoordinate2D]] = []
     @State private var loading = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var mapMessage = "No GPS journey was saved for this session."
     @State private var intervalSteps: Double?
     @State private var intervalCalories: Double?
@@ -722,7 +730,7 @@ private struct PathJourneyDetail: View {
                     Text(fullSummary)
                     ShareLink(item: fullSummary) { Label("Share summary", systemImage: "square.and.arrow.up") }
                 }.pathCard()
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 24) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 280 : 140))], spacing: 24) {
                     PathMetric(title: "Distance", value: String(format: "%.2f km", activity.meters / 1000), icon: "map")
                     PathMetric(title: "Active time", value: "\(Int(activity.seconds / 60)) min", icon: "clock")
                     PathMetric(title: "Average pace", value: activity.pace, icon: "speedometer")

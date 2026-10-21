@@ -288,7 +288,7 @@ extension FacilityKind {
     }
     static func fromAPI(_ category: String) -> FacilityKind? { allCases.first { $0.apiCategory == category } }
 }
-struct APIPoint: Decodable { let coordinates: [Double] }
+struct APIPoint: Codable { let coordinates: [Double] }
 // Only known scalar metadata is displayed; unfamiliar shapes stay unknown.
 struct POIMetadataValue: Decodable {
     let text: String?
@@ -299,7 +299,7 @@ struct POIMetadataValue: Decodable {
         flag = try? value.decode(Bool.self)
     }
 }
-struct StopAccessibility: Decodable {
+struct StopAccessibility: Codable {
     let wheelchair_accessible: Bool?
     let backrest: Bool?
     let shaded: Bool?
@@ -317,7 +317,7 @@ struct StopAccessibility: Decodable {
     }
 }
 
-struct SharedPOI: Decodable, Identifiable {
+struct SharedPOI: Codable, Identifiable {
     let id: UUID
     let name: String?
     let category: String
@@ -327,11 +327,34 @@ struct SharedPOI: Decodable, Identifiable {
     let is_active: Bool?
     let closed_until: String?
     let attributes: StopAccessibility?
-    let operating_hours: [String: POIMetadataValue]?
+    let operating_hours: FacilityHours?
     let last_verified_at: String?
+    let source_updated_at: String?
+    let last_reported_at: String?
+    let last_report_type: String?
+    let hours_status: String?
+    let hours_evaluated_at: String?
+    var accessDescription: String { attributes?.access ?? "unknown" }
+    var restrictedAccess: Bool { ["private", "customers"].contains(accessDescription) }
+    var reportedUnavailable: Bool {
+        guard let type = last_report_type, type != "confirm_exists", let report = FacilityHours.date(last_reported_at) else { return false }
+        return report > (FacilityHours.date(last_verified_at) ?? .distantPast)
+    }
+    func openAtArrival(_ date: Date, duration: TimeInterval = 300) -> Bool? {
+        if unavailable || reportedUnavailable { return false }
+        return operating_hours?.isOpen(at: date, duration: duration)
+    }
+    func availabilityDescription(at date: Date) -> String {
+        if restrictedAccess { return accessDescription == "private" ? "Private access" : "Customers only" }
+        switch openAtArrival(date) {
+        case true: return "Listed open at expected arrival"
+        case false: return "Closed or reported unavailable at arrival"
+        case nil: return "Opening hours at arrival unknown"
+        }
+    }
     var hoursDescription: String {
         if unavailable { return "Reported unavailable" }
-        guard let raw = operating_hours?["raw"]?.text, !raw.isEmpty else { return "Opening hours unknown" }
+        guard let raw = operating_hours?.raw, !raw.isEmpty else { return "Opening hours unknown" }
         return raw == "24/7" ? "Listed as open 24 hours · not live-verified" : "Listed hours: " + raw + " · current status unknown"
     }
     private func attribute(_ key: String) -> String {

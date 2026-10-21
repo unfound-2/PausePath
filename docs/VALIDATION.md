@@ -30,7 +30,7 @@ HealthKit end-to-end behavior and worldwide data completeness cannot be establis
 ## Navigation-specific release checks
 
 - Actual outdoor walking: step timing, GPS drift, dense crossings, urban canyons, turnaround and final arrival. Unit/replay tests do not replace field testing.
-- Pause/resume, app background/lock, permission revocation and stale GPS; confirm no progress is credited while paused and no guidance is claimed in the background.
+- Pause/resume, app background/lock, permission revocation and stale GPS; confirm no progress is credited while paused, guidance continues while locked only when enabled, and tracking ends on Pause/End.
 - Recalculate after deviation, return early, return after multiple recalculations, failed network requests and cancel during a request. Verify original start stays fixed.
 - Recheck generated-route geometry and distances in multiple countries. Four bounded candidates do not constitute exhaustive route search.
 - Optional speech and VoiceOver interaction. Spoken directions require physical-device validation.
@@ -94,3 +94,14 @@ Simulator build succeeds after changing map discovery to run OSM/community and M
 ## Switching cities
 
 City search and location updates now share one debounced loading path. Starting a different area invalidates the prior successful-viewport marker, so returning after an interrupted load is not skipped. Busy/incomplete shared responses are retried (2, 6, 15 seconds), merge available pins instead of deleting them, and do not mark the viewport fully loaded. Up to eight recent area snapshots are retained for five minutes and revalidated on return; old-city pins are filtered out for new requests. Simulator build passed. Live Chicago query returned 373 benches, 18 fountains, 18 toilets, and 85 cafes, with an upstream warning. Houston returned no stored POIs with an upstream warning; direct provider requests confirmed HTTP 504 for that area. Houston upstream availability remains unresolved; these client changes cannot fabricate missing provider data.
+
+## Rest-aware routes, facility reliability and pocket use — October 21, 2026
+
+- Generic iOS Simulator build includes the app and embedded WidgetKit extension, arm64 and x86_64.
+- 40 Swift core tests pass, including supported opening schedules, closing boundaries, overnight date exceptions, unknown rules, final rest gaps, closed/private benches, and strict unknown-data exclusion.
+- 46 backend tests pass locally; five PostGIS integration tests require the isolated CI database. New tests check coordinate-based facility timezones, supported OSM weekly hours, unsupported rules remaining unknown, overnight hours, inactive status and no fabricated verification dates. OpenAPI is regenerated from FastAPI.
+- Local snapshots intentionally exclude temporary Mapbox records. Cache corruption, age and size guards are reviewed in source; saved information is not proof of current facility availability.
+
+Before release, walk a route on a signed phone with the screen locked, test spoken instructions with other audio, pause from the Live Activity, reopen to resume, revoke location access, and verify GPS/pedometer stop after End. Test killed-process behavior: automatic session restoration is not implemented. Check minimum-size phones, largest Dynamic Type, light/dark mode, and widget installation using the selected Apple team. Offline map/navigation and slope verification are outside this change.
+
+The new Saved areas & navigation screen was inspected in light/dark mode on the iPhone 18 Pro simulator. At the largest accessibility text size, its labels stack and scroll; My Path uses a single-column metric layout. Smaller physical screens and a complete VoiceOver pass remain release checks.

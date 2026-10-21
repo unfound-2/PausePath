@@ -614,6 +614,23 @@
               "format": "uuid",
               "title": "Poi Id"
             }
+          },
+          {
+            "name": "arrival_at",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Arrival At"
+            }
           }
         ],
         "responses": {
@@ -1393,6 +1410,69 @@
               }
             ],
             "title": "Source Updated At"
+          },
+          "last_verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Verified At"
+          },
+          "last_reported_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Reported At"
+          },
+          "last_report_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "confirm_exists",
+                  "broken_or_empty",
+                  "temporarily_closed",
+                  "removed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Report Type"
+          },
+          "hours_status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed",
+              "unknown"
+            ],
+            "title": "Hours Status",
+            "default": "unknown"
+          },
+          "hours_evaluated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hours Evaluated At"
           }
         },
         "additionalProperties": false,
@@ -1447,6 +1527,18 @@
               }
             ],
             "title": "Cursor"
+          },
+          "arrival_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arrival At"
           }
         },
         "additionalProperties": false,
