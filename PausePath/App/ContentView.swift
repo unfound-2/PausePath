@@ -513,14 +513,11 @@ struct MyPathView: View {
         }
     }
     private var sectionIntro: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(dynamicTypeSize.isAccessibilitySize ? pathSection : (pathSection == "Overview" ? "Every journey counts." : (pathSection == "History" ? "Retrace your path." : "See your rhythm.")))
-                .font(.system(.title2, design: .rounded).bold()).foregroundStyle(PausePathPalette.teal)
-            if !dynamicTypeSize.isAccessibilitySize {
-                Text(pathSection == "Overview" ? "Your latest journey, a little progress, and what comes next." : (pathSection == "History" ? "Find a session, revisit its route, or add a reflection." : "Explore trends, milestones, and your shared Health readings."))
-                    .font(.subheadline).foregroundStyle(.secondary)
-            }
-        }
+        AdventureHeader(
+            eyebrow: "YOUR FIELD JOURNAL",
+            title: pathSection == "Overview" ? "Find your next chapter." : (pathSection == "History" ? "Trails you've travelled." : "Look how far you've come."),
+            subtitle: pathSection == "Overview" ? "Small steps. Fresh air. A path of your own." : (pathSection == "History" ? "Revisit a journey and the moments along the way." : "Your rhythm, your milestones, your next horizon."),
+            symbol: pathSection == "History" ? "map.fill" : "mountain.2.fill")
     }
     private var sourceControls: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -716,6 +713,7 @@ struct MyPathView: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Personal milestones", systemImage: "trophy.fill").font(.headline)
             Text("Completed PausePath journeys · saved on this device").font(.caption).foregroundStyle(.secondary)
+            MilestoneTrail(badges: milestones.badges)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 280 : 140))], alignment: .leading, spacing: 16) {
                 PathMetric(title: "Longest journey", value: String(format: "%.2f km", milestones.longest / 1000), icon: "map")
                 PathMetric(title: "Longest active time", value: "\(Int(milestones.longestTime / 60)) min", icon: "timer")
@@ -1155,5 +1153,107 @@ struct PathSectionPicker: View {
         }
         }
         }.background(.regularMaterial)
+    }
+}
+
+/// Decorative contour artwork; never represents a real route or terrain data.
+struct AdventureContours: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        for index in 0..<8 {
+            let inset = CGFloat(index) * 18
+            let box = CGRect(x: rect.width * 0.52 - inset, y: -50 - inset * 0.3,
+                             width: rect.width * 0.65 + inset * 2, height: rect.height + 70 + inset)
+            path.addRoundedRect(in: box, cornerSize: CGSize(width: box.width * 0.38, height: box.height * 0.4))
+        }
+        return path
+    }
+}
+struct AdventureHeader: View {
+    let eyebrow: String
+    let title: String
+    let subtitle: String
+    var symbol = "mountain.2.fill"
+    @Environment(\.dynamicTypeSize) private var typeSize
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(eyebrow).font(.caption2.weight(.bold)).tracking(2)
+                Spacer(minLength: 8)
+                Image(systemName: symbol).font(.title2).foregroundStyle(PausePathPalette.lime).accessibilityHidden(true)
+            }.foregroundStyle(Color.white.opacity(0.8))
+            Text(title).font(.system(.title2, design: .rounded).bold()).foregroundStyle(.white)
+            if !typeSize.isAccessibilitySize {
+                Text(subtitle).font(.subheadline).foregroundStyle(Color.white.opacity(0.85))
+            }
+            HStack(spacing: 5) {
+                Circle().fill(PausePathPalette.lime).frame(width: 7, height: 7)
+                Capsule().fill(PausePathPalette.lime.opacity(0.6)).frame(width: 38, height: 2)
+                Image(systemName: "location.north.fill").font(.caption2).foregroundStyle(PausePathPalette.lime)
+            }.accessibilityHidden(true)
+        }.padding(22).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(red: 0.025, green: 0.23, blue: 0.22))
+            .background { AdventureContours().stroke(Color.white.opacity(0.09), lineWidth: 1) }
+            .overlay(alignment: .trailing) {
+                AdventureContours().stroke(Color.white.opacity(0.07), lineWidth: 1).allowsHitTesting(false).accessibilityHidden(true)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 24))
+    }
+}
+struct TrailEmblem: View {
+    let seed: String
+    private var symbol: String {
+        let icons = ["mountain.2.fill", "leaf.fill", "water.waves", "sun.horizon.fill"]
+        return icons[seed.utf8.reduce(0) { ($0 + Int($1)) % icons.count }]
+    }
+    var body: some View {
+        Image(systemName: symbol).font(.title3.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
+            .frame(width: 50, height: 56)
+            .background(Color(red: 0.88, green: 0.84, blue: 0.70), in: RoundedRectangle(cornerRadius: 17))
+            .overlay(RoundedRectangle(cornerRadius: 17).inset(by: 4).stroke(PausePathPalette.teal.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
+            .accessibilityHidden(true)
+    }
+}
+private struct MilestoneTrail: View {
+    let badges: [PathBadge]
+    @AppStorage("pausepath.earnedBadges.v1") private var earnedData = Data()
+    private var saved: [String: Date] { (try? JSONDecoder().decode([String: Date].self, from: earnedData)) ?? [:] }
+    private var stops: [PathBadge] { badges.filter { ["walks-1", "distance-5", "distance-25", "distance-100"].contains($0.id) } }
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(stops.enumerated()), id: \.element.id) { index, badge in
+                let earned = badge.earned || saved[badge.id] != nil
+                HStack(spacing: 14) {
+                    Image(systemName: earned ? badge.symbol : "flag")
+                        .font(.headline).foregroundStyle(earned ? PausePathPalette.ink : PausePathPalette.teal)
+                        .frame(width: 44, height: 44)
+                        .background(earned ? PausePathPalette.lime : Color.secondary.opacity(0.1), in: Circle())
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(badge.name).font(.subheadline.bold())
+                        Text(earned ? "Milestone reached" : badge.requirement).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    if earned { Image(systemName: "checkmark.seal.fill").foregroundStyle(PausePathPalette.teal) }
+                }.padding(.leading, index.isMultiple(of: 2) ? 0 : 24)
+                    .accessibilityElement(children: .combine)
+                if index < stops.count - 1 {
+                    TrailBend(reverse: !index.isMultiple(of: 2))
+                        .stroke(PausePathPalette.teal.opacity(0.35), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [4, 5]))
+                        .frame(width: 68, height: 28).frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityHidden(true)
+                }
+            }
+        }.padding(.vertical, 8)
+    }
+}
+private struct TrailBend: Shape {
+    let reverse: Bool
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let start: CGFloat = reverse ? 46 : 22
+        let end: CGFloat = reverse ? 22 : 46
+        path.move(to: CGPoint(x: start, y: 0))
+        path.addCurve(to: CGPoint(x: end, y: rect.height), control1: CGPoint(x: start, y: rect.height * 0.6), control2: CGPoint(x: end, y: rect.height * 0.4))
+        return path
     }
 }

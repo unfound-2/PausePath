@@ -203,10 +203,7 @@ struct CommunityChallengesView: View {
                                 CommunityHubView(community: community)
                             } label: {
                                 HStack(spacing: 14) {
-                                    Image(systemName: "person.2.fill")
-                                        .foregroundStyle(PausePathPalette.teal)
-                                        .frame(width: 46, height: 46)
-                                        .background(PausePathPalette.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                                    TrailEmblem(seed: community.id.uuidString)
                                     VStack(alignment: .leading, spacing: 5) {
                                         Text(community.name).font(.headline)
                                         Text("\(community.member_count) members · \(challenges[community.id]?.count ?? 0) goals")
@@ -394,7 +391,7 @@ struct CommunityChallengesView: View {
     }
     private var communityOverview: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("Your walking circle", systemImage: "person.2.fill").font(.title2.bold()).foregroundStyle(PausePathPalette.teal)
+            AdventureHeader(eyebrow: "THE PATH IS BETTER TOGETHER", title: "Find your trail crew.", subtitle: "Familiar faces. New places. Your next outing starts here.")
             Text("\(communities.count) \(communities.count == 1 ? "community" : "communities") · \(challenges.values.flatMap { $0 }.count) shared goals")
                 .font(.subheadline).foregroundStyle(.secondary)
             ViewThatFits(in: .horizontal) {
@@ -1073,8 +1070,13 @@ private struct CommunityHubView: View {
             }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
             ForEach(plans) { plan in
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(plan.title).font(.headline)
-                    Text(Self.dateLabel(plan.starts_at)).font(.subheadline)
+                    HStack(alignment: .top, spacing: 14) {
+                        TrailDateBadge(rawDate: plan.starts_at)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(plan.title).font(.system(.headline, design: .rounded))
+                            Text(Self.dateLabel(plan.starts_at)).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                     Label(plan.meeting_point, systemImage: "mappin.and.ellipse")
                     Text(plan.route_description).font(.callout).foregroundStyle(.secondary)
                     if plan.cancelled { Label("Cancelled", systemImage: "xmark.circle") }
@@ -1089,7 +1091,9 @@ private struct CommunityHubView: View {
                     }
                 }.padding(.vertical, 8)
             }
-            if plans.isEmpty && !loading { Text("No upcoming walks yet.").foregroundStyle(.secondary) }
+            if plans.isEmpty && !loading {
+                AdventureHeader(eyebrow: "AN OPEN TRAIL", title: "Your next adventure starts here.", subtitle: "Pick a meeting point, gather your crew, and make a little time outdoors.", symbol: "sun.horizon.fill")
+            }
         }
     }
     private var feedSection: some View {
@@ -1276,5 +1280,25 @@ private struct GroupWalkComposer: View {
             _ = try await PausePathAPI.request("api/v1/communities/\(group)/walks", body: ["title": title, "meeting_point": meeting, "route_description": route, "starts_at": ISO8601DateFormatter().string(from: date), "request_id": requestID.uuidString], requiresAccount: true)
             dismiss()
         } catch { message = communityErrorMessage(error) }
+    }
+}
+
+private struct TrailDateBadge: View {
+    let rawDate: String
+    private var date: Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: rawDate) ?? ISO8601DateFormatter().date(from: rawDate)
+    }
+    var body: some View {
+        VStack(spacing: 3) {
+            if let date {
+                Text(date.formatted(.dateTime.month(.abbreviated)).uppercased()).font(.caption2.bold()).tracking(1)
+                Text(date.formatted(.dateTime.day())).font(.system(.title2, design: .rounded).bold())
+            } else { Image(systemName: "calendar").font(.title2) }
+        }.foregroundStyle(PausePathPalette.ink).padding(10).frame(minWidth: 58)
+            .background(Color(red: 0.88, green: 0.84, blue: 0.70), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(alignment: .top) { Capsule().fill(PausePathPalette.teal).frame(width: 24, height: 3).padding(.top, 4) }
+            .accessibilityHidden(true)
     }
 }
