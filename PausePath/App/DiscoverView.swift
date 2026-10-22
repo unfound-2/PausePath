@@ -592,9 +592,8 @@ struct DiscoverView: View {
                             HStack(spacing: 6) {
                                 Image(systemName: kind.symbol)
                                 Text(filterTitle(kind))
-                                if kinds.contains(kind) { Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)) }
                             }
-                                .font(.caption.weight(.semibold)).padding(.horizontal, 12).frame(minHeight: 44)
+                                .font(.caption.weight(.semibold)).padding(.horizontal, 10).frame(minHeight: 44)
                                 .foregroundStyle(kinds.contains(kind) ? kind.mapColor : Color.secondary)
                                 .background(.regularMaterial, in: Capsule())
                                 .overlay(Capsule().strokeBorder(kinds.contains(kind) ? kind.mapColor.opacity(0.6) : Color.secondary.opacity(0.15)))

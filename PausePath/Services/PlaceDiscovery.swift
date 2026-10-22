@@ -351,6 +351,12 @@ struct WalkingRouteOption: Identifiable {
                     }
                 }
                 if rank($0) != rank($1) { return rank($0) < rank($1) }
+                let leftMatches = preferences.facilities.intersection(Set($0.stops.map(\.kind))).count
+                let rightMatches = preferences.facilities.intersection(Set($1.stops.map(\.kind))).count
+                if leftMatches != rightMatches { return leftMatches > rightMatches }
+                let leftDifference = abs($0.distance - preferences.distanceMeters)
+                let rightDifference = abs($1.distance - preferences.distanceMeters)
+                if leftDifference != rightDifference { return leftDifference < rightDifference }
             }
             return $0.distance < $1.distance
         }

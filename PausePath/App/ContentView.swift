@@ -424,6 +424,8 @@ struct MyPathView: View {
     let health: HealthActivityStore
     @AppStorage("pausepath.trackedWalks") private var trackedData = Data()
     @State private var source = "PausePath"
+    @State private var pathSection = "Overview"
+    @State private var editingGoal = false
     @State private var period = 7
     @State private var kind = "All"
     @State private var historyDays = 0
@@ -441,7 +443,7 @@ struct MyPathView: View {
     private var activities: [PathActivity] {
         let all = source == "PausePath" ? walks.map(PathActivity.init) : health.activities.map(PathActivity.init)
         let hidden = (try? JSONDecoder().decode(Set<String>.self, from: hiddenHealthData)) ?? []
-        return all.filter { (!($0.isHealth && hidden.contains($0.id))) && (kind == "All" || $0.kind == kind) }.sorted { $0.date > $1.date }
+        return all.filter { (!($0.isHealth && hidden.contains($0.id))) && (pathSection != "History" || kind == "All" || $0.kind == kind) }.sorted { $0.date > $1.date }
     }
     private var recent: [PathActivity] {
         let start = Calendar.current.date(byAdding: .day, value: -(period - 1), to: Calendar.current.startOfDay(for: Date()))!
@@ -455,16 +457,10 @@ struct MyPathView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    intro
-                    Picker("Activity source", selection: $source) {
-                        Text("PausePath").tag("PausePath"); Text("Apple Health").tag("Apple Health")
-                    }.pickerStyle(.segmented).onChange(of: source) { kind = "All" }
-                    Text("Sources stay separate so the same walk is never counted twice.").font(.caption).foregroundStyle(.secondary)
-                    Picker("Summary period", selection: $period) {
-                        Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90)
-                    }.pickerStyle(.segmented)
-                    summary
-                    if source == "Apple Health" { healthTotals }
+                    sectionIntro
+                    sourceControls
+                    if pathSection == "Overview" {
+                        summary
                     if let latest = recent.first {
                         NavigationLink { PathJourneyDetail(activity: latest, health: health) } label: {
                             VStack(alignment: .leading, spacing: 12) {
@@ -478,21 +474,31 @@ struct MyPathView: View {
                             }.pathCard()
                         }.buttonStyle(.plain)
                     }
-                    if goalEnabled { personalGoal }
-                    else {
-                        Button("Set a weekly goal", systemImage: "plus.circle") { goalEnabled = true }.pathCard()
+                        if goalEnabled { personalGoal }
+                        else {
+                            Button("Set a weekly goal", systemImage: "plus.circle") { goalEnabled = true }.pathCard()
+                        }
+                        weeklyRecap
+                        Button { pathSection = "History" } label: {
+                            Label("See your full history", systemImage: "arrow.right").frame(maxWidth: .infinity, minHeight: 44)
+                        }.buttonStyle(.bordered).tint(PausePathPalette.teal)
+                    } else if pathSection == "History" {
+                        history
+                    } else {
+                        if source == "Apple Health" { healthTotals }
+                        trends
+                        records
+                        bodyMetrics
+                        healthConnection
                     }
-                    weeklyRecap
-                    trends
-                    records
-                    bodyMetrics
-                    history
-                    healthConnection
-                    Text("True progress is measured by the path we choose to walk, not merely the ground we conquer.")
-                        .font(.callout.italic()).multilineTextAlignment(.center).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity).padding(.vertical, 12)
+                    if source == "Apple Health" && !health.hasConnected && pathSection != "Insights" {
+                        healthConnection
+                    }
                 }.padding(20).frame(maxWidth: 680).frame(maxWidth: .infinity)
-            }.pausePathSurface().navigationTitle("My Path")
+            }.id(pathSection).pausePathSurface().navigationTitle("My Path")
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    PathSectionPicker(titles: ["Overview", "History", "Insights"], selection: $pathSection)
+                }
                 .task { await health.refreshIfConnected() }
                 .onChange(of: pathScenePhase) { _, phase in if phase == .active { Task { await health.refreshIfConnected() } } }
                 .refreshable { await health.connect() }
@@ -500,6 +506,32 @@ struct MyPathView: View {
                     if case .failure = result { exportMessage = "Export could not be saved. Try again." }
                 }
         }
+    }
+    private var sectionIntro: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(pathSection == "Overview" ? "Every journey counts." : (pathSection == "History" ? "Retrace your path." : "See your rhythm."))
+                .font(.system(.title2, design: .rounded).bold()).foregroundStyle(PausePathPalette.teal)
+            Text(pathSection == "Overview" ? "Your latest journey, a little progress, and what comes next." : (pathSection == "History" ? "Find a session, revisit its route, or add a reflection." : "Explore trends, milestones, and your shared Health readings."))
+                .font(.subheadline).foregroundStyle(.secondary)
+        }
+    }
+    private var sourceControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Activity source", systemImage: "square.stack").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                Picker("Activity source", selection: $source) {
+                    Text("PausePath").tag("PausePath")
+                    Text("Apple Health").tag("Apple Health")
+                }.pickerStyle(.menu).tint(PausePathPalette.teal).onChange(of: source) { kind = "All" }
+            }
+            if pathSection != "History" {
+                Picker("Summary period", selection: $period) {
+                    Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90)
+                }.pickerStyle(.segmented)
+            }
+            Text("Sources stay separate to avoid counting the same journey twice.").font(.caption2).foregroundStyle(.secondary)
+        }.padding(14).background(PausePathPalette.teal.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
     }
     private var filteredHistory: [PathActivity] {
         guard historyDays > 0 else { return activities }
@@ -522,13 +554,20 @@ struct MyPathView: View {
             HStack {
                 Label("Your weekly goal", systemImage: "flag.fill").font(.headline)
                 Spacer()
-                Button(role: .destructive) { goalEnabled = false } label: {
+                Button(role: .destructive) { goalEnabled = false; editingGoal = false } label: {
                     Image(systemName: "trash").frame(minWidth: 44, minHeight: 44)
                 }.buttonStyle(.borderless).accessibilityLabel("Remove weekly goal")
             }
-            goalPicker
-            Stepper(value: $goalTarget, in: goalRange, step: 1.0) {
-                Text("Goal: " + String(format: "%.0f", goalTarget) + " " + goalUnit)
+            HStack(alignment: .firstTextBaseline) {
+                Text(String(format: "%.0f", goalTarget) + " " + goalUnit).font(.system(.title2, design: .rounded).bold())
+                Spacer()
+                Button(editingGoal ? "Done" : "Edit goal") { editingGoal.toggle() }.font(.subheadline.weight(.semibold))
+            }
+            if editingGoal {
+                goalPicker
+                Stepper(value: $goalTarget, in: goalRange, step: 1.0) {
+                    Text("Goal: " + String(format: "%.0f", goalTarget) + " " + goalUnit)
+                }
             }
             ProgressView(value: min(value, goalTarget), total: goalTarget).tint(PausePathPalette.teal)
             Text("\(value, specifier: "%.1f") of \(goalTarget, specifier: "%.0f") · \(value >= goalTarget ? "Goal reached!" : "Every session counts")").font(.subheadline)
@@ -1054,5 +1093,28 @@ private struct JourneyNotesView: View {
         }.pathCard().onAppear {
             if let note = (try? JSONDecoder().decode([String: JourneyNote].self, from: noteData))?[activityID] { feeling = note.feeling; text = note.text }
         }.onChange(of: feeling) { saved = false }
+    }
+}
+
+/// Shared tab strip keeps each page focused without adding another navigation stack.
+struct PathSectionPicker: View {
+    let titles: [String]
+    @Binding var selection: String
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(titles, id: \.self) { title in
+                    Button { selection = title } label: {
+                        Text(title).font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 18).frame(minHeight: 44)
+                            .foregroundStyle(selection == title ? PausePathPalette.ink : PausePathPalette.teal)
+                            .background(selection == title ? PausePathPalette.lime : Color.clear, in: Capsule())
+                    }.buttonStyle(.plain)
+                        .accessibilityAddTraits(selection == title ? [.isSelected] : [])
+                }
+            }.padding(6)
+                .background(PausePathPalette.teal.opacity(0.06), in: Capsule())
+                .padding(.horizontal, 16).padding(.vertical, 8)
+        }.background(.regularMaterial)
     }
 }

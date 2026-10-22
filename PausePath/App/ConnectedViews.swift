@@ -133,6 +133,7 @@ struct CommunityChallengesView: View {
     @AppStorage("pausepath.monthlyChallengePoints") private var monthlyPoints = 0
     @AppStorage("pausepath.challengePointsMonth") private var pointsMonthKey = ""
     @State private var weeklyChallenges: [WeeklyPersonalChallenge] = []
+    @State private var showWeeklyChallenges = false
     @AppStorage("pausepath.weeklyChallengeRewards") private var rewardLedgerData = Data()
     @Environment(\.scenePhase) private var scenePhase
     private var walks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedWalkData)) ?? [] }
@@ -224,6 +225,7 @@ struct CommunityChallengesView: View {
                     }
                 }
                 Section {
+                    DisclosureGroup("Weekly suggestions", isExpanded: $showWeeklyChallenges) {
                     ForEach(weeklyChallenges) { challenge in
                         let progress = weeklyProgress(for: challenge)
                         let complete = progress >= challenge.target
@@ -255,6 +257,7 @@ struct CommunityChallengesView: View {
                             .disabled(weeklyRefreshesUsed >= 2)
                     }
                     if weeklyChallenges.isEmpty { Text("No weekly suggestions. Use Refresh to choose new ones.").font(.caption).foregroundStyle(.secondary) }
+                    }
                 } header: { Label("Small steps this week", systemImage: "sparkles") }
                 if !message.isEmpty { Section { Text(message).font(.callout); Button("Retry community connection") { Task { await refresh() } }.disabled(busy) } }
             }
@@ -976,8 +979,9 @@ private struct CommunityPendingAction: Identifiable {
 private struct CommunityHubView: View {
     let community: WalkingCommunity
     @Environment(\.dismiss) private var dismiss
-    private enum Page: String, CaseIterable { case walks = "Walks", goals = "Goals", posts = "Posts", settings = "Settings" }
-    @State private var page = Page.walks
+    @State private var hubSection = "Walks"
+    @State private var showingInvite = false
+    @State private var composingPost = false
     @State private var showGoalComposer = false
     @State private var plans: [CommunityWalkPlan] = []
     @State private var posts: [CommunityPost] = []
@@ -994,22 +998,27 @@ private struct CommunityHubView: View {
     private var base: String { "api/v1/communities/" + community.id.uuidString }
     var body: some View {
         Form {
-            Section {
-                Picker("Community section", selection: $page) {
-                    ForEach(Page.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }.pickerStyle(.segmented)
-            }.listRowBackground(Color.clear).listRowInsets(EdgeInsets())
-            switch page {
-            case .walks: walkSection
-            case .goals: taskSection
-            case .posts: feedSection
-            case .settings:
-                Section("Invite") { CommunityInviteCard(code: community.invite_code) }
-                managementSection
-            }
+            if hubSection == "Walks" { walkSection }
+            else if hubSection == "Goals" { taskSection }
+            else if hubSection == "Posts" { feedSection }
+            else { managementSection }
             if !message.isEmpty { Section { Text(message); Button("Retry") { Task { await load() } }.disabled(loading || busy) } }
             if loading { ProgressView("Refreshing your community…") }
-        }.pausePathSurface().navigationTitle(community.name).navigationBarTitleDisplayMode(.inline)
+        }.id(hubSection).pausePathSurface().navigationTitle(community.name).navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                PathSectionPicker(titles: ["Walks", "Goals", "Posts", "Settings"], selection: $hubSection)
+            }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) {
+                Button { showingInvite = true } label: { Image(systemName: "person.badge.plus") }
+                    .accessibilityLabel("Invite someone")
+            } }
+            .sheet(isPresented: $showingInvite) {
+                NavigationStack {
+                    ScrollView { CommunityInviteCard(code: community.invite_code).padding(20) }
+                        .pausePathSurface().navigationTitle("Invite someone").navigationBarTitleDisplayMode(.inline)
+                        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingInvite = false } } }
+                }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+            }
             .disabled(busy)
             .task { newName = community.name; await load() }
             .onChange(of: PausePathAccount.shared.userID) { _, _ in
@@ -1034,7 +1043,9 @@ private struct CommunityHubView: View {
     }
     private var walkSection: some View {
         Section("Walk together") {
-            Button("Schedule a group walk", systemImage: "calendar.badge.plus") { showWalkComposer = true }
+            Button { showWalkComposer = true } label: {
+                Label("Plan a group walk", systemImage: "calendar.badge.plus").frame(maxWidth: .infinity, minHeight: 44)
+            }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
             ForEach(plans) { plan in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(plan.title).font(.headline)
@@ -1059,16 +1070,18 @@ private struct CommunityHubView: View {
     private var feedSection: some View {
         Section("Small wins") {
             Text("Visible to this group. No route or Health data is attached.").font(.caption).foregroundStyle(.secondary)
+            DisclosureGroup("Share a small win", isExpanded: $composingPost) {
             TextField("A small win from your path…", text: $postText, axis: .vertical).lineLimit(2...5)
                 .onChange(of: postText) { _, _ in postRequest = UUID() }
             Text("\(postText.count)/280").font(.caption).foregroundStyle(.secondary)
             Button("Post to community", systemImage: "paperplane") {
                 Task {
                     if await perform("posts", body: ["body": postText, "request_id": postRequest.uuidString]) {
-                        postText = ""; postRequest = UUID()
+                        postText = ""; postRequest = UUID(); composingPost = false
                     }
                 }
             }.disabled(postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || postText.count > 280)
+            }
             ForEach(posts) { post in
                 VStack(alignment: .leading, spacing: 8) {
                     HStack { Text(post.display_name).font(.headline); Spacer(); Text(Self.dateLabel(post.created_at)).font(.caption2).foregroundStyle(.secondary) }

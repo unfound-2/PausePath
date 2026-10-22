@@ -67,7 +67,10 @@ struct ExploreRoutePlannerView: View {
     }
 
     private var routePreferences: RoutePreferences {
-        var value = preferences; value.maximumRestGapMeters = requestedRestGap; return value
+        var value = preferences
+        value.maximumRestGapMeters = requestedRestGap
+        value.facilities.formUnion(mandatoryKinds)
+        return value
     }
     private var originTitle: String { usesCurrentLocation ? "Current location" : customOriginName }
 
@@ -84,6 +87,12 @@ struct ExploreRoutePlannerView: View {
                     }
                 }
                 if restRank(left) != restRank(right) { return restRank(left) < restRank(right) }
+                let leftMatches = selectedPreferences.facilities.intersection(Set(left.stops.map(\.kind))).count
+                let rightMatches = selectedPreferences.facilities.intersection(Set(right.stops.map(\.kind))).count
+                if leftMatches != rightMatches { return leftMatches > rightMatches }
+                let leftDifference = abs(left.distance - selectedPreferences.distanceMeters)
+                let rightDifference = abs(right.distance - selectedPreferences.distanceMeters)
+                if leftDifference != rightDifference { return leftDifference < rightDifference }
                 let leftRecommended = profileMatches(left)
                 let rightRecommended = profileMatches(right)
                 if leftRecommended != rightRecommended { return leftRecommended }
