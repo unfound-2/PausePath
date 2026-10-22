@@ -105,3 +105,11 @@ City search and location updates now share one debounced loading path. Starting 
 Before release, walk a route on a signed phone with the screen locked, test spoken instructions with other audio, pause from the Live Activity, reopen to resume, revoke location access, and verify GPS/pedometer stop after End. Test killed-process behavior: automatic session restoration is not implemented. Check minimum-size phones, largest Dynamic Type, light/dark mode, and widget installation using the selected Apple team. Offline map/navigation and slope verification are outside this change.
 
 The new Saved areas & navigation screen was inspected in light/dark mode on the iPhone 18 Pro simulator. At the largest accessibility text size, its labels stack and scroll; My Path uses a single-column metric layout. Smaller physical screens and a complete VoiceOver pass remain release checks.
+
+## Community backend repair and combined group features — October 21, 2026
+
+Live inspection confirmed the four original community tables were absent. Applied the original community migration in the private schema and verified RLS and denied direct anon/authenticated table privileges. A rollback-only live create/member/challenge/progress check succeeded and retained no test groups. Stored migration checksums match the repository.
+
+The combined iOS app and widget build passes. All 46 Swift core checks pass, including invite normalization, saved request identity, account separation and the newly merged personal-goal cases. Local backend results: 60 passed, 16 isolated-database cases skipped; GitHub runs those cases against PostGIS. Database checks cover atomic/idempotent create/join, invite collision recovery, membership isolation, progress opt-in, group plans, RSVP, posts, removal and owner permissions. API schema was regenerated.
+
+The Community page loads groups before optional shared-goal/progress work, retains successful data on partial failure, and caps concurrent goal-list reads at four. Group creation drafts keep their request identity after a timeout or relaunch; changing the account or submitted details generates a new identity. An updated iOS build is needed for the page changes. A full physical-device Apple confirmation and two-user invite walkthrough remain user acceptance checks; no real user session was impersonated for testing.

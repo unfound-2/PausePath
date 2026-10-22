@@ -3,6 +3,7 @@ import Charts
 import PhotosUI
 import MapKit
 import UserNotifications
+import UniformTypeIdentifiers
 
 enum DailyRecapNotifications {
     static func enable() async -> Bool {
@@ -390,6 +391,7 @@ private struct PathActivity: Identifiable {
     let kind: String
     let symbol: String
     let meters: Double
+    let hasDistance: Bool
     let seconds: Double
     let steps: Double?
     let calories: Double?
@@ -397,23 +399,23 @@ private struct PathActivity: Identifiable {
     let tracked: TrackedWalk?
     var isHealth: Bool { tracked == nil }
     var pace: String {
-        guard meters > 0, seconds > 0 else { return "—" }
+        guard hasDistance, meters > 0, seconds > 0 else { return "—" }
         let value = seconds / (meters / 1000)
         return String(format: "%d:%02d /km", Int(value) / 60, Int(value) % 60)
     }
     init(_ walk: TrackedWalk) {
-        id = walk.id.uuidString; date = walk.date; title = walk.routeName; kind = "Walking"; symbol = "figure.walk"
-        meters = walk.distanceMeters; seconds = walk.activeSeconds; tracked = walk
+        id = walk.id.uuidString; date = walk.date; title = walk.routeName; kind = walk.activityKind ?? "Walking"; symbol = walk.activityKind == "Running" ? "figure.run" : (walk.activityKind == "Hiking" ? "figure.hiking" : "figure.walk")
+        meters = walk.distanceMeters; hasDistance = true; seconds = walk.activeSeconds; tracked = walk
         steps = walk.steps.map(Double.init); calories = nil; heartRate = nil
     }
     init(_ workout: WalkingActivity) {
         id = workout.id; date = workout.date; title = workout.kind; kind = workout.kind; symbol = workout.symbol
-        meters = workout.meters; seconds = workout.seconds; steps = workout.steps
+        meters = workout.meters ?? 0; hasDistance = workout.meters != nil; seconds = workout.seconds; steps = workout.steps
         calories = workout.calories; heartRate = workout.averageHeartRate; tracked = nil
     }
     var summary: String {
         let state = tracked.map { $0.completed ? "Completed" : "Ended early" } ?? "Recorded"
-        return "\(state) a \(kind.lowercased()) session on \(date.formatted(date: .abbreviated, time: .shortened)): \(String(format: "%.2f", meters / 1000)) km in \(Int(seconds / 60)) active minutes."
+        return "\(state) a \(kind.lowercased()) session on \(date.formatted(date: .abbreviated, time: .shortened)): \(hasDistance ? String(format: "%.2f km", meters / 1000) : "distance not recorded") in \(Int(seconds / 60)) active minutes."
     }
 }
 
@@ -424,11 +426,21 @@ struct MyPathView: View {
     @State private var source = "PausePath"
     @State private var period = 7
     @State private var kind = "All"
+    @State private var historyDays = 0
+    @AppStorage("pausepath.hiddenHealthWorkouts") private var hiddenHealthData = Data()
+    @AppStorage("pausepath.personalGoal.metric") private var goalMetric = "distance"
+    @AppStorage("pausepath.personalGoal.target") private var goalTarget = 5.0
+    @AppStorage("pausepath.earnedBadges.v1") private var earnedBadgeData = Data()
+    @Environment(\.scenePhase) private var pathScenePhase
+    @State private var exportDocument = PathExportDocument(text: "")
+    @State private var exporting = false
+    @State private var exportMessage = ""
     private var walks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedData)) ?? [] }
     private var milestones: PathMilestones { PathMilestones(walks: walks) }
     private var activities: [PathActivity] {
         let all = source == "PausePath" ? walks.map(PathActivity.init) : health.activities.map(PathActivity.init)
-        return all.filter { kind == "All" || $0.kind == kind }.sorted { $0.date > $1.date }
+        let hidden = (try? JSONDecoder().decode(Set<String>.self, from: hiddenHealthData)) ?? []
+        return all.filter { (!($0.isHealth && hidden.contains($0.id))) && (kind == "All" || $0.kind == kind) }.sorted { $0.date > $1.date }
     }
     private var recent: [PathActivity] {
         let start = Calendar.current.date(byAdding: .day, value: -(period - 1), to: Calendar.current.startOfDay(for: Date()))!
@@ -465,6 +477,8 @@ struct MyPathView: View {
                             }.pathCard()
                         }.buttonStyle(.plain)
                     }
+                    personalGoal
+                    weeklyRecap
                     trends
                     records
                     bodyMetrics
@@ -475,7 +489,79 @@ struct MyPathView: View {
                         .frame(maxWidth: .infinity).padding(.vertical, 12)
                 }.padding(20).frame(maxWidth: 680).frame(maxWidth: .infinity)
             }.pausePathSurface().navigationTitle("My Path")
+                .task { await health.refreshIfConnected() }
+                .onChange(of: pathScenePhase) { _, phase in if phase == .active { Task { await health.refreshIfConnected() } } }
+                .refreshable { await health.connect() }
+                .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .commaSeparatedText, defaultFilename: "PausePath-history") { result in
+                    if case .failure = result { exportMessage = "Export could not be saved. Try again." }
+                }
         }
+    }
+    private var filteredHistory: [PathActivity] {
+        guard historyDays > 0 else { return activities }
+        let since = Calendar.current.date(byAdding: .day, value: -(historyDays - 1), to: Calendar.current.startOfDay(for: Date()))!
+        return activities.filter { $0.date >= since && $0.date <= Date() }
+    }
+    private var historyCSV: String {
+        func cell(_ value: String) -> String {
+            let safe = ["=", "+", "-", "@", "\t", "\r"].contains(where: { value.hasPrefix($0) }) ? "'" + value : value
+            return "\"" + safe.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+        }
+        return "Date,Activity,Title,Distance_m,Active_seconds,Steps,Active_kcal\n" + filteredHistory.map { a in
+            [ISO8601DateFormatter().string(from: a.date), a.kind, a.title, a.hasDistance ? String(a.meters) : "", String(a.seconds), a.steps.map { String($0) } ?? "", a.calories.map { String($0) } ?? ""].map(cell).joined(separator: ",")
+        }.joined(separator: "\n")
+    }
+    private var personalGoal: some View {
+        let week = Calendar.current.dateInterval(of: .weekOfYear, for: Date())!
+        let value = PersonalGoalProgress.total(metric: goalMetric, walks: walks, start: week.start, end: min(Date(), week.end))
+        return VStack(alignment: .leading, spacing: 12) {
+            Label("Your weekly goal", systemImage: "flag.fill").font(.headline)
+            goalPicker
+            Stepper(value: $goalTarget, in: goalRange, step: 1.0) {
+                Text("Goal: " + String(format: "%.0f", goalTarget) + " " + goalUnit)
+            }
+            ProgressView(value: min(value, goalTarget), total: goalTarget).tint(PausePathPalette.teal)
+            Text("\(value, specifier: "%.1f") of \(goalTarget, specifier: "%.0f") · \(value >= goalTarget ? "Goal reached!" : "Every session counts")").font(.subheadline)
+            Text("This calendar week · all recorded PausePath activities, including sessions ended early. Separate from your source and history filters.").font(.caption).foregroundStyle(.secondary)
+        }.pathCard()
+    }
+    private var goalUnit: String { goalMetric == "distance" ? "km" : goalMetric }
+    private var goalRange: ClosedRange<Double> {
+        switch goalMetric {
+        case "days": return 1.0...7.0
+        case "minutes": return 1.0...600.0
+        default: return 1.0...100.0
+        }
+    }
+    private var goalPicker: some View {
+        Picker("Measure", selection: $goalMetric) {
+            Text("Distance (km)").tag("distance")
+            Text("Minutes").tag("minutes")
+            Text("Active days").tag("days")
+        }.onChange(of: goalMetric) { _, metric in
+            switch metric {
+            case "days": goalTarget = 3.0
+            case "minutes": goalTarget = 60.0
+            default: goalTarget = 5.0
+            }
+        }
+    }
+    private var weeklyRecap: some View {
+        let week = Calendar.current.dateInterval(of: .weekOfYear, for: Date())!
+        let previous = Calendar.current.date(byAdding: .weekOfYear, value: -1, to: week.start)!
+        let sessions = walks.filter { $0.date >= previous && $0.date < week.start }
+        let earlier = Calendar.current.date(byAdding: .weekOfYear, value: -1, to: previous)!
+        let oldDistance = walks.filter { $0.date >= earlier && $0.date < previous }.reduce(0) { $0 + $1.distanceMeters }
+        let distance = sessions.reduce(0) { $0 + $1.distanceMeters }
+        let earned = (try? JSONDecoder().decode([String: Date].self, from: earnedBadgeData)) ?? [:]
+        let badgeNames = milestones.badges.filter { badge in earned[badge.id].map { $0 >= previous && $0 < week.start } ?? false }.map(\.name)
+        let recap = "Last week: \(sessions.count) PausePath sessions, \(String(format: "%.2f", distance / 1000)) km, and \(Int(sessions.reduce(0) { $0 + $1.activeSeconds } / 60)) active minutes. " + (oldDistance > 0 ? String(format: "%+.0f%% distance versus the week before.", (distance - oldDistance) / oldDistance * 100) : "No earlier distance available for comparison.")
+        return VStack(alignment: .leading, spacing: 12) {
+            Label("Last week on your path", systemImage: "sparkles").font(.headline)
+            Text(recap)
+            Text(badgeNames.isEmpty ? "No new badges last week. Your next journey is another chance." : "Badges earned: " + badgeNames.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+            ShareLink(item: recap) { Label("Share recap", systemImage: "square.and.arrow.up") }
+        }.pathCard()
     }
     private var intro: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -488,7 +574,7 @@ struct MyPathView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("YOUR LAST \(period) DAYS").font(.caption.weight(.bold)).tracking(1.5)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 280 : 140))], alignment: .leading, spacing: 20) {
-                PathMetric(title: "Distance", value: String(format: "%.2f km", recent.reduce(0) { $0 + $1.meters } / 1000), icon: "point.topleft.down.to.point.bottomright.curvepath")
+                PathMetric(title: "Distance", value: recent.contains(where: \.hasDistance) ? String(format: "%.2f km", recent.reduce(0) { $0 + $1.meters } / 1000) : "Not recorded", icon: "point.topleft.down.to.point.bottomright.curvepath")
                 PathMetric(title: "Active time", value: "\(Int(recent.reduce(0) { $0 + $1.seconds } / 60)) min", icon: "clock")
                 PathMetric(title: "Sessions", value: "\(recent.count)", icon: "figure.walk")
                 PathMetric(title: "Active days", value: "\(Set(recent.map { Calendar.current.startOfDay(for: $0.date) }).count)", icon: "calendar")
@@ -497,6 +583,7 @@ struct MyPathView: View {
                     PathMetric(title: "Completed journeys", value: "\(recent.filter { $0.tracked?.completed == true }.count)", icon: "flag.checkered")
                 }
             }
+            if recent.contains(where: { !$0.hasDistance }) { Text("Distance excludes sessions without a recorded distance.").font(.caption) }
             Text(recent.isEmpty ? "Your next chapter starts with a journey. Track one in Explore or connect Health below." :
                     "\(recent.count) sessions, at your own pace. Tap a journey to see what happened.")
                 .font(.subheadline)
@@ -538,7 +625,7 @@ struct MyPathView: View {
         }.pathCard()
     }
     private func trendRow(days: Int, title: String) -> some View {
-        let records = activities.map { TrackedWalk(date: $0.date, routeName: $0.title, distanceMeters: $0.meters, activeSeconds: $0.seconds, completed: true) }
+        let records = activities.filter(\.hasDistance).map { TrackedWalk(date: $0.date, routeName: $0.title, distanceMeters: $0.meters, activeSeconds: $0.seconds, completed: true) }
         let totals = PathTrend.distance(walks: records, days: days)
         return VStack(alignment: .leading, spacing: 4) {
             Text("\(title) · \(days) days vs previous \(days)").font(.subheadline.weight(.semibold))
@@ -602,19 +689,27 @@ struct MyPathView: View {
             HStack {
                 Text("Workout history").font(.title3.bold())
                 Spacer()
-                if source == "Apple Health" {
-                    Menu {
+                Menu {
                         Picker("Activity", selection: $kind) {
                             Text("All activities").tag("All")
-                            ForEach(Array(Set(health.activities.map(\.kind))).sorted(), id: \.self) { Text($0).tag($0) }
+                            ForEach(Array(Set((source == "Apple Health" ? health.activities.map(\.kind) : walks.map { $0.activityKind ?? "Walking" }))).sorted(), id: \.self) { Text($0).tag($0) }
                         }
                     } label: { Label(kind, systemImage: "line.3.horizontal.decrease") }
-                }
             }
-            Text("All available \(source) sessions · newest first").font(.caption).foregroundStyle(.secondary)
-            if activities.isEmpty { ContentUnavailableView("Your story is still unfolding", systemImage: "figure.walk", description: Text("Track a route in Explore, or connect Apple Health for workout history.")) }
+            Picker("History dates", selection: $historyDays) {
+                Text("All dates").tag(0); Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90)
+            }.pickerStyle(.segmented)
+            Button("Export filtered history (CSV)", systemImage: "square.and.arrow.up") {
+                exportDocument = PathExportDocument(text: historyCSV); exporting = true
+            }.disabled(filteredHistory.isEmpty)
+            if source == "Apple Health", !hiddenHealthData.isEmpty {
+                Button("Restore hidden Health workouts") { hiddenHealthData = Data() }
+            }
+            if !exportMessage.isEmpty { Text(exportMessage).font(.caption) }
+            Text("Available \(source) sessions · newest first").font(.caption).foregroundStyle(.secondary)
+            if filteredHistory.isEmpty { ContentUnavailableView("No sessions in this selection", systemImage: "figure.walk", description: Text("Track a route in Explore, or connect Apple Health for workout history.")) }
             LazyVStack(spacing: 12) {
-                ForEach(activities) { activity in
+                ForEach(filteredHistory) { activity in
                     NavigationLink { PathJourneyDetail(activity: activity, health: health) } label: {
                         activityRow(activity).pathCard()
                     }.buttonStyle(.plain)
@@ -629,7 +724,7 @@ struct MyPathView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(activity.title).font(.headline)
                 Text(activity.date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
-                Text("\(activity.meters / 1000, specifier: "%.2f") km · \(Int(activity.seconds / 60)) min").font(.subheadline)
+                Text("\(activity.hasDistance ? String(format: "%.2f km", activity.meters / 1000) : "Distance not recorded") · \(Int(activity.seconds / 60)) min").font(.subheadline)
                 if let walk = activity.tracked {
                     if milestones.recordIDs.contains(walk.id) { Label("Distance PR", systemImage: "trophy.fill").font(.caption).foregroundStyle(PausePathPalette.teal) }
                     if !walk.completed { Text("Ended early").font(.caption).foregroundStyle(.secondary) }
@@ -699,6 +794,12 @@ private struct PathJourneyDetail: View {
     @State private var intervalCalories: Double?
     @State private var intervalHeartRate: Double?
     @State private var metricError: String?
+    @AppStorage("pausepath.trackedWalks") private var detailWalkData = Data()
+    @AppStorage("pausepath.hiddenHealthWorkouts") private var detailHiddenData = Data()
+    @Environment(\.dismiss) private var detailDismiss
+    @State private var confirmDelete = false
+    @State private var exportingRoute = false
+    @State private var routeExport = PathExportDocument(text: "")
     private var steps: Double? { activity.steps ?? intervalSteps }
     private var calories: Double? { activity.calories ?? intervalCalories }
     private var heartRate: Double? { activity.heartRate ?? intervalHeartRate }
@@ -731,7 +832,7 @@ private struct PathJourneyDetail: View {
                     ShareLink(item: fullSummary) { Label("Share summary", systemImage: "square.and.arrow.up") }
                 }.pathCard()
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 280 : 140))], spacing: 24) {
-                    PathMetric(title: "Distance", value: String(format: "%.2f km", activity.meters / 1000), icon: "map")
+                    PathMetric(title: "Distance", value: activity.hasDistance ? String(format: "%.2f km", activity.meters / 1000) : "Not recorded", icon: "map")
                     PathMetric(title: "Active time", value: "\(Int(activity.seconds / 60)) min", icon: "clock")
                     PathMetric(title: "Average pace", value: activity.pace, icon: "speedometer")
                     PathMetric(title: "Steps", value: steps.map { String(format: "%.0f", $0) } ?? "Not recorded", icon: "shoeprints.fill")
@@ -750,12 +851,44 @@ private struct PathJourneyDetail: View {
                 Text(activity.isHealth ? "Source: Apple Health. Metrics are shown only when recorded with this workout." :
                     "Source: PausePath GPS and motion tracking. Distance counts progress along the navigation route, including earlier sections before recalculation. If connected, Health fills available readings during the journey’s start/end interval, including pauses. Values are never estimated from distance.")
                     .font(.caption).foregroundStyle(.secondary)
+                JourneyNotesView(activityID: activity.id)
+                if !segments.isEmpty {
+                    Button("Export journey (GPX)", systemImage: "square.and.arrow.up") {
+                        let tracks = segments.map { segment in
+                            "<trkseg>" + segment.map { "<trkpt lat=\"\($0.latitude)\" lon=\"\($0.longitude)\"/>" }.joined() + "</trkseg>"
+                        }.joined()
+                        routeExport = PathExportDocument(text: "<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx version=\"1.1\" creator=\"PausePath\" xmlns=\"http://www.topografix.com/GPX/1/1\"><trk>" + tracks + "</trk></gpx>")
+                        exportingRoute = true
+                    }
+                }
+                Button(activity.isHealth ? "Hide this workout from PausePath" : "Delete this journey", role: .destructive) { confirmDelete = true }
                 if let metricError { Text(metricError).font(.caption).foregroundStyle(.secondary) }
                 if !health.hasConnected {
                     Text("Connect Apple Health in My Path for available calories and heart-rate readings.").font(.caption).foregroundStyle(.secondary)
                 }
             }.padding(20).frame(maxWidth: 680).frame(maxWidth: .infinity)
         }.pausePathSurface().navigationTitle(activity.title).navigationBarTitleDisplayMode(.inline)
+            .fileExporter(isPresented: $exportingRoute, document: routeExport, contentType: UTType(filenameExtension: "gpx") ?? .xml, defaultFilename: "PausePath-journey.gpx") { result in
+                if case .failure = result { metricError = "Could not export this journey." }
+            }
+            .alert(activity.isHealth ? "Hide this workout?" : "Delete this journey?", isPresented: $confirmDelete) {
+                Button("Cancel", role: .cancel) { }
+                Button(activity.isHealth ? "Hide" : "Delete", role: .destructive) {
+                    if activity.isHealth {
+                        var hidden = (try? JSONDecoder().decode(Set<String>.self, from: detailHiddenData)) ?? []
+                        hidden.insert(activity.id); detailHiddenData = (try? JSONEncoder().encode(hidden)) ?? detailHiddenData
+                    } else {
+                        var walks = (try? JSONDecoder().decode([TrackedWalk].self, from: detailWalkData)) ?? []
+                        walks.removeAll { $0.id.uuidString == activity.id }
+                        detailWalkData = (try? JSONEncoder().encode(walks)) ?? detailWalkData
+                        NotificationCenter.default.post(name: .pausePathWalkRecorded, object: nil)
+                        Task { try? await PausePathAPI.syncChallengeProgress(walks: walks) }
+                    }
+                    detailDismiss()
+                }
+            } message: {
+                Text(activity.isHealth ? "The original stays in Apple Health. Restore hidden workouts from history." : "This removes the saved map and changes your totals and personal records. Already-earned badges remain earned.")
+            }
             .task(id: activity.id) {
                 if let walk = activity.tracked {
                     segments = (walk.journeySegments ?? []).map { $0.map(\.mapCoordinate) }
@@ -877,5 +1010,39 @@ struct PathBadgeCollection: View {
         var result = saved
         for badge in badges where badge.earned && result[badge.id] == nil { result[badge.id] = Date() }
         if result.count != saved.count { earnedData = (try? JSONEncoder().encode(result)) ?? earnedData }
+    }
+}
+
+private struct PathExportDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText, .commaSeparatedText, .xml] }
+    var text: String
+    init(text: String) { self.text = text }
+    init(configuration: ReadConfiguration) throws { text = String(decoding: configuration.file.regularFileContents ?? Data(), as: UTF8.self) }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: Data(text.utf8)) }
+}
+private struct JourneyNote: Codable { var feeling: String; var text: String }
+private struct JourneyNotesView: View {
+    let activityID: String
+    @AppStorage("pausepath.journeyNotes") private var noteData = Data()
+    @State private var feeling = "Not set"
+    @State private var text = ""
+    @State private var saved = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Your reflections", systemImage: "square.and.pencil").font(.headline)
+            Picker("How did it feel?", selection: $feeling) {
+                ForEach(["Not set", "Easy", "Comfortable", "Challenging", "Tough"], id: \.self) { Text($0).tag($0) }
+            }
+            TextField("A note for your future self…", text: $text, axis: .vertical).lineLimit(3...6)
+                .onChange(of: text) { saved = false }
+            Button(saved ? "Saved on this device" : "Save note") {
+                var notes = (try? JSONDecoder().decode([String: JourneyNote].self, from: noteData)) ?? [:]
+                notes[activityID] = JourneyNote(feeling: feeling, text: text)
+                if let data = try? JSONEncoder().encode(notes) { noteData = data; saved = true }
+            }.disabled(text.count > 2000)
+            Text("Private · not included in community posts or exports. Up to 2,000 characters.").font(.caption).foregroundStyle(.secondary)
+        }.pathCard().onAppear {
+            if let note = (try? JSONDecoder().decode([String: JourneyNote].self, from: noteData))?[activityID] { feeling = note.feeling; text = note.text }
+        }.onChange(of: feeling) { saved = false }
     }
 }

@@ -249,6 +249,7 @@ class CommunityJoin(StrictModel):
         return ''.join(value.split()).replace('-', '').upper() if isinstance(value, str) else value
 
 class CommunityResponse(StrictModel):
+    is_owner: bool = False
     id: UUID
     name: str
     invite_code: str

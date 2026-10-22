@@ -269,6 +269,7 @@ private enum SessionKeychain {
         }
     }
     func signOut() async {
+        UserDefaults.standard.set(false, forKey: "pausepath.shareChallengeProgress")
         let old = session?.access_token
         revision = UUID(); refreshTask?.cancel(); refreshTask = nil
         appleChallenge = nil; busy = false
@@ -426,6 +427,7 @@ struct WalkingCommunity: Codable, Identifiable, Sendable {
     let name: String
     let invite_code: String
     let created_at: String?
+    let is_owner: Bool?
     let member_count: Int
     let my_display_name: String
     let members: [String]?
@@ -449,6 +451,9 @@ struct WalkingCommunityChallenge: Decodable, Identifiable, Sendable {
     let name: String
     let metric: String
     let target: Double
+    let shared_goal: Bool?
+    let group_progress: Double?
+    let can_delete: Bool?
     let my_progress: Double?
     let my_progress_shared: Bool?
     let leaderboard: [WalkingChallengeMember]
@@ -461,6 +466,7 @@ private struct ChallengeListResponse: Decodable { let challenges: [WalkingCommun
         let account = PausePathAccount.shared
         let user = account.userID
         let token = requiresAccount ? try await account.accessToken() : nil
+        guard !requiresAccount || account.userID == user else { throw CancellationError() }
         var request = URLRequest(url: ServiceConfiguration.api.appendingPathComponent(path))
         request.httpMethod = body == nil ? "GET" : "POST"
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
@@ -561,9 +567,9 @@ private struct ChallengeListResponse: Decodable { let challenges: [WalkingCommun
         let data = try await request("api/v1/communities/\(community.uuidString)/challenges", requiresAccount: true)
         return try JSONDecoder().decode(ChallengeListResponse.self, from: data).challenges
     }
-    static func createChallenge(in community: UUID, name: String, metric: String, target: Double) async throws {
+    static func createChallenge(in community: UUID, name: String, metric: String, target: Double, shared: Bool = false) async throws {
         _ = try await request("api/v1/communities/\(community.uuidString)/challenges",
-            body: ["name": name, "metric": metric, "target": target], requiresAccount: true)
+            body: ["name": name, "metric": metric, "target": target, "shared_goal": shared], requiresAccount: true)
     }
     static func updateChallengeProgress(_ challenge: UUID, amount: Double) async throws {
         _ = try await request("api/v1/challenges/\(challenge.uuidString)/progress", body: ["amount": amount], requiresAccount: true)
@@ -572,7 +578,10 @@ private struct ChallengeListResponse: Decodable { let challenges: [WalkingCommun
         _ = try await request("api/v1/challenges/\(challenge.uuidString)/progress/delete", body: [:], requiresAccount: true)
     }
     @discardableResult static func syncChallengeProgress(walks: [TrackedWalk], groups: [WalkingCommunity]? = nil, tasks: [UUID: [WalkingCommunityChallenge]]? = nil) async throws -> Set<UUID> {
-        guard UserDefaults.standard.bool(forKey: "pausepath.shareChallengeProgress") else { return [] }
+        let owner = PausePathAccount.shared.userID
+        guard let owner, UserDefaults.standard.string(forKey: "pausepath.shareProgressOwner") == owner,
+              UserDefaults.standard.bool(forKey: "pausepath.shareChallengeProgress") else { return [] }
+        let ownedWalks = walks.filter { $0.ownerID == owner }
         let loadedGroups: [WalkingCommunity]
         if let groups { loadedGroups = groups } else { loadedGroups = try await communities() }
         var changed = Set<UUID>()
@@ -581,12 +590,13 @@ private struct ChallengeListResponse: Decodable { let challenges: [WalkingCommun
             if let tasks { guard let loaded = tasks[group.id] else { continue }; list = loaded }
             else { list = try await challenges(in: group.id) }
             for challenge in list {
-                guard UserDefaults.standard.bool(forKey: "pausepath.shareChallengeProgress") else { return changed }
+                guard PausePathAccount.shared.userID == owner, UserDefaults.standard.bool(forKey: "pausepath.shareChallengeProgress") else { return changed }
                 guard let start = challenge.startDate else { throw ServiceFailure(status: 422, message: "This challenge has an invalid start date. Progress has not been changed.") }
-                let total = min(ChallengeProgressCalculator.total(metric: challenge.metric, walks: walks, from: start, until: Date()), 100000)
+                let total = min(ChallengeProgressCalculator.total(metric: challenge.metric, walks: ownedWalks, from: start, until: Date()), 100000)
                 if challenge.my_progress_shared == true && abs((challenge.my_progress ?? 0) - total) < 0.0001 { continue }
                 try await updateChallengeProgress(challenge.id, amount: total)
                 changed.insert(group.id)
+                guard PausePathAccount.shared.userID == owner else { throw CancellationError() }
                 if !UserDefaults.standard.bool(forKey: "pausepath.shareChallengeProgress") {
                     try await deleteChallengeProgress(challenge.id)
                     return changed
@@ -597,6 +607,7 @@ private struct ChallengeListResponse: Decodable { let challenges: [WalkingCommun
     }
 
     @discardableResult static func clearChallengeProgress(groups: [WalkingCommunity]? = nil, tasks: [UUID: [WalkingCommunityChallenge]]? = nil) async throws -> Set<UUID> {
+        guard let owner = PausePathAccount.shared.userID else { return [] }
         let loadedGroups: [WalkingCommunity]
         if let groups { loadedGroups = groups } else { loadedGroups = try await communities() }
         var changed = Set<UUID>()
@@ -605,6 +616,7 @@ private struct ChallengeListResponse: Decodable { let challenges: [WalkingCommun
             if let tasks { guard let loaded = tasks[group.id] else { continue }; list = loaded }
             else { list = try await challenges(in: group.id) }
             for challenge in list where challenge.my_progress_shared != false || (challenge.my_progress ?? 0) > 0 {
+                guard PausePathAccount.shared.userID == owner else { throw CancellationError() }
                 try await deleteChallengeProgress(challenge.id)
                 changed.insert(group.id)
             }

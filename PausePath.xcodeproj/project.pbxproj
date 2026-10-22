@@ -23,6 +23,10 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = "0000000000000000000002D5";
 		};
+		"3A765561761A2735BF7AD6CB" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "2DE977F7983EBF263625D8F3";
+		};
 		"303D23F6A4FA5B3DE1D2D9CE" = {
 			"isa" = "PBXContainerItemProxy";
 			"containerPortal" = "000000000000000000000001";
@@ -310,6 +314,12 @@
 			"projectRoot" = "";
 			"mainGroup" = "000000000000000000000002";
 		};
+		"2DE977F7983EBF263625D8F3" = {
+			"path" = "PausePath/Core/CommunitySubmission.swift";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
 		"BFC95103BCF2428F543A6457" = {
 			"isa" = "PBXTargetDependency";
 			"target" = "73674CCAEDD83420E5919116";
@@ -356,7 +366,7 @@
 		"00000000000000000000000B" = {
 			"isa" = "XCBuildConfiguration";
 			"buildSettings" = {
-				"IPHONEOS_DEPLOYMENT_TARGET" = "17.0";
+				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
 				"DEBUG_INFORMATION_FORMAT" = "dwarf-with-dsym";
 				"DEVELOPMENT_TEAM" = "74SA4D686B";
 				"TARGETED_DEVICE_FAMILY" = "1,2";
@@ -369,9 +379,9 @@
 				"SDKROOT" = "iphoneos";
 				"SWIFT_VERSION" = "5.0";
 				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "17.0";
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.unfound2.PausePath";
 				"CODE_SIGN_STYLE" = "Automatic";
-				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
 			};
 			"name" = "Release";
 		};
@@ -444,7 +454,7 @@
 		"00000000000000000000000A" = {
 			"isa" = "XCBuildConfiguration";
 			"buildSettings" = {
-				"IPHONEOS_DEPLOYMENT_TARGET" = "17.0";
+				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
 				"DEBUG_INFORMATION_FORMAT" = "dwarf";
 				"DEVELOPMENT_TEAM" = "74SA4D686B";
 				"TARGETED_DEVICE_FAMILY" = "1,2";
@@ -457,9 +467,9 @@
 				"SDKROOT" = "iphoneos";
 				"SWIFT_VERSION" = "5.0";
 				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "17.0";
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.unfound2.PausePath";
 				"CODE_SIGN_STYLE" = "Automatic";
-				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
 			};
 			"name" = "Debug";
 		};
@@ -697,16 +707,6 @@
 		"0000000000000000000000D2" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "00000000000000000000006E";
-		};
-		"2DE977F7983EBF263625D8F3" = {
-			"isa" = "PBXFileReference";
-			"lastKnownFileType" = "sourcecode.swift";
-			"path" = "PausePath/Core/CommunitySubmission.swift";
-			"sourceTree" = "SOURCE_ROOT";
-		};
-		"3A765561761A2735BF7AD6CB" = {
-			"isa" = "PBXBuildFile";
-			"fileRef" = "2DE977F7983EBF263625D8F3";
 		};
 	};
 	"rootObject" = "000000000000000000000001";

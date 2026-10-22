@@ -9,7 +9,7 @@ from psycopg.rows import dict_row
 from fastapi.testclient import TestClient
 import pytest
 from pydantic import ValidationError
-from app import main
+from app import main, community_features
 from app.models import CommunityCreate, CommunityJoin
 
 
@@ -56,6 +56,7 @@ def community_api(monkeypatch):
         def transaction():
             with conn.transaction(): yield conn
         monkeypatch.setattr(main, 'transaction', transaction)
+        monkeypatch.setattr(community_features, 'transaction', transaction)
         monkeypatch.setattr(main, 'rate_limit', lambda *args: None)
         current = {'sub':'community-test-owner'}
         main.app.dependency_overrides[main.identity] = lambda: current
@@ -126,3 +127,14 @@ def test_progress_board_is_opt_in_and_membership_is_enforced(community_api):
     user['sub'] = 'community-test-outsider'
     assert client.post(f'/api/v1/challenges/{task_id}/progress', json={'amount':5}).status_code == 403
     assert client.post(path, json={'name':'Not allowed','metric':'walks','target':1}).status_code == 403
+
+
+def test_post_retry_does_not_silently_discard_changed_text(community_api):
+    client, conn, user = community_api
+    _, group = create(client)
+    path = f"/api/v1/communities/{group['id']}/posts"
+    payload = {'body':'A small step today', 'request_id':str(uuid4())}
+    assert client.post(path, json=payload).status_code == 200
+    assert client.post(path, json=payload).status_code == 200
+    assert client.post(path, json={**payload,'body':'A different milestone'}).status_code == 409
+    assert len(client.get(path).json()['posts']) == 1
