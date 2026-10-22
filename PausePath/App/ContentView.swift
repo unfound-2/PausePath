@@ -516,14 +516,35 @@ struct MyPathView: View {
         let value = PersonalGoalProgress.total(metric: goalMetric, walks: walks, start: week.start, end: min(Date(), week.end))
         return VStack(alignment: .leading, spacing: 12) {
             Label("Your weekly goal", systemImage: "flag.fill").font(.headline)
-            Picker("Measure", selection: $goalMetric) {
-                Text("Distance (km)").tag("distance"); Text("Minutes").tag("minutes"); Text("Active days").tag("days")
-            }.onChange(of: goalMetric) { _, metric in goalTarget = metric == "days" ? 3 : (metric == "minutes" ? 60 : 5) }
-            Stepper("Goal: \(goalTarget, specifier: "%.0f") \(goalMetric == "distance" ? "km" : goalMetric)", value: $goalTarget, in: 1...(goalMetric == "days" ? 7.0 : (goalMetric == "minutes" ? 600.0 : 100.0)))
+            goalPicker
+            Stepper(value: $goalTarget, in: goalRange, step: 1.0) {
+                Text("Goal: " + String(format: "%.0f", goalTarget) + " " + goalUnit)
+            }
             ProgressView(value: min(value, goalTarget), total: goalTarget).tint(PausePathPalette.teal)
             Text("\(value, specifier: "%.1f") of \(goalTarget, specifier: "%.0f") · \(value >= goalTarget ? "Goal reached!" : "Every session counts")").font(.subheadline)
             Text("This calendar week · all recorded PausePath activities, including sessions ended early. Separate from your source and history filters.").font(.caption).foregroundStyle(.secondary)
         }.pathCard()
+    }
+    private var goalUnit: String { goalMetric == "distance" ? "km" : goalMetric }
+    private var goalRange: ClosedRange<Double> {
+        switch goalMetric {
+        case "days": return 1.0...7.0
+        case "minutes": return 1.0...600.0
+        default: return 1.0...100.0
+        }
+    }
+    private var goalPicker: some View {
+        Picker("Measure", selection: $goalMetric) {
+            Text("Distance (km)").tag("distance")
+            Text("Minutes").tag("minutes")
+            Text("Active days").tag("days")
+        }.onChange(of: goalMetric) { _, metric in
+            switch metric {
+            case "days": goalTarget = 3.0
+            case "minutes": goalTarget = 60.0
+            default: goalTarget = 5.0
+            }
+        }
     }
     private var weeklyRecap: some View {
         let week = Calendar.current.dateInterval(of: .weekOfYear, for: Date())!

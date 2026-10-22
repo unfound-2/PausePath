@@ -297,7 +297,7 @@ struct CommunityChallengesView: View {
                         .font(.subheadline.weight(.semibold)).accessibilityLabel("\(monthlyPoints) points this month")
                 }
             }
-            .task { loadWeeklyChallenges(); if !pendingInviteCode.isEmpty { showCommunityComposer = true }; await refresh() }
+            .task { if UserDefaults.standard.string(forKey: "pausepath.shareProgressOwner") != account.userID { shareProgress = false }; loadWeeklyChallenges(); if !pendingInviteCode.isEmpty { showCommunityComposer = true }; await refresh() }
             .refreshable { loadWeeklyChallenges(); await refresh() }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { loadWeeklyChallenges(); Task { await refresh() } }
@@ -451,13 +451,6 @@ struct CommunityChallengesView: View {
         }
         guard !communities.isEmpty else { return }
         // A secondary request must never erase working communities or their invite codes.
-        if let username = profile.username?.trimmingCharacters(in: .whitespacesAndNewlines), !username.isEmpty {
-            do { try await PausePathAPI.updateCommunityUsername(username) }
-            catch {
-                guard communityRevision == revision else { return }
-                message = "Your groups are loaded. Your updated username hasn’t synced yet."
-            }
-        }
         guard communityRevision == revision else { return }
         do {
             if shareProgress { try await PausePathAPI.syncChallengeProgress(walks: walks) }
