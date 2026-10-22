@@ -598,11 +598,21 @@ struct MyPathView: View {
         }
     }
     private var goalPicker: some View {
-        Picker("Measure", selection: $goalMetric) {
-            Text("Distance (km)").tag("distance")
-            Text("Minutes").tag("minutes")
-            Text("Active days").tag("days")
-        }.onChange(of: goalMetric) { _, metric in
+        Menu {
+            Picker("Measure", selection: $goalMetric) {
+                Text("Distance (km)").tag("distance")
+                Text("Minutes").tag("minutes")
+                Text("Active days").tag("days")
+            }
+        } label: {
+            HStack(alignment: .firstTextBaseline) {
+                Text(goalMetric == "distance" ? "Distance (km)" : (goalMetric == "minutes" ? "Minutes" : "Active days"))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.up.chevron.down").font(.caption)
+            }.frame(minHeight: 44)
+        }.accessibilityLabel("Goal measure")
+        .onChange(of: goalMetric) { _, metric in
             switch metric {
             case "days": goalTarget = 3.0
             case "minutes": goalTarget = 60.0
