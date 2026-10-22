@@ -77,9 +77,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "type": "object",
-                "title": "Body"
+                "$ref": "#/components/schemas/CommunityCreate"
               }
             }
           },
@@ -90,7 +88,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CommunityResponse"
+                }
               }
             }
           },
@@ -123,9 +123,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "type": "object",
-                "title": "Body"
+                "$ref": "#/components/schemas/CommunityJoin"
               }
             }
           },
@@ -136,7 +134,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CommunityResponse"
+                }
               }
             }
           },
@@ -1224,6 +1224,125 @@
           "connector"
         ],
         "title": "BreakPoint"
+      },
+      "CommunityCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Name"
+          },
+          "display_name": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Display Name"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid4"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "display_name"
+        ],
+        "title": "CommunityCreate"
+      },
+      "CommunityJoin": {
+        "properties": {
+          "invite_code": {
+            "type": "string",
+            "maxLength": 12,
+            "minLength": 4,
+            "pattern": "^[A-Z0-9]+$",
+            "title": "Invite Code"
+          },
+          "display_name": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Display Name"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid4"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "invite_code",
+          "display_name"
+        ],
+        "title": "CommunityJoin"
+      },
+      "CommunityResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "invite_code": {
+            "type": "string",
+            "title": "Invite Code"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "member_count": {
+            "type": "integer",
+            "title": "Member Count"
+          },
+          "my_display_name": {
+            "type": "string",
+            "title": "My Display Name"
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Members"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "invite_code",
+          "created_at",
+          "member_count",
+          "my_display_name"
+        ],
+        "title": "CommunityResponse"
       },
       "Connector": {
         "properties": {

@@ -2,12 +2,11 @@ services:
   - type: web
     name: pausepath-api
     runtime: docker
-    plan: starter
+    plan: free
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     healthCheckPath: /ready
-    preDeployCommand: python scripts/migrate.py
-    dockerCommand: uvicorn app.main:app --host 0.0.0.0 --port 10000 --no-access-log
+    dockerCommand: python scripts/start.py
     envVars:
       - key: DATABASE_URL
         sync: false

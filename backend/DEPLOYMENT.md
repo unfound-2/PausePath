@@ -1,3 +1,9 @@
+# Current free Render startup
+
+Use `python scripts/start.py` as the Docker command and `/ready` as the health check. Startup applies every checked-in migration transactionally, checks stored checksums, and only starts Uvicorn after migrations succeed. This works on the free instance without a paid pre-deploy hook. `PORT` defaults to 10000. Database migration credentials stay in Render (`MIGRATION_DATABASE_URL` when separately configured, otherwise `DATABASE_URL`).
+
+This command replaces any older explicit Uvicorn override in the Render dashboard; changing only the Dockerfile does not replace a saved override. An unapplied community migration caused create/join/list requests to fail despite `/health` returning OK. `/ready` now checks the community tables as well as POIs. A schema failure returns a recoverable 503 without SQL details.
+
 # Deploy PausePath: Supabase + Render + Mapbox
 
 This is the selected deployment path. Render runs the existing Python API; Supabase provides Postgres/PostGIS and Auth. No cloud resources have been created yet. Supabase Edge Functions are not a drop-in host for this Python/psycopg service; moving there would require a separate implementation.

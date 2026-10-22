@@ -421,7 +421,7 @@ struct CuratedResponse: Decodable {
         let total_distance_with_detours_meters: Double
     }
 }
-struct WalkingCommunity: Codable, Identifiable {
+struct WalkingCommunity: Codable, Identifiable, Sendable {
     let id: UUID
     let name: String
     let invite_code: String
@@ -430,12 +430,12 @@ struct WalkingCommunity: Codable, Identifiable {
     let my_display_name: String
     let members: [String]?
 }
-struct WalkingChallengeMember: Decodable, Identifiable {
+struct WalkingChallengeMember: Decodable, Identifiable, Sendable {
     var id: String { name }
     let name: String
     let amount: Double
 }
-struct WalkingCommunityChallenge: Decodable, Identifiable {
+struct WalkingCommunityChallenge: Decodable, Identifiable, Sendable {
     let created_at: String
     var startDate: Date? {
         let parser = ISO8601DateFormatter()
@@ -450,6 +450,7 @@ struct WalkingCommunityChallenge: Decodable, Identifiable {
     let metric: String
     let target: Double
     let my_progress: Double?
+    let my_progress_shared: Bool?
     let leaderboard: [WalkingChallengeMember]
 }
 private struct CommunityListResponse: Decodable { let communities: [WalkingCommunity] }
@@ -545,12 +546,12 @@ private struct ChallengeListResponse: Decodable { let challenges: [WalkingCommun
         let data = try await request("api/v1/communities", requiresAccount: true)
         return try JSONDecoder().decode(CommunityListResponse.self, from: data).communities
     }
-    static func createCommunity(name: String, username: String) async throws -> WalkingCommunity {
-        let data = try await request("api/v1/communities", body: ["name": name, "display_name": username], requiresAccount: true)
+    static func createCommunity(name: String, username: String, requestID: UUID) async throws -> WalkingCommunity {
+        let data = try await request("api/v1/communities", body: ["name": name, "display_name": username, "request_id": requestID.uuidString], requiresAccount: true)
         return try JSONDecoder().decode(WalkingCommunity.self, from: data)
     }
-    static func joinCommunity(code: String, username: String) async throws -> WalkingCommunity {
-        let data = try await request("api/v1/communities/join", body: ["invite_code": code, "display_name": username], requiresAccount: true)
+    static func joinCommunity(code: String, username: String, requestID: UUID) async throws -> WalkingCommunity {
+        let data = try await request("api/v1/communities/join", body: ["invite_code": code, "display_name": username, "request_id": requestID.uuidString], requiresAccount: true)
         return try JSONDecoder().decode(WalkingCommunity.self, from: data)
     }
     static func updateCommunityUsername(_ username: String) async throws {
@@ -570,32 +571,45 @@ private struct ChallengeListResponse: Decodable { let challenges: [WalkingCommun
     static func deleteChallengeProgress(_ challenge: UUID) async throws {
         _ = try await request("api/v1/challenges/\(challenge.uuidString)/progress/delete", body: [:], requiresAccount: true)
     }
-    static func syncChallengeProgress(walks: [TrackedWalk]) async throws {
-        guard UserDefaults.standard.bool(forKey: "pausepath.shareChallengeProgress") else { return }
-        let groups = try await communities()
-        for group in groups {
-            for challenge in try await challenges(in: group.id) {
-                guard UserDefaults.standard.bool(forKey: "pausepath.shareChallengeProgress") else { return }
-                guard let start = challenge.startDate else {
-                    throw ServiceFailure(status: 422, message: "This challenge has an invalid start date. Progress has not been changed.")
-                }
-                let total = ChallengeProgressCalculator.total(metric: challenge.metric, walks: walks, from: start, until: Date())
-                try await updateChallengeProgress(challenge.id, amount: min(total, 100000))
-                // An opt-out during the request must not leave that upload visible.
+    @discardableResult static func syncChallengeProgress(walks: [TrackedWalk], groups: [WalkingCommunity]? = nil, tasks: [UUID: [WalkingCommunityChallenge]]? = nil) async throws -> Set<UUID> {
+        guard UserDefaults.standard.bool(forKey: "pausepath.shareChallengeProgress") else { return [] }
+        let loadedGroups: [WalkingCommunity]
+        if let groups { loadedGroups = groups } else { loadedGroups = try await communities() }
+        var changed = Set<UUID>()
+        for group in loadedGroups {
+            let list: [WalkingCommunityChallenge]
+            if let tasks { guard let loaded = tasks[group.id] else { continue }; list = loaded }
+            else { list = try await challenges(in: group.id) }
+            for challenge in list {
+                guard UserDefaults.standard.bool(forKey: "pausepath.shareChallengeProgress") else { return changed }
+                guard let start = challenge.startDate else { throw ServiceFailure(status: 422, message: "This challenge has an invalid start date. Progress has not been changed.") }
+                let total = min(ChallengeProgressCalculator.total(metric: challenge.metric, walks: walks, from: start, until: Date()), 100000)
+                if challenge.my_progress_shared == true && abs((challenge.my_progress ?? 0) - total) < 0.0001 { continue }
+                try await updateChallengeProgress(challenge.id, amount: total)
+                changed.insert(group.id)
                 if !UserDefaults.standard.bool(forKey: "pausepath.shareChallengeProgress") {
                     try await deleteChallengeProgress(challenge.id)
-                    return
+                    return changed
                 }
             }
         }
+        return changed
     }
 
-    static func clearChallengeProgress() async throws {
-        for group in try await communities() {
-            for challenge in try await challenges(in: group.id) {
+    @discardableResult static func clearChallengeProgress(groups: [WalkingCommunity]? = nil, tasks: [UUID: [WalkingCommunityChallenge]]? = nil) async throws -> Set<UUID> {
+        let loadedGroups: [WalkingCommunity]
+        if let groups { loadedGroups = groups } else { loadedGroups = try await communities() }
+        var changed = Set<UUID>()
+        for group in loadedGroups {
+            let list: [WalkingCommunityChallenge]
+            if let tasks { guard let loaded = tasks[group.id] else { continue }; list = loaded }
+            else { list = try await challenges(in: group.id) }
+            for challenge in list where challenge.my_progress_shared != false || (challenge.my_progress ?? 0) > 0 {
                 try await deleteChallengeProgress(challenge.id)
+                changed.insert(group.id)
             }
         }
+        return changed
     }
     static func curate(_ walk: GeneratedWalk, allowUnknown: Bool) async throws -> CuratedResponse {
         // Explicit request shares route geometry and preferences; Health speed is never uploaded.

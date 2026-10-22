@@ -110,6 +110,9 @@ struct CommunityChallengesView: View {
     let preferences: RoutePreferences
     @State private var account = PausePathAccount.shared
     @State private var communities: [WalkingCommunity] = []
+    @State private var communitySearch = ""
+    @State private var lastCommunityRefresh: Date?
+    @State private var refreshAgain = false
     @State private var challenges: [UUID: [WalkingCommunityChallenge]] = [:]
     @State private var showCommunityComposer = false
     @State private var communityComposerStartsWithJoin = false
@@ -139,6 +142,7 @@ struct CommunityChallengesView: View {
         NavigationStack {
             Form {
                 Section {
+                    if !communities.isEmpty { communityOverview } else {
                     VStack(spacing: 14) {
                         ZStack {
                             Circle().fill(PausePathPalette.teal.opacity(0.08)).frame(width: 104, height: 104)
@@ -171,38 +175,21 @@ struct CommunityChallengesView: View {
                             Label("Your pace", systemImage: "leaf")
                         }.font(.caption.weight(.medium)).foregroundStyle(PausePathPalette.teal)
                     }.frame(maxWidth: .infinity).padding(.vertical, 16)
-                }.listRowBackground(PausePathPalette.teal.opacity(0.05))
-                Section {
-                    ForEach(weeklyChallenges) { challenge in
-                        let progress = weeklyProgress(for: challenge)
-                        let complete = progress >= challenge.target
-                        VStack(alignment: .leading, spacing: 7) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(challenge.title).font(.headline)
-                                Spacer(minLength: 8)
-                                Text(challengeProgressLabel(challenge, progress: progress))
-                                    .font(.caption.monospacedDigit().weight(.semibold))
-                                    .foregroundStyle(complete ? Color.accentColor : Color.secondary)
-                            }
-                            SegmentedChallengeProgress(value: progress, total: challenge.target)
-                                .frame(height: 9)
-                                .accessibilityLabel("\(challengeProgressLabel(challenge, progress: progress)) complete")
-                            if complete { Label("Completed • 10 points", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green) }
-                        }.padding(14)
-                            .background(complete ? PausePathPalette.lime.opacity(0.22) : PausePathPalette.teal.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
-                    }.listRowSeparator(.hidden)
-                    HStack {
-                        Label("\(monthlyPoints) points this month", systemImage: "star.fill")
-                            .font(.subheadline.weight(.semibold))
-                        Spacer()
-                        Button("Refresh (\(max(0, 2 - weeklyRefreshesUsed)) left)") { refreshWeeklyChallenges() }
-                            .font(.caption.weight(.semibold))
-                            .disabled(weeklyRefreshesUsed >= 2)
                     }
-                    Text("Choose two achievable suggestions for this week. You can refresh them twice; points are awarded once when recorded walks meet a challenge. Points never depend on pace, harder routes, or heart rate.")
-                        .font(.caption).foregroundStyle(.secondary)
-                } header: { Label("Small steps this week", systemImage: "sparkles") }
-                Section("Communities") {
+                }.listRowBackground(PausePathPalette.teal.opacity(0.05))
+                Section("Your communities") {
+                    if communities.count > 1 {
+                        TextField("Find your community", text: $communitySearch).autocorrectionDisabled()
+                            .accessibilityLabel("Search your communities")
+                    }
+                    if let lastCommunityRefresh {
+                        HStack {
+                            Label("Updated", systemImage: "checkmark.circle").foregroundStyle(PausePathPalette.teal)
+                            Text(lastCommunityRefresh, style: .relative).foregroundStyle(.secondary)
+                            Spacer()
+                            if busy { ProgressView().controlSize(.small) }
+                        }.font(.caption)
+                    }
                     if let communityLoadMessage {
                         Label(communityLoadMessage, systemImage: "arrow.clockwise.circle")
                             .font(.callout).foregroundStyle(.secondary)
@@ -224,18 +211,22 @@ struct CommunityChallengesView: View {
                                     .font(.subheadline).foregroundStyle(.secondary)
                             }.padding(.vertical, 8)
                         }
-                        ForEach(communities) { community in
+                        ForEach(filteredCommunities) { community in
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack(alignment: .firstTextBaseline) {
                                     Label(community.name, systemImage: "person.2.fill").font(.headline).foregroundStyle(PausePathPalette.teal)
                                     Spacer()
                                     Text("\(community.member_count) members").font(.caption).foregroundStyle(.secondary)
                                 }
-                                CommunityInviteCard(code: community.invite_code)
+                                DisclosureGroup {
+                                    CommunityInviteCard(code: community.invite_code)
+                                } label: { Label("Invite someone", systemImage: "ticket") }.font(.subheadline)
                                 Text("You appear as \(community.my_display_name)").font(.caption).foregroundStyle(.secondary)
                                 if let members = community.members, !members.isEmpty {
-                                    Text("Members").font(.caption.weight(.semibold))
-                                    Text(members.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                                    DisclosureGroup("Members (\(members.count))") {
+                                        Text(members.joined(separator: " · ")).font(.subheadline).foregroundStyle(.secondary)
+                                            .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6)
+                                    }.font(.caption.weight(.semibold))
                                 }
                                 Text("Community members can see these usernames. They see your activity totals only while progress sharing is on; routes, locations, and Health data stay private.")
                                     .font(.caption2).foregroundStyle(.secondary)
@@ -268,12 +259,42 @@ struct CommunityChallengesView: View {
                                 if let notice = challengeLoadMessages[community.id] {
                                     Label(notice, systemImage: "arrow.clockwise").font(.caption).foregroundStyle(.secondary)
                                 }
-                                Button("Create a community task", systemImage: "plus") { challengeSheetTarget = ChallengeTarget(community.id) }
+                                Button("Add a shared goal", systemImage: "plus.circle.fill") { challengeSheetTarget = ChallengeTarget(community.id) }
                                     .font(.subheadline)
                             }.padding(.vertical, 12)
                         }
                     }
                 }
+                Section {
+                    ForEach(weeklyChallenges) { challenge in
+                        let progress = weeklyProgress(for: challenge)
+                        let complete = progress >= challenge.target
+                        VStack(alignment: .leading, spacing: 7) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(challenge.title).font(.headline)
+                                Spacer(minLength: 8)
+                                Text(challengeProgressLabel(challenge, progress: progress))
+                                    .font(.caption.monospacedDigit().weight(.semibold))
+                                    .foregroundStyle(complete ? Color.accentColor : Color.secondary)
+                            }
+                            SegmentedChallengeProgress(value: progress, total: challenge.target)
+                                .frame(height: 9)
+                                .accessibilityLabel("\(challengeProgressLabel(challenge, progress: progress)) complete")
+                            if complete { Label("Completed • 10 points", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green) }
+                        }.padding(14)
+                            .background(complete ? PausePathPalette.lime.opacity(0.22) : PausePathPalette.teal.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+                    }.listRowSeparator(.hidden)
+                    HStack {
+                        Label("\(monthlyPoints) points this month", systemImage: "star.fill")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Button("Refresh (\(max(0, 2 - weeklyRefreshesUsed)) left)") { refreshWeeklyChallenges() }
+                            .font(.caption.weight(.semibold))
+                            .disabled(weeklyRefreshesUsed >= 2)
+                    }
+                    Text("Choose two achievable suggestions for this week. You can refresh them twice; points are awarded once when recorded walks meet a challenge. Points never depend on pace, harder routes, or heart rate.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } header: { Label("Small steps this week", systemImage: "sparkles") }
                 Section {
                     Text("Take part at your own pace. A challenge is not a fitness test or medical recommendation; choose a goal that feels appropriate for you.")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -297,8 +318,9 @@ struct CommunityChallengesView: View {
                 updateWeeklyProgress(); Task { await refresh() }
             }
             .onChange(of: account.userID) { _, userID in
+                communityRevision = UUID(); communities = []; challenges = [:]; challengeLoadMessages = [:]
+                communityLoadMessage = nil; message = ""; communitySearch = ""; lastCommunityRefresh = nil
                 if userID != nil { Task { await refresh() } }
-                else { communityRevision = UUID(); communities = []; challenges = [:]; challengeLoadMessages = [:]; communityLoadMessage = nil; message = "" }
             }
             .onReceive(NotificationCenter.default.publisher(for: .pausePathJoinCommunity)) { notification in
                 pendingInviteCode = notification.userInfo?["code"] as? String ?? ""
@@ -307,15 +329,7 @@ struct CommunityChallengesView: View {
             .onChange(of: pendingInviteCode) { _, code in if !code.isEmpty { showCommunityComposer = true } }
             .onChange(of: preferences) { _, _ in personalizeUnstartedChallenges() }
             .onChange(of: profileData) { _, _ in personalizeUnstartedChallenges() }
-            .onChange(of: shareProgress) { _, enabled in
-                Task {
-                    if enabled { await refresh() }
-                    else {
-                        do { try await PausePathAPI.clearChallengeProgress(); await refresh() }
-                        catch { message = communityErrorMessage(error) }
-                    }
-                }
-            }
+            .onChange(of: shareProgress) { _, _ in Task { await refresh() } }
             .sheet(isPresented: $showCommunityComposer, onDismiss: {
                 pendingInviteCode = ""
                 Task { await refresh() }
@@ -419,77 +433,123 @@ struct CommunityChallengesView: View {
     private func unit(_ metric: String) -> String {
         switch metric { case "distance_km": "km"; case "minutes": "minutes"; case "new_routes": "routes"; default: "walks" }
     }
+    private var filteredCommunities: [WalkingCommunity] {
+        let query = communitySearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty ? communities : communities.filter { $0.name.localizedCaseInsensitiveContains(query) }
+    }
+    private var communityOverview: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Your walking circle", systemImage: "person.2.fill").font(.title2.bold()).foregroundStyle(PausePathPalette.teal)
+            Text("\(communities.count) \(communities.count == 1 ? "community" : "communities") · \(challenges.values.flatMap { $0 }.count) shared goals")
+                .font(.subheadline).foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack { communityActions }
+                VStack(alignment: .leading) { communityActions }
+            }
+            if !communitySearch.isEmpty && filteredCommunities.isEmpty {
+                Text("No groups match that name.").font(.caption).foregroundStyle(.secondary)
+                Button("Clear search") { communitySearch = "" }.font(.caption)
+            }
+        }.padding(.vertical, 10)
+    }
+    @ViewBuilder private var communityActions: some View {
+        Button { communityComposerStartsWithJoin = false; showCommunityComposer = true } label: {
+            Label("Create", systemImage: "plus.circle.fill").frame(minHeight: 44)
+        }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
+        Button { communityComposerStartsWithJoin = true; showCommunityComposer = true } label: {
+            Label("Join with a code", systemImage: "person.badge.plus").frame(minHeight: 44)
+        }.buttonStyle(.bordered)
+    }
     @MainActor private func refresh() async {
-        guard account.isSignedIn, !busy else { return }
-        let revision = UUID()
-        communityRevision = revision
-        busy = true
-        defer { busy = false }
+        guard account.isSignedIn else { return }
+        if busy { refreshAgain = true; return }
+        let revision = UUID(); communityRevision = revision; busy = true
+        defer {
+            busy = false
+            if refreshAgain { refreshAgain = false; Task { await refresh() } }
+        }
+        let loaded: [WalkingCommunity]
         do {
-            let loaded = try await PausePathAPI.communities()
+            loaded = try await PausePathAPI.communities()
             guard communityRevision == revision, account.isSignedIn else { return }
             communities = loaded
-            communityLoadMessage = nil
-            message = ""
+            let ids = Set(loaded.map(\.id))
+            challenges = challenges.filter { ids.contains($0.key) }
+            challengeLoadMessages = challengeLoadMessages.filter { ids.contains($0.key) }
+            communityLoadMessage = nil; message = ""; lastCommunityRefresh = .now
         } catch {
             guard communityRevision == revision else { return }
-            communityLoadMessage = "We couldn’t refresh your groups. Pull down to try again."
+            communityLoadMessage = communityErrorMessage(error)
             return
         }
-        guard !communities.isEmpty else { return }
-        // A secondary request must never erase working communities or their invite codes.
-        if let username = profile.username?.trimmingCharacters(in: .whitespacesAndNewlines), !username.isEmpty {
-            do { try await PausePathAPI.updateCommunityUsername(username) }
-            catch {
-                guard communityRevision == revision else { return }
-                message = "Your groups are loaded. Your updated username hasn’t synced yet."
+        guard !loaded.isEmpty else { return }
+        // Only list calls run together. Mutations below remain ordered and optional.
+        var loadedTasks: [UUID: [WalkingCommunityChallenge]] = [:]
+        await withTaskGroup(of: (UUID, Result<[WalkingCommunityChallenge], Error>).self) { group in
+            var remaining = loaded.dropFirst(4).makeIterator()
+            for community in loaded.prefix(4) {
+                group.addTask {
+                    do { return (community.id, .success(try await PausePathAPI.challenges(in: community.id))) }
+                    catch { return (community.id, .failure(error)) }
+                }
+            }
+            for await (id, result) in group {
+                guard communityRevision == revision, account.isSignedIn else { group.cancelAll(); return }
+                switch result {
+                case .success(let list): loadedTasks[id] = list; challenges[id] = list; challengeLoadMessages[id] = nil
+                case .failure: challengeLoadMessages[id] = "Shared goals could not refresh. Pull down to retry; your group and invite code remain available."
+                }
+                if let community = remaining.next() {
+                    group.addTask {
+                        do { return (community.id, .success(try await PausePathAPI.challenges(in: community.id))) }
+                        catch { return (community.id, .failure(error)) }
+                    }
+                }
             }
         }
         guard communityRevision == revision else { return }
+        if let username = profile.username?.trimmingCharacters(in: .whitespacesAndNewlines), !username.isEmpty,
+           loaded.contains(where: { $0.my_display_name != username }) {
+            do { try await PausePathAPI.updateCommunityUsername(username) }
+            catch { message = "Your groups are loaded. Your updated username will retry on refresh." }
+        }
+        guard communityRevision == revision else { return }
         do {
-            if shareProgress { try await PausePathAPI.syncChallengeProgress(walks: walks) }
-            else { try await PausePathAPI.clearChallengeProgress() }
-            guard communityRevision == revision else { return }
-            if message.contains("progress") { message = "" }
+            let changed: Set<UUID>
+            if shareProgress { changed = try await PausePathAPI.syncChallengeProgress(walks: walks, groups: loaded, tasks: loadedTasks) }
+            else { changed = try await PausePathAPI.clearChallengeProgress(groups: loaded, tasks: loadedTasks) }
+            for id in changed {
+                let list = try await PausePathAPI.challenges(in: id)
+                guard communityRevision == revision else { return }; challenges[id] = list
+            }
         } catch {
             guard communityRevision == revision else { return }
-            message = shareProgress
-                ? "Your groups are ready. Challenge progress will retry on refresh."
-                : "Your groups are ready. Removing shared progress hasn’t finished; refresh to retry."
-        }
-        for community in communities {
-            do {
-                let list = try await PausePathAPI.challenges(in: community.id)
-                guard communityRevision == revision else { return }
-                challenges[community.id] = list
-                challengeLoadMessages[community.id] = nil
-            } catch {
-                guard communityRevision == revision else { return }
-                challengeLoadMessages[community.id] = "Tasks haven’t refreshed yet. Your invite code is still ready to share."
-            }
+            message = shareProgress ? "Your groups and goals are loaded. Progress syncing will retry on refresh." : "Removing shared totals hasn’t finished. Pull down to retry."
         }
     }
     private func saveCommunityUsername(_ username: String) {
         var updated = profile; updated.username = username
         profileData = (try? JSONEncoder().encode(updated)) ?? profileData
     }
-    private func createCommunity(name: String, username: String) async throws -> WalkingCommunity {
-        let community = try await PausePathAPI.createCommunity(name: name, username: username)
+    private func createCommunity(name: String, username: String, requestID: UUID) async throws -> WalkingCommunity {
+        let community = try await PausePathAPI.createCommunity(name: name, username: username, requestID: requestID)
         communityRevision = UUID()
         communityLoadMessage = nil
         saveCommunityUsername(username)
         communities.removeAll { $0.id == community.id }
         communities.insert(community, at: 0)
+        communitySearch = ""; lastCommunityRefresh = .now
         message = ""
         return community
     }
-    private func joinCommunity(code: String, username: String) async throws -> WalkingCommunity {
-        let community = try await PausePathAPI.joinCommunity(code: code, username: username)
+    private func joinCommunity(code: String, username: String, requestID: UUID) async throws -> WalkingCommunity {
+        let community = try await PausePathAPI.joinCommunity(code: code, username: username, requestID: requestID)
         communityRevision = UUID()
         communityLoadMessage = nil
         saveCommunityUsername(username)
         communities.removeAll { $0.id == community.id }
         communities.insert(community, at: 0)
+        communitySearch = ""; lastCommunityRefresh = .now
         message = ""
         return community
     }
@@ -523,8 +583,8 @@ private struct CommunityJoinSheet: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     let account: PausePathAccount
-    let onCreate: (String, String) async throws -> WalkingCommunity
-    let onJoin: (String, String) async throws -> WalkingCommunity
+    let onCreate: (String, String, UUID) async throws -> WalkingCommunity
+    let onJoin: (String, String, UUID) async throws -> WalkingCommunity
     let initialUsername: String
     let initialInviteCode: String
     let startsWithJoin: Bool
@@ -535,6 +595,9 @@ private struct CommunityJoinSheet: View {
     @State private var busy = false
     @State private var submissionError = ""
     @State private var result: WalkingCommunity?
+    @State private var draft = CommunitySubmissionDraft()
+    @State private var didRestoreDraft = false
+    @AppStorage("pausepath.communitySubmissionDraft.v1") private var savedDraft = Data()
 
     var body: some View {
         NavigationStack {
@@ -557,11 +620,11 @@ private struct CommunityJoinSheet: View {
                       footer: { Text("This is the name other members see. Use 1–32 characters.") }
                     if isJoining {
                         Section {
-                            TextField("Enter invite code", text: $code)
+                            TextField("Paste a code or PausePath invite link", text: $code)
                                 .textInputAutocapitalization(.characters).autocorrectionDisabled().disabled(busy)
                                 .font(.body.monospaced()).accessibilityLabel("Community invite code")
                         } header: { Text("Invite code") }
-                          footer: { Text("Ask a member for their code. You do not need to create a community first.") }
+                          footer: { Text("Paste a member’s code or PausePath invite link. Spaces and hyphens are ignored.") }
                     } else {
                         Section {
                             TextField("For example, Weekend Walkers", text: $name)
@@ -580,6 +643,7 @@ private struct CommunityJoinSheet: View {
                         if !submissionError.isEmpty {
                             Label(submissionError, systemImage: "exclamationmark.circle")
                                 .font(.callout).foregroundStyle(.secondary)
+                            Text("Your draft is saved on this device. Retrying unchanged details uses the same request.").font(.caption).foregroundStyle(.secondary)
                         }
                     } footer: { Text("Progress sharing stays optional. Your routes and locations remain private.") }
                 }
@@ -589,7 +653,15 @@ private struct CommunityJoinSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.disabled(busy) } }
             .interactiveDismissDisabled(busy)
-            .onAppear { username = initialUsername; code = initialInviteCode; isJoining = startsWithJoin || !initialInviteCode.isEmpty }
+            .onAppear {
+                guard !didRestoreDraft else { return }; didRestoreDraft = true
+                if let restored = try? JSONDecoder().decode(CommunitySubmissionDraft.self, from: savedDraft), restored.ownerID == (account.userID ?? "signed-out") {
+                    draft = restored; username = restored.username; name = restored.name; code = restored.code; isJoining = restored.joining
+                } else { username = initialUsername; code = initialInviteCode; isJoining = startsWithJoin || !initialInviteCode.isEmpty }
+                if !initialInviteCode.isEmpty { code = initialInviteCode; isJoining = true }
+                storeDraft()
+            }
+            .onChange(of: [name, code, username, String(isJoining), account.userID ?? "signed-out"]) { _, _ in storeDraft() }
             .onChange(of: isJoining) { _, _ in submissionError = "" }
         }
     }
@@ -633,18 +705,25 @@ private struct CommunityJoinSheet: View {
 
     private var cleanUsername: String { username.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var cleanName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var cleanCode: String { code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+    private var cleanCode: String { CommunityInvite.normalizedCode(code) }
     private var canSubmit: Bool {
-        account.isSignedIn && account.sessionState == .ready && (1...32).contains(cleanUsername.count) &&
-        (isJoining ? (4...12).contains(cleanCode.count) : (2...60).contains(cleanName.count))
+        account.isSignedIn && account.sessionState != .checking && (1...32).contains(cleanUsername.count) &&
+        (isJoining ? CommunityInvite.isValid(cleanCode) : (2...60).contains(cleanName.count))
+    }
+    private func storeDraft() {
+        guard result == nil else { return }
+        draft.prepare(ownerID: account.userID ?? "signed-out", joining: isJoining, name: name, code: code, username: username)
+        savedDraft = (try? JSONEncoder().encode(draft)) ?? savedDraft
     }
     @MainActor private func submit() async {
         guard canSubmit, !busy else { return }
         busy = true; submissionError = ""
         defer { busy = false }
         do {
-            if isJoining { result = try await onJoin(cleanCode, cleanUsername) }
-            else { result = try await onCreate(cleanName, cleanUsername) }
+            storeDraft()
+            if isJoining { result = try await onJoin(cleanCode, cleanUsername, draft.requestID) }
+            else { result = try await onCreate(cleanName, cleanUsername, draft.requestID) }
+            savedDraft = Data()
         } catch { submissionError = communityErrorMessage(error) }
     }
 }
@@ -661,6 +740,11 @@ private struct ChallengeComposer: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Start with an idea") {
+                    Button("One walk together", systemImage: "figure.walk") { name = "One walk at your own pace"; metric = "walks"; target = 1 }
+                    Button("Explore somewhere new", systemImage: "map") { name = "Try a new route"; metric = "new_routes"; target = 1 }
+                    Text("Choose or customize a goal. Everyone can take part at their own pace.").font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Make it yours") {
                     TextField("Task name", text: $name)
                     Picker("Measure progress by", selection: $metric) {
@@ -844,15 +928,16 @@ struct RouteBreaksView: View {
 private func communityErrorMessage(_ error: Error) -> String {
     if let failure = error as? ServiceFailure {
         switch failure.status {
-        case 401, 403: return "Reconnect your account to continue. Your entries are still here."
+        case 401: return "Reconnect your account to continue. Your entries are still here."
+        case 403: return "This action needs community membership. Refresh your groups and try again."
         case 404:
             if failure.message.localizedCaseInsensitiveContains("invite") {
                 return "That invite code didn’t match a community. Check the code and try again."
             }
             return "We couldn’t complete this request. Your entries are still here; please try again."
-        case 409: return "That name or request is already in use. Check your communities or try another name."
+        case 409: return "This saved request changed. Review your entries and submit again."
         case 429: return "A few requests arrived together. Give it a moment, then try again."
-        case 500...599: return "We couldn’t confirm the request. Your entries are still here. Check your communities before trying again."
+        case 500...599: return "The community service is temporarily unavailable. Your entries are still here; please try again shortly."
         case 400, 422: return "Check your community name, username and invite code, then try again."
         default: break
         }

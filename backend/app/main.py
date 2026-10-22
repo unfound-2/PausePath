@@ -5,16 +5,18 @@ import hmac
 import secrets
 import json
 import os
+import logging
 from typing import Annotated, Union, Optional
 from uuid import UUID
 from fastapi import FastAPI, Body, Depends, HTTPException, Response, Request
+from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from psycopg import errors
 from psycopg.types.json import Jsonb
 from .auth import identity,reviewer,admin
 from .db import transaction
 from .models import (ExistingReport,Suggestion,ReportReceipt,IngestRequest,DiscoveryRequest,CurateRequest,CuratedRoute,
-                     Review,POIReview,QueueEdit,QueueReceipt,MapboxCategorySearch,MapboxSuggest,MapboxRetrieve,MapboxResponse,DiscoveryResponse)
+                     Review,POIReview,QueueEdit,QueueReceipt,MapboxCategorySearch,MapboxSuggest,MapboxRetrieve,MapboxResponse,DiscoveryResponse,CommunityCreate,CommunityJoin,CommunityResponse)
 from .providers import baseline_osm
 from .discovery import search_area, start_worker, stop_worker
 from . import mapbox
@@ -71,40 +73,63 @@ def health(): return {'status':'ok'}
 
 @app.get('/ready', tags=['operations'])
 def ready():
-    with transaction() as conn: conn.execute('SELECT id FROM pois LIMIT 1')
+    with transaction() as conn:
+        conn.execute('SELECT id FROM pois LIMIT 0')
+        conn.execute('SELECT 1 FROM walking_communities, walking_community_members, walking_challenges, walking_challenge_progress LIMIT 0')
     return {'status':'ready'}
 
-@app.post('/api/v1/communities',tags=['community'])
-def create_community(body: dict=Body(...),user=Depends(identity)):
-    rate_limit(user,'community',8)
-    raw_name=body.get('name')
-    name=raw_name.strip() if isinstance(raw_name,str) else ''
-    if not 2 <= len(name) <= 60: raise HTTPException(422,'Community name must be 2–60 characters')
-    raw_display=body.get('display_name')
-    display=raw_display.strip() if isinstance(raw_display,str) else ''
-    if not 1 <= len(display) <= 32: raise HTTPException(422,'Choose a community username from 1 to 32 characters')
-    code=secrets.token_urlsafe(6).replace('-','').replace('_','').upper()[:8]
-    with transaction() as conn:
-        row=conn.execute('INSERT INTO walking_communities(name,invite_code,created_by) VALUES (%s,%s,%s) RETURNING id,name,invite_code,created_at',(name,code,user['sub'])).fetchone()
-        conn.execute('INSERT INTO walking_community_members(community_id,user_id,display_name) VALUES (%s,%s,%s)',(row['id'],user['sub'],display))
-    return {**row,'member_count':1,'my_display_name':display}
+@app.exception_handler(errors.UndefinedTable)
+async def missing_schema(request: Request, exc):
+    logging.getLogger('uvicorn.error').error('database_schema_incomplete: run the checked-in migrations')
+    return JSONResponse(status_code=503, content={'detail':'Community setup is temporarily unavailable. Please try again shortly.'}, headers={'Retry-After':'30'})
 
-@app.post('/api/v1/communities/join',tags=['community'])
-def join_community(body: dict=Body(...),user=Depends(identity)):
-    rate_limit(user,'community',12)
-    raw_code=body.get('invite_code')
-    code=raw_code.strip().upper() if isinstance(raw_code,str) else ''
-    if not 4 <= len(code) <= 12: raise HTTPException(422,'Enter a valid invite code')
-    raw_display=body.get('display_name')
-    display=raw_display.strip() if isinstance(raw_display,str) else ''
-    if not 1 <= len(display) <= 32: raise HTTPException(422,'Choose a community username from 1 to 32 characters')
+
+def community_receipt(conn, user, body, action):
+    """Serialize identical requests; a lost response must not create another group."""
+    if body.request_id is None: return None, None
+    digest = hashlib.sha256(json.dumps({'action':action, **body.model_dump(mode='json', exclude={'request_id'})}, sort_keys=True).encode()).hexdigest()
+    conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', (user['sub'] + ':' + str(body.request_id),))
+    previous = conn.execute('SELECT payload_hash,response FROM api_request_receipts WHERE user_id=%s AND request_id=%s', (user['sub'],body.request_id)).fetchone()
+    if previous and previous['payload_hash'] != digest: raise HTTPException(409,'This request changed. Review your entries and submit again.')
+    return previous['response'] if previous else None, digest
+
+
+def save_community_receipt(conn, user, body, digest, result):
+    encoded = jsonable_encoder(result)
+    if body.request_id is not None:
+        conn.execute('INSERT INTO api_request_receipts(user_id,request_id,payload_hash,response) VALUES (%s,%s,%s,%s)', (user['sub'],body.request_id,digest,Jsonb(encoded)))
+    return encoded
+
+
+@app.post('/api/v1/communities', response_model=CommunityResponse, tags=['community'])
+def create_community(body: CommunityCreate,user=Depends(identity)):
+    rate_limit(user,'community',8)
     with transaction() as conn:
-        row=conn.execute('SELECT id,name,invite_code,created_at FROM walking_communities WHERE invite_code=%s',(code,)).fetchone()
+        previous,digest = community_receipt(conn,user,body,'create')
+        if previous is not None: return previous
+        for attempt in range(3):
+            code = ''.join(secrets.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(8))
+            try:
+                with conn.transaction():
+                    row=conn.execute('INSERT INTO walking_communities(name,invite_code,created_by) VALUES (%s,%s,%s) RETURNING id,name,invite_code,created_at', (body.name,code,user['sub'])).fetchone()
+                break
+            except errors.UniqueViolation:
+                if attempt == 2: raise HTTPException(503,'An invite code could not be allocated. Please retry.')
+        conn.execute('INSERT INTO walking_community_members(community_id,user_id,display_name) VALUES (%s,%s,%s)', (row['id'],user['sub'],body.display_name))
+        return save_community_receipt(conn,user,body,digest,{**row,'member_count':1,'my_display_name':body.display_name,'members':[body.display_name]})
+
+
+@app.post('/api/v1/communities/join', response_model=CommunityResponse, tags=['community'])
+def join_community(body: CommunityJoin,user=Depends(identity)):
+    rate_limit(user,'community',12)
+    with transaction() as conn:
+        previous,digest = community_receipt(conn,user,body,'join')
+        if previous is not None: return previous
+        row=conn.execute('SELECT id,name,invite_code,created_at FROM walking_communities WHERE invite_code=%s', (body.invite_code,)).fetchone()
         if not row: raise HTTPException(404,'That invite code was not found')
-        conn.execute('INSERT INTO walking_community_members(community_id,user_id,display_name) VALUES (%s,%s,%s) ON CONFLICT (community_id,user_id) DO UPDATE SET display_name=excluded.display_name',(row['id'],user['sub'],display))
-        member=conn.execute('SELECT display_name FROM walking_community_members WHERE community_id=%s AND user_id=%s',(row['id'],user['sub'])).fetchone()
-        count=conn.execute('SELECT count(*) AS n FROM walking_community_members WHERE community_id=%s',(row['id'],)).fetchone()['n']
-    return {**row,'member_count':count,'my_display_name':member['display_name']}
+        conn.execute('INSERT INTO walking_community_members(community_id,user_id,display_name) VALUES (%s,%s,%s) ON CONFLICT (community_id,user_id) DO UPDATE SET display_name=excluded.display_name', (row['id'],user['sub'],body.display_name))
+        members=conn.execute('SELECT display_name FROM walking_community_members WHERE community_id=%s ORDER BY lower(display_name),user_id', (row['id'],)).fetchall()
+        return save_community_receipt(conn,user,body,digest,{**row,'member_count':len(members),'my_display_name':body.display_name,'members':[m['display_name'] for m in members]})
 
 @app.post('/api/v1/communities/username',tags=['community'])
 def update_community_username(body: dict=Body(...),user=Depends(identity)):
@@ -137,7 +162,6 @@ def create_challenge(community_id: UUID,body: dict=Body(...),user=Depends(identi
     with transaction() as conn:
         if not conn.execute('SELECT 1 FROM walking_community_members WHERE community_id=%s AND user_id=%s',(community_id,user['sub'])).fetchone(): raise HTTPException(403,'Join this community before creating a challenge')
         row=conn.execute('INSERT INTO walking_challenges(community_id,name,metric,target,created_by) VALUES (%s,%s,%s,%s,%s) RETURNING id,community_id,name,metric,target,created_at',(community_id,name,metric,target,user['sub'])).fetchone()
-        conn.execute('INSERT INTO walking_challenge_progress(challenge_id,user_id,amount) VALUES (%s,%s,0)',(row['id'],user['sub']))
     return row
 
 @app.get('/api/v1/communities/{community_id}/challenges',tags=['community'])
@@ -146,11 +170,12 @@ def list_challenges(community_id: UUID,user=Depends(identity)):
         if not conn.execute('SELECT 1 FROM walking_community_members WHERE community_id=%s AND user_id=%s',(community_id,user['sub'])).fetchone(): raise HTTPException(403,'Join this community to view its challenges')
         rows=conn.execute('''SELECT c.id,c.community_id,c.name,c.metric,c.target,c.created_at,
             coalesce((SELECT p.amount FROM walking_challenge_progress p WHERE p.challenge_id=c.id AND p.user_id=%s),0) AS my_progress,
+            EXISTS(SELECT 1 FROM walking_challenge_progress p WHERE p.challenge_id=c.id AND p.user_id=%s) AS my_progress_shared,
             coalesce((SELECT jsonb_agg(jsonb_build_object('name',ranked.display_name,'amount',ranked.amount) ORDER BY ranked.amount DESC)
                 FROM (SELECT m.display_name,coalesce(p.amount,0) AS amount FROM walking_community_members m
-                    LEFT JOIN walking_challenge_progress p ON p.user_id=m.user_id AND p.challenge_id=c.id
+                    JOIN walking_challenge_progress p ON p.user_id=m.user_id AND p.challenge_id=c.id
                     WHERE m.community_id=c.community_id ORDER BY amount DESC LIMIT 50) ranked),'[]'::jsonb) AS leaderboard
-            FROM walking_challenges c WHERE c.community_id=%s ORDER BY c.created_at DESC''',(user['sub'],community_id)).fetchall()
+            FROM walking_challenges c WHERE c.community_id=%s ORDER BY c.created_at DESC''',(user['sub'],user['sub'],community_id)).fetchall()
     return {'challenges':rows}
 
 @app.post('/api/v1/challenges/{challenge_id}/progress',tags=['community'])
@@ -191,7 +216,7 @@ def report(body: Annotated[Union[ExistingReport,Suggestion], Body(discriminator=
             if previous:
                 if previous['payload_hash']!=digest: raise HTTPException(409,'request_id was used for a different payload')
                 return previous['response']
-            count=conn.execute("SELECT count(*) AS n FROM api_request_receipts WHERE user_id=%s AND created_at>now()-interval '24 hours'",(user['sub'],)).fetchone()['n']
+            count=conn.execute("SELECT count(*) AS n FROM api_request_receipts WHERE user_id=%s AND response->>'kind' IN ('status','suggestion') AND created_at>now()-interval '24 hours'",(user['sub'],)).fetchone()['n']
             if count>=60: raise HTTPException(429,'Daily reporting limit reached')
             if isinstance(body,ExistingReport):
                 row=conn.execute('''INSERT INTO poi_reports(poi_id,user_id,report_type,request_id,payload_hash)

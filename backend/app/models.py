@@ -221,3 +221,38 @@ class DiscoveryResponse(StrictModel):
     truncated: bool
     warning: Optional[str] = None
     attribution: str
+
+
+class CommunityCreate(StrictModel):
+    name: str = Field(min_length=2, max_length=60)
+    display_name: str = Field(min_length=1, max_length=32)
+    request_id: Optional[UUID4] = None
+
+    @field_validator('name', 'display_name', mode='before')
+    @classmethod
+    def trim_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+class CommunityJoin(StrictModel):
+    invite_code: str = Field(min_length=4, max_length=12, pattern=r'^[A-Z0-9]+$')
+    display_name: str = Field(min_length=1, max_length=32)
+    request_id: Optional[UUID4] = None
+
+    @field_validator('display_name', mode='before')
+    @classmethod
+    def trim_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator('invite_code', mode='before')
+    @classmethod
+    def normalize_code(cls, value):
+        return ''.join(value.split()).replace('-', '').upper() if isinstance(value, str) else value
+
+class CommunityResponse(StrictModel):
+    id: UUID
+    name: str
+    invite_code: str
+    created_at: datetime
+    member_count: int
+    my_display_name: str
+    members: List[str] = Field(default_factory=list)
