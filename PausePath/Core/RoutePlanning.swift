@@ -193,14 +193,18 @@ public struct TrackedWalk: Identifiable, Codable, Sendable {
     public var steps: Int?
     public var startedAt: Date?
     public var journeySegments: [[Coordinate]]?
+    public var activityKind: String?
+    public var ownerID: String?
     public init(id: UUID = UUID(), date: Date = .now, routeName: String, distanceMeters: Double,
                 activeSeconds: Double, completed: Bool, routeIdentity: String? = nil,
-                steps: Int? = nil, startedAt: Date? = nil, journeySegments: [[Coordinate]]? = nil) {
+                steps: Int? = nil, startedAt: Date? = nil, journeySegments: [[Coordinate]]? = nil,
+                activityKind: String? = nil, ownerID: String? = nil) {
         self.id = id; self.date = date; self.routeName = routeName
         self.distanceMeters = max(0, distanceMeters); self.activeSeconds = max(0, activeSeconds)
         self.completed = completed; self.routeIdentity = routeIdentity
         self.steps = steps
         self.startedAt = startedAt; self.journeySegments = journeySegments
+        self.activityKind = activityKind; self.ownerID = ownerID
     }
 }
 
@@ -344,5 +348,17 @@ public enum RoutePreviewMetrics {
             }
         }
         return max(longest, gap)
+    }
+}
+
+/// Calendar-week goals use recorded activity only; no inferred Health values.
+public enum PersonalGoalProgress {
+    public static func total(metric: String, walks: [TrackedWalk], start: Date, end: Date, calendar: Calendar = .current) -> Double {
+        let eligible = walks.filter { $0.date >= start && $0.date < end }
+        switch metric {
+        case "minutes": return eligible.reduce(0) { $0 + ($1.activeSeconds.isFinite ? max(0, $1.activeSeconds) / 60 : 0) }
+        case "days": return Double(Set(eligible.map { calendar.startOfDay(for: $0.date) }).count)
+        default: return eligible.reduce(0) { $0 + ($1.distanceMeters.isFinite ? max(0, $1.distanceMeters) / 1000 : 0) }
+        }
     }
 }

@@ -5,14 +5,14 @@ import CoreLocation
 struct WalkingActivity: Identifiable {
     let id: String
     let date: Date
-    let meters: Double
+    let meters: Double?
     let seconds: Double
     let averageHeartRate: Double?
     let kind: String
     let symbol: String
     let steps: Double?
     let calories: Double?
-    var pace: String { meters > 0 ? String(format: "%.1f min/km", seconds / 60 / (meters / 1000)) : "Unavailable" }
+    var pace: String { guard let meters, meters > 0 else { return "Unavailable" }; return String(format: "%.1f min/km", seconds / 60 / (meters / 1000)) }
 }
 
 struct BodyReading: Identifiable {
@@ -40,6 +40,12 @@ struct HealthDay: Identifiable {
     private let store = HKHealthStore()
     private var workoutsByID: [String: HKWorkout] = [:]
     private var generation = UUID()
+    private var lastRefresh: Date?
+    func refreshIfConnected() async {
+        guard UserDefaults.standard.bool(forKey: "pausepath.health.autoRefresh"), !isLoading,
+              lastRefresh.map({ Date().timeIntervalSince($0) > 60 }) ?? true else { return }
+        await connect()
+    }
 
     func connect() async {
         guard !isLoading else { return }
@@ -64,7 +70,7 @@ struct HealthDay: Identifiable {
             let imported = workouts.map { workout in
                 let presentation = Self.presentation(workout.workoutActivityType)
                 return WalkingActivity(id: workout.uuid.uuidString, date: workout.startDate,
-                    meters: workout.totalDistance?.doubleValue(for: .meter()) ?? 0, seconds: workout.duration,
+                    meters: workout.totalDistance?.doubleValue(for: .meter()), seconds: workout.duration,
                     averageHeartRate: workout.statistics(for: heartRate)?.averageQuantity()?.doubleValue(for: HKUnit.count().unitDivided(by: .minute())),
                     kind: presentation.0, symbol: presentation.1,
                     steps: workout.statistics(for: steps)?.sumQuantity()?.doubleValue(for: .count()),
@@ -87,6 +93,8 @@ struct HealthDay: Identifiable {
                 return HealthDay(date: date, steps: stepDays[date], calories: energyDays[date])
             }
             hasConnected = true
+            lastRefresh = Date()
+            UserDefaults.standard.set(true, forKey: "pausepath.health.autoRefresh")
             status = "Up to 500 workouts and body readings from the last year; daily totals from the last 90 days. Missing values mean no data was shared or recorded."
         } catch {
             guard request == generation else { return }
@@ -182,6 +190,8 @@ struct HealthDay: Identifiable {
         }
     }
     func clear() {
+        UserDefaults.standard.set(false, forKey: "pausepath.health.autoRefresh")
+        lastRefresh = nil
         generation = UUID()
         activities = []; walkingSpeed = nil; days = []; weight = []; bodyFat = []; height = []
         workoutsByID = [:]; hasConnected = false

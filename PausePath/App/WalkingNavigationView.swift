@@ -7,6 +7,8 @@ struct WalkingNavigationView: View {
     @State private var weatherGuidance = WeatherGuidanceStore()
     @State private var camera: MapCameraPosition = .automatic
     @State private var acknowledged = false
+    @State private var activityKind = "Walking"
+    @State private var recordingOwner = PausePathAccount.shared.userID
     @State private var takingBreak = false
     @State private var suggestedStops: [SharedPOI] = []
     @State private var showEndConfirmation = false
@@ -65,6 +67,11 @@ struct WalkingNavigationView: View {
                         Button("Whole route", systemImage: "map") { camera = .automatic }
                     }
                     if navigator.state == .ready {
+                        Picker("Activity", selection: $activityKind) {
+                            ForEach(["Walking", "Running", "Hiking"], id: \.self) { Text($0).tag($0) }
+                        }.pickerStyle(.segmented)
+                        Text("Directions and time estimates use walking pace. Your recorded time reflects your actual activity.").font(.caption).foregroundStyle(.secondary)
+
                         Text("\(plan.distance / 1000, specifier: "%.1f") km • about \(Int(plan.duration / 60)) min").font(.title2.bold())
                         RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: plan.distance, durationSeconds: plan.duration))
                         Text(plan.requirements).font(.subheadline)
@@ -218,7 +225,7 @@ struct WalkingNavigationView: View {
         let distance = navigator.recordedDistanceMeters
         let activity = TrackedWalk(routeName: plan.name, distanceMeters: distance,
             activeSeconds: navigator.elapsedActiveSeconds, completed: completed, routeIdentity: plan.routeIdentity,
-            steps: navigator.recordedSteps, startedAt: navigator.journeyStartedAt, journeySegments: navigator.journeySegments)
+            steps: navigator.recordedSteps, startedAt: navigator.journeyStartedAt, journeySegments: navigator.journeySegments, activityKind: activityKind, ownerID: recordingOwner)
         let previousBest = PathMilestones(walks: tracked).longest
         tracked.insert(activity, at: 0)
         let defaults = UserDefaults.standard
@@ -232,7 +239,7 @@ struct WalkingNavigationView: View {
         } else if completed, let badge = newBadges.first {
             milestoneMessage = "Badge earned: " + badge.name + ". Find your collection in Profile."
         }
-        trackedWalkData = (try? JSONEncoder().encode(Array(tracked.prefix(500)))) ?? trackedWalkData
+        trackedWalkData = (try? JSONEncoder().encode(tracked)) ?? trackedWalkData
         NotificationCenter.default.post(name: .pausePathWalkRecorded, object: activity)
         Task {
             do { try await PausePathAPI.syncChallengeProgress(walks: tracked) }
