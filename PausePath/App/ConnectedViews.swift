@@ -145,15 +145,15 @@ struct CommunityChallengesView: View {
                     if !communities.isEmpty { communityOverview } else {
                     VStack(spacing: 14) {
                         ZStack {
-                            Circle().fill(PausePathPalette.teal.opacity(0.08)).frame(width: 104, height: 104)
-                            Circle().fill(PausePathPalette.lime).frame(width: 76, height: 76)
+                            Circle().fill(PausePathPalette.teal.opacity(0.08)).frame(width: 76, height: 76)
+                            Circle().fill(PausePathPalette.lime).frame(width: 60, height: 60)
                             Image(systemName: "person.3.fill").font(.system(size: 29, weight: .semibold)).foregroundStyle(PausePathPalette.ink)
                             Image(systemName: "leaf.fill").font(.caption.bold()).foregroundStyle(PausePathPalette.teal)
                                 .padding(9).background(.background, in: Circle()).offset(x: 38, y: 28)
                         }.accessibilityHidden(true)
-                        Text("Good paths. Better together.").font(.system(.title2, design: .rounded).bold())
+                        Text("Walk together").font(.system(.title2, design: .rounded).bold())
                             .foregroundStyle(PausePathPalette.teal)
-                        Text("Create a community for your friends, or join one with an invite code.")
+                        Text("Create a group or join with a code.")
                             .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
                         Button {
                             communityComposerStartsWithJoin = false; showCommunityComposer = true
@@ -170,10 +170,7 @@ struct CommunityChallengesView: View {
                         if !account.isSignedIn {
                             Text("Sign in with Apple in the next step.").font(.caption).foregroundStyle(.secondary)
                         }
-                        HStack(spacing: 16) {
-                            Label("Your people", systemImage: "person.2")
-                            Label("Your pace", systemImage: "leaf")
-                        }.font(.caption.weight(.medium)).foregroundStyle(PausePathPalette.teal)
+
                     }.frame(maxWidth: .infinity).padding(.vertical, 16)
                     }
                 }.listRowBackground(PausePathPalette.teal.opacity(0.05))
@@ -201,72 +198,29 @@ struct CommunityChallengesView: View {
                         Text("Sign in with Apple to create a community or join with an invite code.")
                             .foregroundStyle(.secondary)
                     } else {
-                        Toggle("Share challenge progress with my communities", isOn: $shareProgress)
-                        Text("When enabled, PausePath sends only challenge totals (walk count, distance, minutes, or routes). Only journeys recorded while signed into this account are included. It never shares route names, location, or Health data. Turning this off removes your totals from community boards.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        if communities.isEmpty && communityLoadMessage == nil && !busy {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Label("Make room for your walking circle", systemImage: "person.2.circle").font(.headline)
-                                Text("Create a group above, then share its code with a friend. Your first shared path starts here.")
-                                    .font(.subheadline).foregroundStyle(.secondary)
-                            }.padding(.vertical, 8)
-                        }
                         ForEach(filteredCommunities) { community in
-                            VStack(alignment: .leading, spacing: 10) {
-                                HStack(alignment: .firstTextBaseline) {
-                                    Label(community.name, systemImage: "person.2.fill").font(.headline).foregroundStyle(PausePathPalette.teal)
-                                    Spacer()
-                                    Text("\(community.member_count) members").font(.caption).foregroundStyle(.secondary)
-                                }
-                                DisclosureGroup {
-                                    CommunityInviteCard(code: community.invite_code)
-                                } label: { Label("Invite someone", systemImage: "ticket") }.font(.subheadline)
-                                Text("You appear as \(community.my_display_name)").font(.caption).foregroundStyle(.secondary)
-                                if let members = community.members, !members.isEmpty {
-                                    DisclosureGroup("Members (\(members.count))") {
-                                        Text(members.joined(separator: " · ")).font(.subheadline).foregroundStyle(.secondary)
-                                            .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6)
-                                    }.font(.caption.weight(.semibold))
-                                }
-                                Text("Community members can see these usernames. They see your activity totals only while progress sharing is on; routes, locations, and Health data stay private.")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                                if let list = challenges[community.id], !list.isEmpty {
-                                    ForEach(list) { challenge in
-                                        VStack(alignment: .leading, spacing: 5) {
-                                            Text(challenge.name).font(.subheadline.weight(.semibold))
-                                            if challenge.shared_goal == true { Label("Together toward one goal", systemImage: "person.3.fill").font(.caption) }
-                                            if challenge.can_delete == true {
-                                                NavigationLink("Manage task") { CommunityHubView(community: community) }
-                                            }
-                                            ProgressView(value: min(challenge.shared_goal == true ? (challenge.group_progress ?? 0) : (challenge.my_progress ?? 0), challenge.target), total: challenge.target)
-                                            Text("\((challenge.shared_goal == true ? (challenge.group_progress ?? 0) : (challenge.my_progress ?? 0)), specifier: "%.1f") / \(challenge.target, specifier: "%.1f") \(unit(challenge.metric))")
-                                                .font(.caption).foregroundStyle(.secondary)
-                                            if (challenge.shared_goal == true ? (challenge.group_progress ?? 0) : (challenge.my_progress ?? 0)) >= challenge.target {
-                                                Label("Completed", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
-                                            }
-                                            if !challenge.leaderboard.isEmpty {
-                                                DisclosureGroup("Community board") {
-                                                    ForEach(Array(challenge.leaderboard.prefix(10).enumerated()), id: \.offset) { index, member in
-                                                        HStack {
-                                                            Text("\(index + 1). \(member.name)")
-                                                            Spacer()
-                                                            Text("\(member.amount, specifier: "%.1f") \(unit(challenge.metric))")
-                                                        }.font(.caption)
-                                                    }
-                                                }.font(.caption)
-                                            }
-                                        }.padding(.vertical, 4)
+                            NavigationLink {
+                                CommunityHubView(community: community)
+                            } label: {
+                                HStack(spacing: 14) {
+                                    Image(systemName: "person.2.fill")
+                                        .foregroundStyle(PausePathPalette.teal)
+                                        .frame(width: 46, height: 46)
+                                        .background(PausePathPalette.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(community.name).font(.headline)
+                                        Text("\(community.member_count) members · \(challenges[community.id]?.count ?? 0) goals")
+                                            .font(.caption).foregroundStyle(.secondary)
                                     }
-                                } else if challengeLoadMessages[community.id] == nil {
-                                    Text("A fresh start. Add your first shared challenge.").font(.caption).foregroundStyle(.secondary)
-                                }
-                                if let notice = challengeLoadMessages[community.id] {
-                                    Label(notice, systemImage: "arrow.clockwise").font(.caption).foregroundStyle(.secondary)
-                                }
-                                Button("Add a shared goal", systemImage: "plus.circle.fill") { challengeSheetTarget = ChallengeTarget(community.id) }
-                                    .font(.subheadline)
-                            }.padding(.vertical, 12)
+                                }.padding(.vertical, 8)
+                            }
                         }
+                        DisclosureGroup("Progress sharing") {
+                            Toggle("Share my goal totals", isOn: $shareProgress)
+                            Text("Only totals from this account are shared. Routes, locations and Health data stay private. Turning this off removes your totals from group boards.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+
                     }
                 }
                 Section {
@@ -276,6 +230,10 @@ struct CommunityChallengesView: View {
                         VStack(alignment: .leading, spacing: 7) {
                             HStack(alignment: .firstTextBaseline) {
                                 Text(challenge.title).font(.headline)
+                                Button(role: .destructive) {
+                                    weeklyChallenges.removeAll { $0.id == challenge.id }; storeWeeklyChallenges()
+                                } label: { Image(systemName: "xmark.circle").frame(minWidth: 44, minHeight: 44) }
+                                    .buttonStyle(.borderless).accessibilityLabel("Remove suggestion: \(challenge.title)")
                                 Spacer(minLength: 8)
                                 Text(challengeProgressLabel(challenge, progress: progress))
                                     .font(.caption.monospacedDigit().weight(.semibold))
@@ -296,13 +254,8 @@ struct CommunityChallengesView: View {
                             .font(.caption.weight(.semibold))
                             .disabled(weeklyRefreshesUsed >= 2)
                     }
-                    Text("Choose two achievable suggestions for this week. You can refresh them twice; points are awarded once when recorded walks meet a challenge. Points never depend on pace, harder routes, or heart rate.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    if weeklyChallenges.isEmpty { Text("No weekly suggestions. Use Refresh to choose new ones.").font(.caption).foregroundStyle(.secondary) }
                 } header: { Label("Small steps this week", systemImage: "sparkles") }
-                Section {
-                    Text("Take part at your own pace. A challenge is not a fitness test or medical recommendation; choose a goal that feels appropriate for you.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
                 if !message.isEmpty { Section { Text(message).font(.callout); Button("Retry community connection") { Task { await refresh() } }.disabled(busy) } }
             }
             .pausePathSurface()
@@ -366,7 +319,7 @@ struct CommunityChallengesView: View {
         if pointsMonthKey != currentMonthKey { pointsMonthKey = currentMonthKey; monthlyPoints = 0 }
         if refreshWeekKey != currentWeekKey { refreshWeekKey = currentWeekKey; weeklyRefreshesUsed = 0 }
         if challengeWeekKey == currentWeekKey,
-           let decoded = try? JSONDecoder().decode([WeeklyPersonalChallenge].self, from: weeklyChallengeData), decoded.count == 2 {
+           let decoded = try? JSONDecoder().decode([WeeklyPersonalChallenge].self, from: weeklyChallengeData), decoded.count <= 2 {
             weeklyChallenges = decoded
         } else {
             weeklyChallenges = makeWeeklyDeck()
@@ -1023,6 +976,9 @@ private struct CommunityPendingAction: Identifiable {
 private struct CommunityHubView: View {
     let community: WalkingCommunity
     @Environment(\.dismiss) private var dismiss
+    private enum Page: String, CaseIterable { case walks = "Walks", goals = "Goals", posts = "Posts", settings = "Settings" }
+    @State private var page = Page.walks
+    @State private var showGoalComposer = false
     @State private var plans: [CommunityWalkPlan] = []
     @State private var posts: [CommunityPost] = []
     @State private var members: [CommunityMember] = []
@@ -1039,13 +995,18 @@ private struct CommunityHubView: View {
     var body: some View {
         Form {
             Section {
-                Text("A place to make plans and celebrate small steps.").font(.callout).foregroundStyle(.secondary)
-                CommunityInviteCard(code: community.invite_code)
+                Picker("Community section", selection: $page) {
+                    ForEach(Page.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }.pickerStyle(.segmented)
+            }.listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+            switch page {
+            case .walks: walkSection
+            case .goals: taskSection
+            case .posts: feedSection
+            case .settings:
+                Section("Invite") { CommunityInviteCard(code: community.invite_code) }
+                managementSection
             }
-            walkSection
-            feedSection
-            taskSection
-            managementSection
             if !message.isEmpty { Section { Text(message); Button("Retry") { Task { await load() } }.disabled(loading || busy) } }
             if loading { ProgressView("Refreshing your community…") }
         }.pausePathSurface().navigationTitle(community.name).navigationBarTitleDisplayMode(.inline)
@@ -1056,6 +1017,11 @@ private struct CommunityHubView: View {
             }
             .refreshable { await load() }
             .onDisappear { NotificationCenter.default.post(name: .pausePathWalkRecorded, object: nil) }
+            .sheet(isPresented: $showGoalComposer, onDismiss: { Task { await load() } }) {
+                ChallengeComposer(onSave: { name, metric, amount, shared in
+                    _ = try await PausePathAPI.request(base + "/challenges", body: ["name": name, "metric": metric, "target": amount, "shared_goal": shared], requiresAccount: true)
+                })
+            }
             .sheet(isPresented: $showWalkComposer, onDismiss: { Task { await load() } }) {
                 GroupWalkComposer(group: community.id)
             }
@@ -1092,7 +1058,7 @@ private struct CommunityHubView: View {
     }
     private var feedSection: some View {
         Section("Small wins") {
-            Text("Share a milestone only when you want to. Posts are visible to group members; no route or Health data is attached.").font(.caption).foregroundStyle(.secondary)
+            Text("Visible to this group. No route or Health data is attached.").font(.caption).foregroundStyle(.secondary)
             TextField("A small win from your path…", text: $postText, axis: .vertical).lineLimit(2...5)
                 .onChange(of: postText) { _, _ in postRequest = UUID() }
             Text("\(postText.count)/280").font(.caption).foregroundStyle(.secondary)
@@ -1122,14 +1088,34 @@ private struct CommunityHubView: View {
         }
     }
     private var taskSection: some View {
-        Section("Manage tasks") {
-            ForEach(tasks.filter { $0.can_delete == true }) { task in
-                HStack {
-                    Text(task.name)
-                    Spacer()
-                    Button("Delete", role: .destructive) { pending = CommunityPendingAction(title: "Delete this task and its progress?", path: "challenges/\(task.id)/delete") }
-                }
+        Section("Goals") {
+            Button("Add a goal", systemImage: "plus.circle.fill") { showGoalComposer = true }
+            ForEach(tasks) { goal in
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top) {
+                        Text(goal.name).font(.headline)
+                        Spacer()
+                        if goal.can_delete == true {
+                            Button(role: .destructive) {
+                                pending = CommunityPendingAction(title: "Delete this goal and its progress?", path: "challenges/\(goal.id)/delete")
+                            } label: { Image(systemName: "trash").frame(minWidth: 44, minHeight: 44) }
+                                .buttonStyle(.borderless).accessibilityLabel("Delete \(goal.name)")
+                        }
+                    }
+                    let progress = goal.shared_goal == true ? (goal.group_progress ?? 0) : (goal.my_progress ?? 0)
+                    ProgressView(value: min(progress, goal.target), total: goal.target).tint(PausePathPalette.teal)
+                    Text("\(progress, specifier: "%.1f") / \(goal.target, specifier: "%.0f") \(goal.metric == "distance_km" ? "km" : goal.metric.replacingOccurrences(of: "_", with: " "))")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    if !goal.leaderboard.isEmpty {
+                        DisclosureGroup("Progress board") {
+                            ForEach(Array(goal.leaderboard.enumerated()), id: \.offset) { _, member in
+                                HStack { Text(member.name); Spacer(); Text("\(member.amount, specifier: "%.1f")") }.font(.caption)
+                            }
+                        }.font(.subheadline)
+                    }
+                }.padding(.vertical, 6)
             }
+            if tasks.isEmpty && !loading { Text("No goals yet.").foregroundStyle(.secondary) }
         }
     }
     private var managementSection: some View {

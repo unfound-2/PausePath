@@ -580,6 +580,8 @@ struct DiscoverView: View {
                 }
             }.padding(.horizontal, 14).frame(minHeight: 54)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+                .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(PausePathPalette.teal.opacity(0.1)))
+                .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(FacilityKind.allCases, id: \.self) { kind in
@@ -587,10 +589,15 @@ struct DiscoverView: View {
                             if kinds.contains(kind) { kinds.remove(kind) } else { kinds.insert(kind) }
                             if let selectedID, let place = discovery.places.first(where: { $0.id == selectedID }), !kinds.contains(place.kind) { self.selectedID = nil }
                         } label: {
-                            Label(filterTitle(kind), systemImage: kind.symbol)
-                                .font(.caption.weight(.semibold)).padding(.horizontal, 10).frame(minHeight: 44)
-                                .foregroundStyle(kinds.contains(kind) ? Color.white : Color.primary)
-                                .background(kinds.contains(kind) ? kind.mapColor : Color(.secondarySystemBackground), in: Capsule())
+                            HStack(spacing: 6) {
+                                Image(systemName: kind.symbol)
+                                Text(filterTitle(kind))
+                                if kinds.contains(kind) { Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)) }
+                            }
+                                .font(.caption.weight(.semibold)).padding(.horizontal, 12).frame(minHeight: 44)
+                                .foregroundStyle(kinds.contains(kind) ? kind.mapColor : Color.secondary)
+                                .background(.regularMaterial, in: Capsule())
+                                .overlay(Capsule().strokeBorder(kinds.contains(kind) ? kind.mapColor.opacity(0.6) : Color.secondary.opacity(0.15)))
                         }.buttonStyle(.plain)
                             .accessibilityLabel(filterTitle(kind))
                             .accessibilityValue(kinds.contains(kind) ? "Shown" : "Hidden")
@@ -685,8 +692,8 @@ struct DiscoverView: View {
                     HStack {
                         Button { animate { sheetLevel = (sheetLevel + 1) % 3 } } label: {
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(selectedPlace == nil ? "Find your next pause" : "Your selected stop").font(.headline)
-                                Text(sheetLevel == 0 ? "Swipe up to explore stops" : "Swipe the handle to resize").font(.caption).foregroundStyle(.secondary)
+                                Text(selectedPlace == nil ? "Nearby pauses" : "Your selected stop").font(.headline)
+                                Text(sheetLevel == 0 ? "\(visiblePlaces.count) stops · swipe up to explore" : "Swipe down for more map").font(.caption).foregroundStyle(.secondary)
                             }.frame(maxWidth: .infinity, alignment: .leading).frame(minHeight: 60)
                         }.buttonStyle(.plain).accessibilityLabel("Resize stops panel")
                             .accessibilityAdjustableAction { direction in

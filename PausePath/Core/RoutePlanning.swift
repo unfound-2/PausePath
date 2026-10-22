@@ -362,3 +362,29 @@ public enum PersonalGoalProgress {
         }
     }
 }
+
+
+/// Order suggested waypoints from start to destination; try individual stops as
+/// well as the combined plan so one unreachable facility cannot erase all choices.
+public enum RouteStopOrdering {
+    public static func plans(start: Coordinate, end: Coordinate, stops: [Coordinate]) -> [[Int]] {
+        let scale = cos((start.latitude + end.latitude) * .pi / 360)
+        let dx = (end.longitude - start.longitude) * scale
+        let dy = end.latitude - start.latitude
+        let length = dx * dx + dy * dy
+        func projection(_ point: Coordinate) -> Double {
+            guard length > 0 else { return 0 }
+            return ((point.longitude - start.longitude) * scale * dx + (point.latitude - start.latitude) * dy) / length
+        }
+        let ordered = stops.indices.filter {
+            WalkingGeometry.distance(start, stops[$0]) > 35 && WalkingGeometry.distance(end, stops[$0]) > 35
+        }.sorted {
+            let a = projection(stops[$0]), b = projection(stops[$1])
+            return a == b ? $0 < $1 : a < b
+        }
+        guard !ordered.isEmpty else { return [[]] }
+        var result: [[Int]] = [[], ordered]
+        if ordered.count > 1 { result += ordered.prefix(3).map { [$0] } }
+        return result
+    }
+}

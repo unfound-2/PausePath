@@ -40,6 +40,7 @@ struct ExploreRoutePlannerView: View {
     @State private var status = "Choose an end destination to find walking routes."
     @State private var savedRouteCount = SavedRouteStore.load().count
     @State private var showHelp = false
+    @State private var showRestPreferences = false
     @State private var sortOrder: RouteSortOrder = .recommended
     @State private var lastBuiltRequestID: UUID?
     @State private var requestedRestGap = 400.0
@@ -126,11 +127,14 @@ struct ExploreRoutePlannerView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     planningControls
-                    VStack(alignment: .leading, spacing: 8) {
+                    DisclosureGroup(isExpanded: $showRestPreferences) {
                         Stepper("Rest gap: at most \(Int(requestedRestGap)) m", value: $requestedRestGap, in: 100...1000, step: 50)
                         Toggle("Include benches with unknown hours or access", isOn: $allowUnknownRestStops)
-                        Text("Known private, customer-only, closed or reported-unavailable benches never count as rest stops. Unknown availability is clearly marked.").font(.caption).foregroundStyle(.secondary)
-                        Button("Update route choices") { requestRoutes(for: UUID()) }.disabled(discovery.isLoading || destination == nil)
+                        Text("Closed and restricted benches are excluded. Unknown availability stays marked.").font(.caption).foregroundStyle(.secondary)
+                        Button("Update choices") { requestRoutes(for: UUID()) }.disabled(discovery.isLoading || destination == nil)
+                    } label: {
+                        Label("Rest stops · up to \(Int(requestedRestGap)) m apart", systemImage: "chair.lounge.fill")
+                            .font(.subheadline.weight(.semibold))
                     }.padding(14).background(PausePathPalette.teal.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
 
                     if !status.isEmpty { Text(status).font(.callout).foregroundStyle(.secondary) }
@@ -162,10 +166,8 @@ struct ExploreRoutePlannerView: View {
                         } else {
                             ForEach(visibleOptions) { routeRow($0) }
                         }
-                        Text("Difficulty uses available route data. Tap a difficulty badge for factors and missing information.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Text("\(savedRouteCount) routes saved on this device.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Button("How route estimates work", systemImage: "info.circle") { showHelp = true }
+                            .font(.caption)
                     } else if let destination {
                         Text("Destination: \(destination.name ?? destinationQuery)").font(.subheadline.weight(.semibold))
                         if discovery.isLoading { ProgressView("Finding routes…") }
@@ -201,7 +203,7 @@ struct ExploreRoutePlannerView: View {
                     List {
                         Section("Location and privacy") {
                             Text("PausePath uses your current location to find nearby destinations and possible stops, calculate walking routes, and show live progress while you navigate. Location is not used for advertising or community tracking. Route details are saved on this device. Weather guidance is on by default and sends approximate route points to Open-Meteo; turn it off in Account settings any time.")
-                            Text("Live GPS runs only while an active walk is in the foreground. Tracking pauses when PausePath leaves the foreground and resumes only when you choose to resume the walk. iOS controls location permission and Precise Location; you can change both in Settings.")
+                            Text("An explicitly started walk can continue with the phone locked when location permission is available. End navigation to stop tracking. You can change permission in Settings.")
                         }
                         Section("Route choices") {
                             Text("Difficulty is a planning estimate based on route details that are available, such as distance and estimated time. It is not a judgment of your fitness.")
@@ -298,7 +300,7 @@ struct ExploreRoutePlannerView: View {
                     routeMetric("Est. time", value: "\(max(1, Int(ceil(option.distance / max(0.3, routePreferences.speedMetersPerSecond) / 60)))) min")
                     routeMetric("Planned stops", value: "\(option.stops.count)")
                     routeMetric("Longest bench gap", value: longestBenchGap(option))
-                    routeMetric("Terrain", value: "Unknown")
+                    if isSelected { routeMetric("Terrain", value: "Unknown") }
                 }
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityAddTraits(isSelected ? [.isSelected] : [])
@@ -307,15 +309,15 @@ struct ExploreRoutePlannerView: View {
                 Text("Does not include: \(missing.joined(separator: ", "))")
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             }
+            if isSelected {
             RestGapStatusCard(assessment: option.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops), limit: requestedRestGap)
-            Text("Bench gap includes the start and finish. Only mapped benches count; seating and accessibility are not verified.")
-                .font(.caption2).foregroundStyle(.secondary)
+            }
             if !option.stops.isEmpty {
                 Text(option.stops.enumerated().map { "\($0.offset + 1). \($0.element.item.name ?? $0.element.kind.rawValue)" }.joined(separator: " → "))
                     .font(.caption).foregroundStyle(PausePathPalette.teal)
             }
-            RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: option.distance, durationSeconds: option.duration), compact: true)
             if isSelected {
+            RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: option.distance, durationSeconds: option.duration), compact: true)
             if weatherGuidanceEnabled { WeatherGuidanceCard(store: routeWeather) }
             Button("Navigate this route", systemImage: "figure.walk") {
                 let walk = GeneratedWalk(name: "Walk to \(option.destinationName)", legs: option.legs, preferences: routePreferences, stops: option.stops, allowUnknownRestStops: allowUnknownRestStops)
@@ -359,7 +361,7 @@ struct ExploreRoutePlannerView: View {
         clearRouteOptions()
         status = "Looking for stops near the route…"
         let region = corridorRegion(from: origin, to: destination.placemark.coordinate)
-        _ = await discovery.discover(kinds: Set(FacilityKind.allCases), region: region, waitForRefresh: false)
+        _ = await discovery.discover(kinds: Set(FacilityKind.allCases), region: region, waitForRefresh: true, maxRefreshAttempts: 1)
 
         guard !Task.isCancelled else { return }
         let allPlaces = discovery.places
@@ -373,6 +375,11 @@ struct ExploreRoutePlannerView: View {
             CLLocation(latitude: stop.item.placemark.coordinate.latitude, longitude: stop.item.placemark.coordinate.longitude).distance(from: CLLocation(latitude: destination.placemark.coordinate.latitude, longitude: destination.placemark.coordinate.longitude)) > 15
         }
         if mandatoryKinds.isEmpty {
+            for kind in [FacilityKind.bench, .bathroom, .fountain, .cafe] {
+                if candidates.count < 3, let candidate = corridorPlaces.first(where: { place in place.kind == kind && !candidates.contains(where: { $0.id == place.id }) }) {
+                    candidates.append(candidate)
+                }
+            }
             for candidate in corridorPlaces where candidates.count < 3 && !candidates.contains(where: { $0.id == candidate.id }) { candidates.append(candidate) }
         } else {
             for kind in mandatoryKinds.sorted(by: { $0.rawValue < $1.rawValue }) {
@@ -403,7 +410,11 @@ struct ExploreRoutePlannerView: View {
         let unmet = discovery.routeOptions.allSatisfy { $0.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops).status == .exceeds }
         let gapWarning = unmet ? "No route meets your requested rest gap with the available mapped data. Choose another destination, a shorter walk, or change your preference." : ""
         let unavailableText = unavailable.isEmpty ? "" : " No mapped \(unavailable.map(\.chipTitle).sorted().joined(separator: " or ")) was found near the route."
-        status = ([gapWarning, unavailableText].filter { !$0.isEmpty }).joined(separator: " ")
+        let onlyDirect = discovery.routeOptions.allSatisfy { $0.stops.isEmpty }
+        let explanation = onlyDirect ? (discovery.areaLoadState == "ready"
+            ? "Only routes without planned stops could be built. Try a different destination or add a mapped stop."
+            : "Facility data is still incomplete. These routes have no planned stops; update choices when stops finish loading.") : ""
+        status = ([gapWarning, unavailableText, explanation].filter { !$0.isEmpty }).joined(separator: " ")
         savedRouteCount = SavedRouteStore.load().count
     }
 

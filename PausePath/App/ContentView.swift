@@ -430,6 +430,7 @@ struct MyPathView: View {
     @AppStorage("pausepath.hiddenHealthWorkouts") private var hiddenHealthData = Data()
     @AppStorage("pausepath.personalGoal.metric") private var goalMetric = "distance"
     @AppStorage("pausepath.personalGoal.target") private var goalTarget = 5.0
+    @AppStorage("pausepath.personalGoal.enabled") private var goalEnabled = true
     @AppStorage("pausepath.earnedBadges.v1") private var earnedBadgeData = Data()
     @Environment(\.scenePhase) private var pathScenePhase
     @State private var exportDocument = PathExportDocument(text: "")
@@ -477,7 +478,10 @@ struct MyPathView: View {
                             }.pathCard()
                         }.buttonStyle(.plain)
                     }
-                    personalGoal
+                    if goalEnabled { personalGoal }
+                    else {
+                        Button("Set a weekly goal", systemImage: "plus.circle") { goalEnabled = true }.pathCard()
+                    }
                     weeklyRecap
                     trends
                     records
@@ -515,7 +519,13 @@ struct MyPathView: View {
         let week = Calendar.current.dateInterval(of: .weekOfYear, for: Date())!
         let value = PersonalGoalProgress.total(metric: goalMetric, walks: walks, start: week.start, end: min(Date(), week.end))
         return VStack(alignment: .leading, spacing: 12) {
-            Label("Your weekly goal", systemImage: "flag.fill").font(.headline)
+            HStack {
+                Label("Your weekly goal", systemImage: "flag.fill").font(.headline)
+                Spacer()
+                Button(role: .destructive) { goalEnabled = false } label: {
+                    Image(systemName: "trash").frame(minWidth: 44, minHeight: 44)
+                }.buttonStyle(.borderless).accessibilityLabel("Remove weekly goal")
+            }
             goalPicker
             Stepper(value: $goalTarget, in: goalRange, step: 1.0) {
                 Text("Goal: " + String(format: "%.0f", goalTarget) + " " + goalUnit)

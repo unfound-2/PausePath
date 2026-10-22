@@ -136,7 +136,7 @@ struct WalkingRouteOption: Identifiable {
         } catch { if token == generation { status = "Place search failed. Check your connection and try again." }; return false }
     }
 
-    @discardableResult func discover(kinds: Set<FacilityKind>, region searchRegion: MKCoordinateRegion, waitForRefresh: Bool = true) async -> Bool {
+    @discardableResult func discover(kinds: Set<FacilityKind>, region searchRegion: MKCoordinateRegion, waitForRefresh: Bool = true, maxRefreshAttempts: Int = 24) async -> Bool {
         cancelPending()
         let token = UUID(); generation = token; isLoading = true; areaLoadState = "loading"; route = nil
         let key = areaKey(searchRegion)
@@ -186,11 +186,11 @@ struct WalkingRouteOption: Identifiable {
             }
             var result = await sharedStops(in: searchRegion, onPage: publish)
             // A busy ingestion response is not an authoritative empty area.
-            for attempt in 0..<(waitForRefresh ? 24 : 0) {
+            for attempt in 0..<(waitForRefresh ? max(0, maxRefreshAttempts) : 0) {
                 guard token == generation, !Task.isCancelled else { return }
                 guard case .success(let response) = result,
                       response.loading_state == "loading" || (response.loading_state == nil && response.warning != nil) else { break }
-                let delay = min(max(response.retry_after_seconds ?? 5, 3), 60) + (attempt >= 12 ? 5 : 0)
+                let delay = min(max(response.retry_after_seconds ?? 5, 3), maxRefreshAttempts == 1 ? 5 : 60) + (attempt >= 12 ? 5 : 0)
                 let updates = response.pois.compactMap(\.place)
                 receivedSharedPins = receivedSharedPins || !updates.isEmpty
                 let incomingIDs = Set(updates.map(\.id))
@@ -282,7 +282,11 @@ struct WalkingRouteOption: Identifiable {
         let token = UUID(); generation = token; route = nil; itinerary = []; routeOptions = []; selectedRouteOptionID = nil; isLoading = true
         defer { if token == generation { isLoading = false } }
         var options: [WalkingRouteOption] = []
-        let stopSets: [[DiscoveredPlace]] = stops.isEmpty ? [[]] : [[], stops]
+        let stopSets = RouteStopOrdering.plans(
+            start: Coordinate(origin.latitude, origin.longitude),
+            end: Coordinate(destination.placemark.coordinate.latitude, destination.placemark.coordinate.longitude),
+            stops: stops.map { Coordinate($0.item.placemark.coordinate.latitude, $0.item.placemark.coordinate.longitude) }
+        ).map { indices in indices.map { stops[$0] } }
 
         var directDistance: Double?
         for stopSet in stopSets {
@@ -305,6 +309,7 @@ struct WalkingRouteOption: Identifiable {
                 finalRequest.source = MKMapItem(placemark: MKPlacemark(coordinate: start))
                 finalRequest.destination = destination
                 finalRequest.transportType = .walking
+                finalRequest.requestsAlternateRoutes = stopSet.isEmpty
                 let finalResponse = try await MKDirections(request: finalRequest).calculate()
                 guard let finalLeg = finalResponse.routes.first else { throw RouteBuildError.noRoute }
                 legs.append(finalLeg)
@@ -313,15 +318,25 @@ struct WalkingRouteOption: Identifiable {
                 if stopSet.isEmpty { directDistance = option.distance }
                 if let directDistance, option.distance > directDistance * 2.25 { continue }
                 options.append(option)
+                if stopSet.isEmpty {
+                    for alternative in finalResponse.routes.dropFirst().prefix(2) {
+                        options.append(WalkingRouteOption(id: UUID(), title: "Alternative via " + alternative.name,
+                            destinationName: destinationName, stops: [], legs: [alternative]))
+                    }
+                }
             } catch {
+                if Task.isCancelled || token != generation { return }
                 // Keep successful alternatives if one stop combination cannot be routed.
                 continue
             }
         }
-        guard token == generation else { return }
+        guard token == generation, !Task.isCancelled else { return }
         if let preferences {
             var improved: [WalkingRouteOption] = []
-            for option in options.prefix(2) {
+            // Rest improvements must include a stop-based route even when Apple
+            // returns several direct alternatives first.
+            let seeds = [options.first, options.first(where: { !$0.stops.isEmpty })].compactMap { $0 }
+            for option in seeds {
                 let revised = await RestAwareRouteBuilder.improve(option, candidates: places, preferences: preferences, allowUnknown: allowUnknownRestStops)
                 guard token == generation, !Task.isCancelled else { return }
                 if revised.id != option.id { improved.append(revised) }
