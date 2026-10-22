@@ -262,12 +262,6 @@ struct CommunityChallengesView: View {
             }
             .pausePathSurface()
         .navigationTitle("Community")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 4) { Image(systemName: "star.fill"); Text("\(monthlyPoints)") }
-                        .font(.subheadline.weight(.semibold)).accessibilityLabel("\(monthlyPoints) points this month")
-                }
-            }
             .task { if UserDefaults.standard.string(forKey: "pausepath.shareProgressOwner") != account.userID { shareProgress = false }; loadWeeklyChallenges(); if !pendingInviteCode.isEmpty { showCommunityComposer = true }; await refresh() }
             .refreshable { loadWeeklyChallenges(); await refresh() }
             .onChange(of: scenePhase) { _, phase in
