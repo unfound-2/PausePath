@@ -133,6 +133,7 @@ struct CommunityChallengesView: View {
     @AppStorage("pausepath.monthlyChallengePoints") private var monthlyPoints = 0
     @AppStorage("pausepath.challengePointsMonth") private var pointsMonthKey = ""
     @State private var weeklyChallenges: [WeeklyPersonalChallenge] = []
+    @State private var showWeeklyChallenges = false
     @AppStorage("pausepath.weeklyChallengeRewards") private var rewardLedgerData = Data()
     @Environment(\.scenePhase) private var scenePhase
     private var walks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedWalkData)) ?? [] }
@@ -145,8 +146,8 @@ struct CommunityChallengesView: View {
                     if !communities.isEmpty { communityOverview } else {
                     VStack(spacing: 14) {
                         ZStack {
-                            Circle().fill(PausePathPalette.teal.opacity(0.08)).frame(width: 104, height: 104)
-                            Circle().fill(PausePathPalette.lime).frame(width: 76, height: 76)
+                            Circle().fill(PausePathPalette.teal.opacity(0.08)).frame(width: account.isSignedIn ? 72 : 104, height: account.isSignedIn ? 72 : 104)
+                            Circle().fill(PausePathPalette.lime).frame(width: account.isSignedIn ? 56 : 76, height: account.isSignedIn ? 56 : 76)
                             Image(systemName: "person.3.fill").font(.system(size: 29, weight: .semibold)).foregroundStyle(PausePathPalette.ink)
                             Image(systemName: "leaf.fill").font(.caption.bold()).foregroundStyle(PausePathPalette.teal)
                                 .padding(9).background(.background, in: Circle()).offset(x: 38, y: 28)
@@ -218,6 +219,12 @@ struct CommunityChallengesView: View {
                                     Spacer()
                                     Text("\(community.member_count) members").font(.caption).foregroundStyle(.secondary)
                                 }
+                                NavigationLink {
+                                    CommunityHubView(community: community)
+                                } label: {
+                                    Label("Open community", systemImage: "arrow.right.circle.fill")
+                                        .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
+                                }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
                                 DisclosureGroup {
                                     CommunityInviteCard(code: community.invite_code)
                                 } label: { Label("Invite someone", systemImage: "ticket") }.font(.subheadline)
@@ -236,7 +243,7 @@ struct CommunityChallengesView: View {
                                             Text(challenge.name).font(.subheadline.weight(.semibold))
                                             if challenge.shared_goal == true { Label("Together toward one goal", systemImage: "person.3.fill").font(.caption) }
                                             if challenge.can_delete == true {
-                                                NavigationLink("Manage task") { CommunityHubView(community: community) }
+                                                NavigationLink("Manage task") { CommunityHubView(community: community, initialSection: "Settings") }
                                             }
                                             ProgressView(value: min(challenge.shared_goal == true ? (challenge.group_progress ?? 0) : (challenge.my_progress ?? 0), challenge.target), total: challenge.target)
                                             Text("\((challenge.shared_goal == true ? (challenge.group_progress ?? 0) : (challenge.my_progress ?? 0)), specifier: "%.1f") / \(challenge.target, specifier: "%.1f") \(unit(challenge.metric))")
@@ -270,6 +277,7 @@ struct CommunityChallengesView: View {
                     }
                 }
                 Section {
+                    DisclosureGroup("Your weekly challenges", isExpanded: $showWeeklyChallenges) {
                     ForEach(weeklyChallenges) { challenge in
                         let progress = weeklyProgress(for: challenge)
                         let complete = progress >= challenge.target
@@ -298,6 +306,7 @@ struct CommunityChallengesView: View {
                     }
                     Text("Choose two achievable suggestions for this week. You can refresh them twice; points are awarded once when recorded walks meet a challenge. Points never depend on pace, harder routes, or heart rate.")
                         .font(.caption).foregroundStyle(.secondary)
+                    }
                 } header: { Label("Small steps this week", systemImage: "sparkles") }
                 Section {
                     Text("Take part at your own pace. A challenge is not a fitness test or medical recommendation; choose a goal that feels appropriate for you.")
@@ -1027,6 +1036,9 @@ private struct CommunityHubView: View {
     @State private var posts: [CommunityPost] = []
     @State private var members: [CommunityMember] = []
     @State private var tasks: [WalkingCommunityChallenge] = []
+    @State private var hubSection = "Walks"
+    @State private var showingInvite = false
+    @State private var composingPost = false
     @State private var loading = false
     @State private var busy = false
     @State private var message = ""
@@ -1035,20 +1047,45 @@ private struct CommunityHubView: View {
     @State private var postRequest = UUID()
     @State private var showWalkComposer = false
     @State private var pending: CommunityPendingAction?
+    init(community: WalkingCommunity, initialSection: String = "Walks") {
+        self.community = community
+        _hubSection = State(initialValue: initialSection)
+    }
     private var base: String { "api/v1/communities/" + community.id.uuidString }
     var body: some View {
         Form {
             Section {
-                Text("A place to make plans and celebrate small steps.").font(.callout).foregroundStyle(.secondary)
-                CommunityInviteCard(code: community.invite_code)
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(hubSection == "Walks" ? "Make time together." : (hubSection == "Updates" ? "Small wins. Shared joy." : "Your walking circle."), systemImage: hubSection == "Walks" ? "figure.walk" : (hubSection == "Updates" ? "hands.clap.fill" : "person.2.fill"))
+                        .font(.system(.title3, design: .rounded).bold()).foregroundStyle(PausePathPalette.teal)
+                    Text(hubSection == "Walks" ? "Find your next group walk and let everyone know you're coming." : (hubSection == "Updates" ? "Share a milestone or send a little encouragement." : "Invite friends and manage your community."))
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }.padding(.vertical, 8)
+            }.listRowBackground(PausePathPalette.teal.opacity(0.05))
+            if hubSection == "Walks" { walkSection }
+            else if hubSection == "Updates" { feedSection }
+            else {
+                Section("Invite friends") { CommunityInviteCard(code: community.invite_code) }
+                taskSection
+                managementSection
             }
-            walkSection
-            feedSection
-            taskSection
-            managementSection
             if !message.isEmpty { Section { Text(message); Button("Retry") { Task { await load() } }.disabled(loading || busy) } }
             if loading { ProgressView("Refreshing your community…") }
-        }.pausePathSurface().navigationTitle(community.name).navigationBarTitleDisplayMode(.inline)
+        }.id(hubSection).pausePathSurface().navigationTitle(community.name).navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                PathSectionPicker(titles: ["Walks", "Updates", "Settings"], selection: $hubSection)
+            }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) {
+                Button { showingInvite = true } label: { Image(systemName: "person.badge.plus") }
+                    .accessibilityLabel("Invite friends")
+            } }
+            .sheet(isPresented: $showingInvite) {
+                NavigationStack {
+                    ScrollView { CommunityInviteCard(code: community.invite_code).padding(20) }
+                        .pausePathSurface().navigationTitle("Invite friends").navigationBarTitleDisplayMode(.inline)
+                        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingInvite = false } } }
+                }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+            }
             .disabled(busy)
             .task { newName = community.name; await load() }
             .onChange(of: PausePathAccount.shared.userID) { _, _ in
@@ -1068,7 +1105,9 @@ private struct CommunityHubView: View {
     }
     private var walkSection: some View {
         Section("Walk together") {
-            Button("Schedule a group walk", systemImage: "calendar.badge.plus") { showWalkComposer = true }
+            Button { showWalkComposer = true } label: {
+                Label("Plan a group walk", systemImage: "calendar.badge.plus").frame(maxWidth: .infinity, minHeight: 44)
+            }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
             ForEach(plans) { plan in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(plan.title).font(.headline)
@@ -1087,22 +1126,26 @@ private struct CommunityHubView: View {
                     }
                 }.padding(.vertical, 8)
             }
-            if plans.isEmpty && !loading { Text("No upcoming walks yet.").foregroundStyle(.secondary) }
+            if plans.isEmpty && !loading {
+                ContentUnavailableView("Your next walk starts here", systemImage: "figure.walk.circle", description: Text("Choose a time, a meeting point, and a route for your circle."))
+            }
         }
     }
     private var feedSection: some View {
         Section("Small wins") {
             Text("Share a milestone only when you want to. Posts are visible to group members; no route or Health data is attached.").font(.caption).foregroundStyle(.secondary)
+            DisclosureGroup("Share a small win", isExpanded: $composingPost) {
             TextField("A small win from your path…", text: $postText, axis: .vertical).lineLimit(2...5)
                 .onChange(of: postText) { _, _ in postRequest = UUID() }
             Text("\(postText.count)/280").font(.caption).foregroundStyle(.secondary)
             Button("Post to community", systemImage: "paperplane") {
                 Task {
                     if await perform("posts", body: ["body": postText, "request_id": postRequest.uuidString]) {
-                        postText = ""; postRequest = UUID()
+                        postText = ""; postRequest = UUID(); composingPost = false
                     }
                 }
             }.disabled(postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || postText.count > 280)
+            }
             ForEach(posts) { post in
                 VStack(alignment: .leading, spacing: 8) {
                     HStack { Text(post.display_name).font(.headline); Spacer(); Text(Self.dateLabel(post.created_at)).font(.caption2).foregroundStyle(.secondary) }
