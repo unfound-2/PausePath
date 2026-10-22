@@ -138,3 +138,61 @@ def test_post_retry_does_not_silently_discard_changed_text(community_api):
     assert client.post(path, json=payload).status_code == 200
     assert client.post(path, json={**payload,'body':'A different milestone'}).status_code == 409
     assert len(client.get(path).json()['posts']) == 1
+
+
+def test_goal_retry_edit_archive_and_two_user_permissions(community_api):
+    client, conn, user = community_api
+    _, group = create(client)
+    base = f"/api/v1/communities/{group['id']}"
+    payload = {'name':'First walks','metric':'walks','target':3,'shared_goal':True,'request_id':str(uuid4())}
+    first = client.post(base + '/challenges',json=payload)
+    assert first.status_code == 200, first.text
+    goal = first.json(); path = base + '/challenges/' + goal['id']
+    assert client.post(base+'/challenges',json=payload).json() == goal
+    assert client.post(base+'/challenges',json={**payload,'target':4}).status_code == 409
+    assert conn.execute('SELECT count(*) AS n FROM walking_challenges').fetchone()['n'] == 1
+    details = {k:v for k,v in payload.items() if k != 'request_id'}
+    owner = user['sub']
+    user['sub'] = 'second-test-account'
+    assert client.post(path+'/archive',json={'archived':True}).status_code == 403
+    assert client.post('/api/v1/communities/join',json={'invite_code':group['invite_code'],'display_name':'Friend'}).status_code == 200
+    assert client.post(path+'/edit',json=details).status_code == 403
+    assert client.post(path+'/archive',json={'archived':True}).status_code == 403
+    assert client.post(path+'/delete',json={}).status_code == 403
+    assert client.post(f"/api/v1/challenges/{goal['id']}/progress",json={'amount':1}).status_code == 200
+    user['sub'] = owner
+    assert client.post(path+'/edit',json={**details,'name':'Renamed goal','target':5}).status_code == 200
+    assert client.post(path+'/edit',json={**details,'metric':'minutes'}).status_code == 409
+    assert client.post(path+'/edit',json={**details,'shared_goal':False}).status_code == 409
+    for _ in range(2): assert client.post(path+'/archive',json={'archived':True}).status_code == 200
+    archived = client.get(base+'/challenges').json()['challenges'][0]
+    assert archived['archived_at'] and archived['group_progress'] == 1 and archived['name'] == 'Renamed goal'
+    assert client.post(f"/api/v1/challenges/{goal['id']}/progress",json={'amount':2}).status_code == 409
+    assert client.post(path+'/edit',json=details).status_code == 409
+    assert client.post(path+'/archive',json={'archived':False}).status_code == 200
+    assert client.get(base+'/challenges').json()['challenges'][0]['archived_at'] is None
+    assert client.post(path+'/delete',json={}).status_code == 200
+    assert client.get(base+'/challenges').json()['challenges'] == []
+
+
+def test_goal_receipt_is_group_scoped_and_requires_current_membership(community_api):
+    client, conn, user = community_api
+    _, a = create(client)
+    _, b = create(client, name='Second group')
+    payload = {'name':'A walk','metric':'walks','target':1,'request_id':str(uuid4())}
+    assert client.post(f"/api/v1/communities/{a['id']}/challenges",json=payload).status_code == 200
+    assert client.post(f"/api/v1/communities/{b['id']}/challenges",json=payload).status_code == 409
+    conn.execute('DELETE FROM walking_community_members WHERE community_id=%s AND user_id=%s',(a['id'],user['sub']))
+    assert client.post(f"/api/v1/communities/{a['id']}/challenges",json=payload).status_code == 403
+
+
+@pytest.mark.parametrize('change', [{'target':True}, {'target':'2'}, {'target':0}, {'metric':'pace'}, {'shared_goal':'yes'}, {'name':' '}, {'user_id':'forged'}])
+def test_goal_validation_precedes_database(change,monkeypatch):
+    previous=main.app.dependency_overrides.copy()
+    main.app.dependency_overrides[main.identity]=lambda:{'sub':'test-user'}
+    monkeypatch.setattr(main,'rate_limit',lambda *args:None)
+    try:
+        result=TestClient(main.app).post(f'/api/v1/communities/{uuid4()}/challenges',json={'name':'Walk together','metric':'walks','target':1,**change})
+        assert result.status_code == 422
+    finally:
+        main.app.dependency_overrides.clear();main.app.dependency_overrides.update(previous)

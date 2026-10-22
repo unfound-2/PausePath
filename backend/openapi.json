@@ -826,6 +826,138 @@
         }
       }
     },
+    "/api/v1/communities/{group}/challenges/{challenge}/edit": {
+      "post": {
+        "tags": [
+          "community"
+        ],
+        "summary": "Edit Goal",
+        "operationId": "edit_goal_api_v1_communities__group__challenges__challenge__edit_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "group",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group"
+            }
+          },
+          {
+            "name": "challenge",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Challenge"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoalDetails"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/communities/{group}/challenges/{challenge}/archive": {
+      "post": {
+        "tags": [
+          "community"
+        ],
+        "summary": "Archive Goal",
+        "operationId": "archive_goal_api_v1_communities__group__challenges__challenge__archive_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "group",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group"
+            }
+          },
+          {
+            "name": "challenge",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Challenge"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoalArchive"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -1053,9 +1185,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/GoalCreate"
               }
             }
           }
@@ -2607,6 +2737,110 @@
           "report_type"
         ],
         "title": "ExistingReport"
+      },
+      "GoalArchive": {
+        "properties": {
+          "archived": {
+            "type": "boolean",
+            "title": "Archived"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "archived"
+        ],
+        "title": "GoalArchive"
+      },
+      "GoalCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 2,
+            "title": "Name"
+          },
+          "metric": {
+            "type": "string",
+            "enum": [
+              "distance_km",
+              "walks",
+              "minutes",
+              "new_routes"
+            ],
+            "title": "Metric"
+          },
+          "target": {
+            "type": "number",
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Target"
+          },
+          "shared_goal": {
+            "type": "boolean",
+            "title": "Shared Goal",
+            "default": false
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid4"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "metric",
+          "target"
+        ],
+        "title": "GoalCreate"
+      },
+      "GoalDetails": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 2,
+            "title": "Name"
+          },
+          "metric": {
+            "type": "string",
+            "enum": [
+              "distance_km",
+              "walks",
+              "minutes",
+              "new_routes"
+            ],
+            "title": "Metric"
+          },
+          "target": {
+            "type": "number",
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Target"
+          },
+          "shared_goal": {
+            "type": "boolean",
+            "title": "Shared Goal",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "metric",
+          "target"
+        ],
+        "title": "GoalDetails"
       },
       "HTTPValidationError": {
         "properties": {

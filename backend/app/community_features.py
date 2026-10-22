@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException
+from .models import GoalDetails, GoalArchive
 from .auth import identity
 from .db import transaction
 
@@ -185,3 +186,31 @@ def delete_post(group: UUID, post: UUID, user=Depends(identity)):
         if not owner and row['user_id'] != user['sub']: raise HTTPException(403,'Only the author or owner can delete')
         conn.execute('DELETE FROM community_posts WHERE id=%s',(post,))
     return {'deleted':True}
+
+
+def managed_goal(conn, group, challenge, user):
+    owner = member(conn, group, user)
+    row = conn.execute('SELECT created_by,metric,shared_goal,archived_at FROM walking_challenges WHERE id=%s AND community_id=%s FOR UPDATE', (challenge,group)).fetchone()
+    if not row: raise HTTPException(404, 'Goal not found')
+    if not owner and row['created_by'] != user['sub']:
+        raise HTTPException(403, 'Only the goal creator or community owner can manage this goal')
+    return row
+
+@router.post('/{group}/challenges/{challenge}/edit')
+def edit_goal(group: UUID, challenge: UUID, body: GoalDetails, user=Depends(identity)):
+    with transaction() as conn:
+        row = managed_goal(conn,group,challenge,user)
+        if row['archived_at'] is not None: raise HTTPException(409, 'Restore this goal before editing it')
+        if row['metric'] != body.metric or row['shared_goal'] != body.shared_goal:
+            if conn.execute('SELECT 1 FROM walking_challenge_progress WHERE challenge_id=%s LIMIT 1',(challenge,)).fetchone():
+                raise HTTPException(409, 'A goal with shared progress must keep its measure and group mode. Create a new goal instead.')
+        conn.execute('UPDATE walking_challenges SET name=%s,metric=%s,target=%s,shared_goal=%s WHERE id=%s',
+                     (body.name,body.metric,body.target,body.shared_goal,challenge))
+    return {'saved':True}
+
+@router.post('/{group}/challenges/{challenge}/archive')
+def archive_goal(group: UUID, challenge: UUID, body: GoalArchive, user=Depends(identity)):
+    with transaction() as conn:
+        managed_goal(conn,group,challenge,user)
+        conn.execute('UPDATE walking_challenges SET archived_at=CASE WHEN %s THEN coalesce(archived_at,now()) ELSE NULL END WHERE id=%s',(body.archived,challenge))
+    return {'saved':True,'archived':body.archived}

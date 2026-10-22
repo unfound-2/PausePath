@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from uuid import UUID
-from pydantic import UUID4
+from pydantic import UUID4, StrictBool
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Category = Literal['bench', 'toilet', 'drinking_water', 'cafe']
@@ -257,3 +257,28 @@ class CommunityResponse(StrictModel):
     member_count: int
     my_display_name: str
     members: List[str] = Field(default_factory=list)
+
+
+class GoalDetails(StrictModel):
+    name: str = Field(min_length=2, max_length=80)
+    metric: Literal['distance_km', 'walks', 'minutes', 'new_routes']
+    target: float = Field(ge=1, le=10000)
+    shared_goal: StrictBool = False
+
+    @field_validator('name', mode='before')
+    @classmethod
+    def trim_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator('target', mode='before')
+    @classmethod
+    def numeric_target(cls, value):
+        if isinstance(value, bool) or not isinstance(value, (float, int)):
+            raise ValueError('Target must be a number')
+        return value
+
+class GoalCreate(GoalDetails):
+    request_id: Optional[UUID4] = None
+
+class GoalArchive(StrictModel):
+    archived: StrictBool

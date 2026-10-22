@@ -452,6 +452,7 @@ struct WalkingCommunityChallenge: Decodable, Identifiable, Sendable {
     let metric: String
     let target: Double
     let shared_goal: Bool?
+    let archived_at: String?
     let group_progress: Double?
     let can_delete: Bool?
     let my_progress: Double?
@@ -567,9 +568,9 @@ private struct ChallengeListResponse: Decodable { let challenges: [WalkingCommun
         let data = try await request("api/v1/communities/\(community.uuidString)/challenges", requiresAccount: true)
         return try JSONDecoder().decode(ChallengeListResponse.self, from: data).challenges
     }
-    static func createChallenge(in community: UUID, name: String, metric: String, target: Double, shared: Bool = false) async throws {
+    static func createChallenge(in community: UUID, name: String, metric: String, target: Double, shared: Bool = false, requestID: UUID) async throws {
         _ = try await request("api/v1/communities/\(community.uuidString)/challenges",
-            body: ["name": name, "metric": metric, "target": target, "shared_goal": shared], requiresAccount: true)
+            body: ["name": name, "metric": metric, "target": target, "shared_goal": shared, "request_id": requestID.uuidString], requiresAccount: true)
     }
     static func updateChallengeProgress(_ challenge: UUID, amount: Double) async throws {
         _ = try await request("api/v1/challenges/\(challenge.uuidString)/progress", body: ["amount": amount], requiresAccount: true)
@@ -589,7 +590,7 @@ private struct ChallengeListResponse: Decodable { let challenges: [WalkingCommun
             let list: [WalkingCommunityChallenge]
             if let tasks { guard let loaded = tasks[group.id] else { continue }; list = loaded }
             else { list = try await challenges(in: group.id) }
-            for challenge in list {
+            for challenge in list where challenge.archived_at == nil {
                 guard PausePathAccount.shared.userID == owner, UserDefaults.standard.bool(forKey: "pausepath.shareChallengeProgress") else { return changed }
                 guard let start = challenge.startDate else { throw ServiceFailure(status: 422, message: "This challenge has an invalid start date. Progress has not been changed.") }
                 let total = min(ChallengeProgressCalculator.total(metric: challenge.metric, walks: ownedWalks, from: start, until: Date()), 100000)

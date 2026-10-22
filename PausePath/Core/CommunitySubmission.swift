@@ -36,3 +36,22 @@ public struct CommunitySubmissionDraft: Codable, Equatable, Sendable {
         self.ownerID = ownerID; self.joining = joining; self.name = cleanName; self.code = cleanCode; self.username = cleanUsername
     }
 }
+
+
+public struct GoalSubmissionDraft: Codable, Equatable, Sendable {
+    public private(set) var requestID = UUID()
+    public private(set) var ownerID = ""
+    public private(set) var scope = ""
+    public private(set) var name = ""
+    public private(set) var metric = "walks"
+    public private(set) var target = 3.0
+    public private(set) var shared = false
+    public init() {}
+    public mutating func prepare(ownerID: String, scope: String, name: String, metric: String, target: Double, shared: Bool) {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if self.ownerID != ownerID || self.scope != scope || self.name != clean || self.metric != metric || self.target != target || self.shared != shared {
+            requestID = UUID()
+        }
+        self.ownerID = ownerID; self.scope = scope; self.name = clean; self.metric = metric; self.target = target; self.shared = shared
+    }
+}

@@ -16,7 +16,7 @@ from psycopg.types.json import Jsonb
 from .auth import identity,reviewer,admin
 from .db import transaction
 from .models import (ExistingReport,Suggestion,ReportReceipt,IngestRequest,DiscoveryRequest,CurateRequest,CuratedRoute,
-                     Review,POIReview,QueueEdit,QueueReceipt,MapboxCategorySearch,MapboxSuggest,MapboxRetrieve,MapboxResponse,DiscoveryResponse,CommunityCreate,CommunityJoin,CommunityResponse)
+                     Review,POIReview,QueueEdit,QueueReceipt,MapboxCategorySearch,MapboxSuggest,MapboxRetrieve,MapboxResponse,DiscoveryResponse,CommunityCreate,CommunityJoin,CommunityResponse,GoalCreate)
 from .providers import baseline_osm
 from .discovery import search_area, start_worker, stop_worker
 from . import mapbox
@@ -78,7 +78,7 @@ def health(): return {'status':'ok'}
 def ready():
     with transaction() as conn:
         conn.execute('SELECT id FROM pois LIMIT 0')
-        conn.execute('SELECT walking_communities.request_id, walking_challenges.shared_goal FROM walking_communities, walking_community_members, walking_challenges, walking_challenge_progress, community_walks, community_walk_rsvps, community_posts, community_reactions LIMIT 0')
+        conn.execute('SELECT walking_communities.request_id, walking_challenges.shared_goal, walking_challenges.archived_at FROM walking_communities, walking_community_members, walking_challenges, walking_challenge_progress, community_walks, community_walk_rsvps, community_posts, community_reactions LIMIT 0')
     return {'status':'ready'}
 
 @app.exception_handler(errors.UndefinedTable)
@@ -156,25 +156,21 @@ def list_communities(user=Depends(identity)):
     return {'communities':rows}
 
 @app.post('/api/v1/communities/{community_id}/challenges',tags=['community'])
-def create_challenge(community_id: UUID,body: dict=Body(...),user=Depends(identity)):
+def create_challenge(community_id: UUID,body: GoalCreate,user=Depends(identity)):
     rate_limit(user,'challenge',12)
-    raw_name=body.get('name'); name=raw_name.strip() if isinstance(raw_name,str) else ''
-    metric=body.get('metric'); target=body.get('target')
-    if not 2 <= len(name) <= 80: raise HTTPException(422,'Challenge name must be 2–80 characters')
-    if metric not in ('distance_km','walks','minutes','new_routes'): raise HTTPException(422,'Choose a supported challenge type')
-    if not isinstance(target,(int,float)) or isinstance(target,bool) or not 1 <= target <= 10000: raise HTTPException(422,'Choose a goal from 1 to 10,000')
-    shared=body.get('shared_goal',False)
-    if type(shared) is not bool: raise HTTPException(422,'Invalid goal mode')
     with transaction() as conn:
-        if not conn.execute('SELECT 1 FROM walking_community_members WHERE community_id=%s AND user_id=%s',(community_id,user['sub'])).fetchone(): raise HTTPException(403,'Join this community before creating a challenge')
-        row=conn.execute('INSERT INTO walking_challenges(community_id,name,metric,target,created_by,shared_goal) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id,community_id,name,metric,target,created_at',(community_id,name,metric,target,user['sub'],shared)).fetchone()
-    return row
+        # Recheck membership before replaying a receipt after a user leaves a group.
+        if not conn.execute('SELECT 1 FROM walking_community_members WHERE community_id=%s AND user_id=%s',(community_id,user['sub'])).fetchone(): raise HTTPException(403,'Join this community before creating a goal')
+        previous,digest = community_receipt(conn,user,body,'goal:' + str(community_id))
+        if previous is not None: return previous
+        row=conn.execute('INSERT INTO walking_challenges(community_id,name,metric,target,created_by,shared_goal) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id,community_id,name,metric,target,created_at,shared_goal,archived_at',(community_id,body.name,body.metric,body.target,user['sub'],body.shared_goal)).fetchone()
+        return save_community_receipt(conn,user,body,digest,row)
 
 @app.get('/api/v1/communities/{community_id}/challenges',tags=['community'])
 def list_challenges(community_id: UUID,user=Depends(identity)):
     with transaction() as conn:
         if not conn.execute('SELECT 1 FROM walking_community_members WHERE community_id=%s AND user_id=%s',(community_id,user['sub'])).fetchone(): raise HTTPException(403,'Join this community to view its challenges')
-        rows=conn.execute('''SELECT c.id,c.community_id,c.name,c.metric,c.target,c.created_at,c.shared_goal,
+        rows=conn.execute('''SELECT c.id,c.community_id,c.name,c.metric,c.target,c.created_at,c.shared_goal,c.archived_at,
             (SELECT coalesce(sum(amount),0) FROM walking_challenge_progress WHERE challenge_id=c.id) AS group_progress,
             (c.created_by=%s OR EXISTS(SELECT 1 FROM walking_communities g WHERE g.id=c.community_id AND g.created_by=%s)) AS can_delete,
             coalesce((SELECT p.amount FROM walking_challenge_progress p WHERE p.challenge_id=c.id AND p.user_id=%s),0) AS my_progress,
@@ -191,9 +187,10 @@ def update_challenge_progress(challenge_id: UUID,body: dict=Body(...),user=Depen
     amount=body.get('amount')
     if not isinstance(amount,(int,float)) or isinstance(amount,bool) or not 0 <= amount <= 100000: raise HTTPException(422,'Progress must be between 0 and 100,000')
     with transaction() as conn:
-        joined=conn.execute('''SELECT 1 FROM walking_challenges c JOIN walking_community_members m ON m.community_id=c.community_id
-            WHERE c.id=%s AND m.user_id=%s''',(challenge_id,user['sub'])).fetchone()
+        joined=conn.execute('''SELECT c.archived_at FROM walking_challenges c JOIN walking_community_members m ON m.community_id=c.community_id
+            WHERE c.id=%s AND m.user_id=%s FOR UPDATE OF c''',(challenge_id,user['sub'])).fetchone()
         if not joined: raise HTTPException(403,'Join the challenge community before updating progress')
+        if joined['archived_at'] is not None: raise HTTPException(409,'Restore this archived goal before updating progress')
         conn.execute('''INSERT INTO walking_challenge_progress(challenge_id,user_id,amount) VALUES (%s,%s,%s)
             ON CONFLICT (challenge_id,user_id) DO UPDATE SET amount=excluded.amount,updated_at=now()''',(challenge_id,user['sub'],amount))
     return {'saved':True,'amount':amount}

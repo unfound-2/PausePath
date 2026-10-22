@@ -29,3 +29,26 @@ final class CommunitySubmissionTests: XCTestCase {
         XCTAssertNotEqual(second, draft.requestID)
     }
 }
+
+final class GoalSubmissionTests: XCTestCase {
+    func testRequestIdentitySurvivesSavedRetry() throws {
+        var draft = GoalSubmissionDraft()
+        draft.prepare(ownerID: "one", scope: "group", name: " Walk ", metric: "walks", target: 3, shared: true)
+        let original = draft.requestID
+        var restored = try JSONDecoder().decode(GoalSubmissionDraft.self, from: JSONEncoder().encode(draft))
+        restored.prepare(ownerID: "one", scope: "group", name: "Walk", metric: "walks", target: 3, shared: true)
+        XCTAssertEqual(restored.requestID, original)
+        restored.prepare(ownerID: "one", scope: "group", name: "Walk", metric: "walks", target: 4, shared: true)
+        XCTAssertNotEqual(restored.requestID, original)
+    }
+    func testAccountAndGroupIsolation() {
+        var draft = GoalSubmissionDraft()
+        draft.prepare(ownerID: "one", scope: "group", name: "Walk", metric: "walks", target: 3, shared: false)
+        let first = draft.requestID
+        draft.prepare(ownerID: "two", scope: "group", name: "Walk", metric: "walks", target: 3, shared: false)
+        XCTAssertNotEqual(draft.requestID, first)
+        let second = draft.requestID
+        draft.prepare(ownerID: "two", scope: "other", name: "Walk", metric: "walks", target: 3, shared: false)
+        XCTAssertNotEqual(draft.requestID, second)
+    }
+}

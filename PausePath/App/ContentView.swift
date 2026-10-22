@@ -426,6 +426,9 @@ struct MyPathView: View {
     @State private var source = "PausePath"
     @State private var pathSection = "Overview"
     @State private var editingGoal = false
+    @State private var showGoalExplanation = false
+    @State private var showRecapDetails = false
+    @State private var showHealthExplanation = false
     @State private var period = 7
     @State private var kind = "All"
     @State private var historyDays = 0
@@ -501,7 +504,9 @@ struct MyPathView: View {
                 }
                 .task { await health.refreshIfConnected() }
                 .onChange(of: pathScenePhase) { _, phase in if phase == .active { Task { await health.refreshIfConnected() } } }
-                .refreshable { await health.connect() }
+                .refreshable {
+                    if source == "Apple Health", health.hasConnected { await health.connect() }
+                }
                 .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .commaSeparatedText, defaultFilename: "PausePath-history") { result in
                     if case .failure = result { exportMessage = "Export could not be saved. Try again." }
                 }
@@ -528,7 +533,7 @@ struct MyPathView: View {
             if pathSection != "History" {
                 Picker("Summary period", selection: $period) {
                     Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90)
-                }.pickerStyle(.segmented)
+                }.pickerStyle(.menu)
             }
             Text("Sources stay separate to avoid counting the same journey twice.").font(.caption2).foregroundStyle(.secondary)
         }.padding(14).background(PausePathPalette.teal.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
@@ -558,10 +563,9 @@ struct MyPathView: View {
                     Image(systemName: "trash").frame(minWidth: 44, minHeight: 44)
                 }.buttonStyle(.borderless).accessibilityLabel("Remove weekly goal")
             }
-            HStack(alignment: .firstTextBaseline) {
-                Text(String(format: "%.0f", goalTarget) + " " + goalUnit).font(.system(.title2, design: .rounded).bold())
-                Spacer()
-                Button(editingGoal ? "Done" : "Edit goal") { editingGoal.toggle() }.font(.subheadline.weight(.semibold))
+            ViewThatFits(in: .horizontal) {
+                HStack { Text(String(format: "%.0f", goalTarget) + " " + goalUnit).font(.title2.bold()); Spacer(); goalEditButton }
+                VStack(alignment: .leading, spacing: 8) { Text(String(format: "%.0f", goalTarget) + " " + goalUnit).font(.title2.bold()); goalEditButton }
             }
             if editingGoal {
                 goalPicker
@@ -571,8 +575,15 @@ struct MyPathView: View {
             }
             ProgressView(value: min(value, goalTarget), total: goalTarget).tint(PausePathPalette.teal)
             Text("\(value, specifier: "%.1f") of \(goalTarget, specifier: "%.0f") · \(value >= goalTarget ? "Goal reached!" : "Every session counts")").font(.subheadline)
-            Text("This calendar week · all recorded PausePath activities, including sessions ended early. Separate from your source and history filters.").font(.caption).foregroundStyle(.secondary)
+            Text("This week · PausePath recordings only").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            DisclosureGroup("What counts?", isExpanded: $showGoalExplanation) {
+                Text("All PausePath sessions recorded this calendar week count, including sessions ended early. Apple Health, the summary period and history filters do not change this goal.").font(.caption).foregroundStyle(.secondary)
+            }.font(.caption)
         }.pathCard()
+    }
+    private var goalEditButton: some View {
+        Button(editingGoal ? "Done" : "Edit goal") { editingGoal.toggle() }
+            .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
     }
     private var goalUnit: String { goalMetric == "distance" ? "km" : goalMetric }
     private var goalRange: ClosedRange<Double> {
@@ -606,9 +617,13 @@ struct MyPathView: View {
         let badgeNames = milestones.badges.filter { badge in earned[badge.id].map { $0 >= previous && $0 < week.start } ?? false }.map(\.name)
         let recap = "Last week: \(sessions.count) PausePath sessions, \(String(format: "%.2f", distance / 1000)) km, and \(Int(sessions.reduce(0) { $0 + $1.activeSeconds } / 60)) active minutes. " + (oldDistance > 0 ? String(format: "%+.0f%% distance versus the week before.", (distance - oldDistance) / oldDistance * 100) : "No earlier distance available for comparison.")
         return VStack(alignment: .leading, spacing: 12) {
-            Label("Last week on your path", systemImage: "sparkles").font(.headline)
-            Text(recap)
-            Text(badgeNames.isEmpty ? "No new badges last week. Your next journey is another chance." : "Badges earned: " + badgeNames.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+            Label("Last week · PausePath", systemImage: "sparkles").font(.headline)
+            Text("\(sessions.count) sessions · \(distance / 1000, specifier: "%.2f") km · \(Int(sessions.reduce(0) { $0 + $1.activeSeconds } / 60)) min")
+            DisclosureGroup("Recap details", isExpanded: $showRecapDetails) {
+                Text(recap).font(.caption)
+                Text("PausePath recordings only. Independent of the source and summary period above.").font(.caption).foregroundStyle(.secondary)
+                if !badgeNames.isEmpty { Text("Badges earned: " + badgeNames.joined(separator: ", ")).font(.caption) }
+            }.font(.subheadline)
             ShareLink(item: recap) { Label("Share recap", systemImage: "square.and.arrow.up") }
         }.pathCard()
     }
@@ -642,9 +657,8 @@ struct MyPathView: View {
     private var healthTotals: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Daily movement").font(.headline)
-            HStack {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 280 : 140))], alignment: .leading, spacing: 16) {
                 PathMetric(title: "Steps", value: optionalTotal(daily.compactMap(\.steps)), icon: "shoeprints.fill")
-                Spacer()
                 PathMetric(title: "Active kcal", value: optionalTotal(daily.compactMap(\.calories)), icon: "flame")
             }
             Text("Health daily totals for this period include movement outside workouts. Not filtered by workout type. Missing readings are not treated as zero.")
@@ -669,7 +683,7 @@ struct MyPathView: View {
             trendRow(days: 7, title: "Short term")
             Divider()
             trendRow(days: 30, title: "Long term")
-            Text("Compares equal periods ending yesterday, excluding today’s partial day. Based on available \(source) records\(kind == "All" ? "" : " for \(kind.lowercased())").")
+            Text("Compares equal periods ending yesterday. All available \(source) activity types are included; history filters apply only to History.")
                 .font(.caption).foregroundStyle(.secondary)
         }.pathCard()
     }
@@ -688,9 +702,8 @@ struct MyPathView: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Personal milestones", systemImage: "trophy.fill").font(.headline)
             Text("Completed PausePath journeys · saved on this device").font(.caption).foregroundStyle(.secondary)
-            HStack(alignment: .top) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 280 : 140))], alignment: .leading, spacing: 16) {
                 PathMetric(title: "Longest journey", value: String(format: "%.2f km", milestones.longest / 1000), icon: "map")
-                Spacer()
                 PathMetric(title: "Longest active time", value: "\(Int(milestones.longestTime / 60)) min", icon: "timer")
             }
             if let pr = milestones.walks.last(where: { milestones.recordIDs.contains($0.id) }) {
@@ -706,16 +719,15 @@ struct MyPathView: View {
             }
         }.pathCard()
     }
-    private var bodyMetrics: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("Body measurements", systemImage: "figure.stand").font(.headline)
-            Text("Your latest shared Health readings. These do not affect badges or goals.").font(.caption).foregroundStyle(.secondary)
-            bodyRow("Weight", readings: health.weight, unit: "kg", multiplier: 1)
-            Divider()
-            bodyRow("Body fat", readings: health.bodyFat, unit: "%", multiplier: 100)
-            Divider()
-            bodyRow("Height", readings: health.height, unit: "cm", multiplier: 1)
-        }.pathCard()
+    @ViewBuilder private var bodyMetrics: some View {
+        if !health.weight.isEmpty || !health.bodyFat.isEmpty || !health.height.isEmpty {
+            DisclosureGroup("Body measurements") {
+                if !health.weight.isEmpty { bodyRow("Weight", readings: health.weight, unit: "kg", multiplier: 1) }
+                if !health.bodyFat.isEmpty { bodyRow("Body fat", readings: health.bodyFat, unit: "%", multiplier: 100) }
+                if !health.height.isEmpty { bodyRow("Height", readings: health.height, unit: "cm", multiplier: 1) }
+                Text("Health readings stay on this device and do not affect goals or badges.").font(.caption).foregroundStyle(.secondary)
+            }.font(.headline).pathCard()
+        }
     }
     private func bodyRow(_ title: String, readings: [BodyReading], unit: String, multiplier: Double) -> some View {
         NavigationLink {
@@ -733,21 +745,23 @@ struct MyPathView: View {
             }
         }.buttonStyle(.plain)
     }
-    private var history: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("Workout history").font(.title3.bold())
-                Spacer()
-                Menu {
+    private var historyFilter: some View {
+        Menu {
                         Picker("Activity", selection: $kind) {
                             Text("All activities").tag("All")
                             ForEach(Array(Set((source == "Apple Health" ? health.activities.map(\.kind) : walks.map { $0.activityKind ?? "Walking" }))).sorted(), id: \.self) { Text($0).tag($0) }
                         }
                     } label: { Label(kind, systemImage: "line.3.horizontal.decrease") }
+    }
+    private var history: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ViewThatFits(in: .horizontal) {
+                HStack { Text("Workout history").font(.title3.bold()); Spacer(); historyFilter }
+                VStack(alignment: .leading, spacing: 8) { Text("Workout history").font(.title3.bold()); historyFilter }
             }
             Picker("History dates", selection: $historyDays) {
                 Text("All dates").tag(0); Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90)
-            }.pickerStyle(.segmented)
+            }.pickerStyle(.menu)
             Button("Export filtered history (CSV)", systemImage: "square.and.arrow.up") {
                 exportDocument = PathExportDocument(text: historyCSV); exporting = true
             }.disabled(filteredHistory.isEmpty)
@@ -791,8 +805,9 @@ struct MyPathView: View {
                 HStack { if health.isLoading { ProgressView() }; Text(health.isLoading ? "Reading Health…" : "Connect / refresh Apple Health") }
                     .frame(maxWidth: .infinity)
             }.buttonStyle(.borderedProminent).disabled(health.isLoading)
-            Text("You choose what to share. Health readings and journey maps stay on this device.")
-                .font(.caption).foregroundStyle(.secondary)
+            DisclosureGroup("About Health data", isExpanded: $showHealthExplanation) {
+                Text("You choose which readings to share. Missing readings stay unknown. Health readings and journey maps stay on this device.").font(.caption).foregroundStyle(.secondary)
+            }.font(.caption)
             if health.hasConnected { Button("Clear Health session", role: .destructive) { health.clear() }.font(.caption) }
         }.pathCard()
     }
