@@ -514,21 +514,19 @@ struct MyPathView: View {
     }
     private var sectionIntro: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(pathSection == "Overview" ? "Every journey counts." : (pathSection == "History" ? "Retrace your path." : "See your rhythm."))
+            Text(dynamicTypeSize.isAccessibilitySize ? pathSection : (pathSection == "Overview" ? "Every journey counts." : (pathSection == "History" ? "Retrace your path." : "See your rhythm.")))
                 .font(.system(.title2, design: .rounded).bold()).foregroundStyle(PausePathPalette.teal)
-            Text(pathSection == "Overview" ? "Your latest journey, a little progress, and what comes next." : (pathSection == "History" ? "Find a session, revisit its route, or add a reflection." : "Explore trends, milestones, and your shared Health readings."))
-                .font(.subheadline).foregroundStyle(.secondary)
+            if !dynamicTypeSize.isAccessibilitySize {
+                Text(pathSection == "Overview" ? "Your latest journey, a little progress, and what comes next." : (pathSection == "History" ? "Find a session, revisit its route, or add a reflection." : "Explore trends, milestones, and your shared Health readings."))
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
         }
     }
     private var sourceControls: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Activity source", systemImage: "square.stack").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                Spacer()
-                Picker("Activity source", selection: $source) {
-                    Text("PausePath").tag("PausePath")
-                    Text("Apple Health").tag("Apple Health")
-                }.pickerStyle(.menu).tint(PausePathPalette.teal).onChange(of: source) { kind = "All" }
+            ViewThatFits(in: .horizontal) {
+                HStack { Label("Activity source", systemImage: "square.stack").font(.caption); Spacer(); sourceMenu }
+                VStack(alignment: .leading, spacing: 8) { Text("Activity source").font(.caption).foregroundStyle(.secondary); sourceMenu }
             }
             if pathSection != "History" {
                 Picker("Summary period", selection: $period) {
@@ -537,6 +535,12 @@ struct MyPathView: View {
             }
             Text("Sources stay separate to avoid counting the same journey twice.").font(.caption2).foregroundStyle(.secondary)
         }.padding(14).background(PausePathPalette.teal.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
+    }
+    private var sourceMenu: some View {
+        Picker("Activity source", selection: $source) {
+            Text("PausePath").tag("PausePath")
+            Text("Apple Health").tag("Apple Health")
+        }.pickerStyle(.menu).tint(PausePathPalette.teal).onChange(of: source) { kind = "All" }
     }
     private var filteredHistory: [PathActivity] {
         guard historyDays > 0 else { return activities }
@@ -1113,9 +1117,17 @@ private struct JourneyNotesView: View {
 
 /// Shared tab strip keeps each page focused without adding another navigation stack.
 struct PathSectionPicker: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let titles: [String]
     @Binding var selection: String
     var body: some View {
+        Group {
+        if dynamicTypeSize.isAccessibilitySize {
+            Picker("Section", selection: $selection) {
+                ForEach(titles, id: \.self) { Text($0).tag($0) }
+            }.pickerStyle(.menu).tint(PausePathPalette.teal)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 8)
+        } else {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(titles, id: \.self) { title in
@@ -1130,6 +1142,8 @@ struct PathSectionPicker: View {
             }.padding(6)
                 .background(PausePathPalette.teal.opacity(0.06), in: Capsule())
                 .padding(.horizontal, 16).padding(.vertical, 8)
+        }
+        }
         }.background(.regularMaterial)
     }
 }
