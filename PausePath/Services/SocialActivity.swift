@@ -42,6 +42,9 @@ struct RemindersResponse: Decodable { let walks: [SocialWalkReminder] }
     static func post(_ path: String, _ body: [String: Any] = [:]) async throws {
         _ = try await PausePathAPI.request("api/v1/social/" + path, body: body, requiresAccount: true)
         NotificationCenter.default.post(name: .pausePathSocialChanged, object: nil)
+        if path.hasPrefix("invitations/"), body["accept"] as? Bool == true {
+            NotificationCenter.default.post(name: .pausePathCommunityMembershipChanged, object: nil)
+        }
     }
     static func date(_ raw: String) -> Date? {
         let parser = ISO8601DateFormatter(); parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -112,5 +115,6 @@ struct RemindersResponse: Decodable { let walks: [SocialWalkReminder] }
 
 extension Notification.Name {
     static let pausePathSocialChanged = Notification.Name("pausepath.socialChanged")
+    static let pausePathCommunityMembershipChanged = Notification.Name("pausepath.communityMembershipChanged")
     static let pausePathShowInbox = Notification.Name("pausepath.showInbox")
 }

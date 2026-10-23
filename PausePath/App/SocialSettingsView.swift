@@ -253,19 +253,21 @@ struct SocialInboxView: View {
                     }
                 }
             }
-            Section("Updates") {
-                ForEach(store.notifications) { notification in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .top) {
-                            if notification.read_at == nil { Circle().fill(PausePathPalette.teal).frame(width: 7,height: 7).padding(.top,6).accessibilityLabel("Unread") }
-                            Text(notification.message).font(.subheadline)
-                        }
-                        if let date = SocialAPI.date(notification.created_at) { Text(date.formatted()).font(.caption).foregroundStyle(.secondary) }
-                        if let group = notification.community_id { Button("Open community") { Task { await open(group, notification: notification.id) } }.disabled(busy) }
-                        else if notification.read_at == nil { Button("Mark read") { Task { try? await SocialAPI.post("inbox/read",["ids":[notification.id.uuidString]]); await store.refresh() } } }
-                    }.padding(.vertical,5)
+            if account.isSignedIn {
+                Section("Updates") {
+                    ForEach(store.notifications) { notification in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .top) {
+                                if notification.read_at == nil { Circle().fill(PausePathPalette.teal).frame(width: 7,height: 7).padding(.top,6).accessibilityLabel("Unread") }
+                                Text(notification.message).font(.subheadline)
+                            }
+                            if let date = SocialAPI.date(notification.created_at) { Text(date.formatted()).font(.caption).foregroundStyle(.secondary) }
+                            if let group = notification.community_id { Button("Open community") { Task { await open(group, notification: notification.id) } }.disabled(busy) }
+                            else if notification.read_at == nil { Button("Mark read") { Task { try? await SocialAPI.post("inbox/read",["ids":[notification.id.uuidString]]); await store.refresh() } } }
+                        }.padding(.vertical,5)
+                    }
+                    if store.notifications.isEmpty && store.invitations.isEmpty { ContentUnavailableView("All caught up",systemImage: "tray",description: Text("Friend, walk and goal updates will appear here.")) }
                 }
-                if account.isSignedIn && store.notifications.isEmpty && store.invitations.isEmpty { ContentUnavailableView("All caught up",systemImage: "tray",description: Text("Friend, walk and goal updates will appear here.")) }
             }
             if let error = store.error { Text(error).font(.callout) }
             if !message.isEmpty { Text(message) }

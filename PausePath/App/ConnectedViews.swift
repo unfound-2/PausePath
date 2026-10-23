@@ -106,15 +106,21 @@ private struct WeeklyPersonalChallenge: Codable, Identifiable {
     var pointsAwarded = false
 }
 
+private struct CommunityComposerRoute: Identifiable {
+    let id = UUID()
+    let joining: Bool
+    let inviteCode: String
+}
+
 struct CommunityChallengesView: View {
     let preferences: RoutePreferences
     @State private var account = PausePathAccount.shared
+    @State private var social = SocialActivityStore.shared
     @State private var communities: [WalkingCommunity] = []
     @State private var communitySearch = ""
     @State private var lastCommunityRefresh: Date?
     @State private var refreshAgain = false
-    @State private var showCommunityComposer = false
-    @State private var communityComposerStartsWithJoin = false
+    @State private var communityComposerRoute: CommunityComposerRoute?
     @AppStorage("pausepath.pendingCommunityInvite") private var pendingInviteCode = ""
     @State private var message = ""
     @State private var membershipConfirmation: String?
@@ -125,45 +131,45 @@ struct CommunityChallengesView: View {
     @AppStorage("pausepath.shareChallengeProgress") private var shareProgress = false
     @AppStorage("pausepath.personalProfile") private var profileData = Data()
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var typeSize
     private var walks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedWalkData)) ?? [] }
     private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    if !communities.isEmpty { communityOverview } else {
-                    VStack(spacing: 14) {
-                        ZStack {
-                            Circle().fill(PausePathPalette.teal.opacity(0.08)).frame(width: 76, height: 76)
-                            Circle().fill(PausePathPalette.lime).frame(width: 60, height: 60)
-                            Image(systemName: "person.3.fill").font(.system(size: 29, weight: .semibold)).foregroundStyle(PausePathPalette.ink)
-                            Image(systemName: "leaf.fill").font(.caption.bold()).foregroundStyle(PausePathPalette.teal)
-                                .padding(9).background(.background, in: Circle()).offset(x: 38, y: 28)
-                        }.accessibilityHidden(true)
-                        Text("Walk together").font(.system(.title2, design: .rounded).bold())
-                            .foregroundStyle(PausePathPalette.teal)
-                        Text("Create a group or join with a code.")
-                            .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                        Button {
-                            communityComposerStartsWithJoin = false; showCommunityComposer = true
-                        } label: {
-                            Label("Create a community", systemImage: "plus.circle.fill")
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                        }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
-                        Button {
-                            communityComposerStartsWithJoin = true; showCommunityComposer = true
-                        } label: {
-                            Label("Join with a code", systemImage: "person.badge.plus")
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                        }.buttonStyle(.bordered)
-                        if !account.isSignedIn {
-                            Text("Sign in with Apple in the next step.").font(.caption).foregroundStyle(.secondary)
-                        }
-
-                    }.frame(maxWidth: .infinity).padding(.vertical, 16)
+                Section("Connect") {
+                    NavigationLink { FriendsSettingsView() } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "person.2.fill")
+                                .font(.title3)
+                                .foregroundStyle(PausePathPalette.teal)
+                                .frame(width: 42, height: 42)
+                                .background(PausePathPalette.lime.opacity(0.22), in: RoundedRectangle(cornerRadius: 12))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Find friends").font(.headline)
+                                Text("Search by username · No group needed")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }.frame(minHeight: 52)
                     }
-                }.listRowBackground(PausePathPalette.teal.opacity(0.05))
+                    NavigationLink { SocialInboxView() } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "tray.fill")
+                                .font(.title3)
+                                .foregroundStyle(PausePathPalette.teal)
+                                .frame(width: 42, height: 42)
+                                .background(PausePathPalette.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                            Text("Inbox").font(.headline)
+                            Spacer()
+                            if social.unread > 0 {
+                                Text("\(social.unread) new")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(PausePathPalette.teal)
+                            }
+                        }.frame(minHeight: 52)
+                    }
+                }
                 if let membershipConfirmation {
                     Section {
                         HStack {
@@ -173,30 +179,39 @@ struct CommunityChallengesView: View {
                         }
                     }
                 }
-                Section("Your communities") {
-                    if communities.count > 1 {
-                        TextField("Find your community", text: $communitySearch).autocorrectionDisabled()
-                            .accessibilityLabel("Search your communities")
-                    }
-                    if let lastCommunityRefresh {
-                        HStack {
-                            Label("Updated", systemImage: "checkmark.circle").foregroundStyle(PausePathPalette.teal)
-                            Text(lastCommunityRefresh, style: .relative).foregroundStyle(.secondary)
-                            Spacer()
-                            if busy { ProgressView().controlSize(.small) }
-                        }.font(.caption)
-                    }
-                    if let communityLoadMessage {
-                        Label(communityLoadMessage, systemImage: "arrow.clockwise.circle")
-                            .font(.callout).foregroundStyle(.secondary)
-                        Button("Refresh communities") { Task { await refresh() } }.disabled(busy)
-                    } else if busy {
-                        ProgressView("Loading communities…")
-                    }
-                    if !account.isSignedIn {
-                        Text("Sign in with Apple to create a community or join with an invite code.")
-                            .foregroundStyle(.secondary)
-                    } else {
+                Section {
+                    groupHero
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
+                if account.isSignedIn {
+                    Section("Your groups") {
+                        if let lastCommunityRefresh {
+                            HStack {
+                                Text("Updated").foregroundStyle(.secondary)
+                                Text(lastCommunityRefresh, style: .relative).foregroundStyle(.secondary)
+                                Spacer()
+                                if busy { ProgressView().controlSize(.small) }
+                            }.font(.caption)
+                        }
+                        if let communityLoadMessage {
+                            Label(communityLoadMessage, systemImage: "arrow.clockwise.circle")
+                                .font(.callout).foregroundStyle(.secondary)
+                            Button("Refresh groups") { Task { await refresh(force: true) } }.disabled(busy)
+                        } else if busy && lastCommunityRefresh == nil {
+                            ProgressView("Loading groups…")
+                        }
+                        if communities.count > 1 {
+                            TextField("Search your groups", text: $communitySearch).autocorrectionDisabled()
+                                .accessibilityLabel("Search your groups")
+                        }
+                        if communities.isEmpty && !busy && lastCommunityRefresh != nil {
+                            Label("No groups yet. Create one or join with an invite code.", systemImage: "person.3")
+                                .font(.callout).foregroundStyle(.secondary)
+                        } else if !communitySearch.isEmpty && filteredCommunities.isEmpty {
+                            Button("No groups match. Clear search") { communitySearch = "" }
+                                .font(.callout)
+                        }
                         ForEach(filteredCommunities) { community in
                             VStack(alignment: .leading, spacing: 12) {
                                 NavigationLink { CommunityHubView(community: community) } label: {
@@ -205,19 +220,18 @@ struct CommunityChallengesView: View {
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text(community.name).font(.headline)
                                             Text("\(community.member_count) members").font(.caption).foregroundStyle(.secondary)
+                                            if let walk = community.next_walk {
+                                                Label("Next: \(walk.title) · \(CommunityHubView.dateLabel(walk.starts_at))", systemImage: "calendar")
+                                                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                            }
+                                            if let goals = community.active_goal_count, goals > 0 {
+                                                Label("\(goals) active \(goals == 1 ? "goal" : "goals")", systemImage: "flag")
+                                                    .font(.caption).foregroundStyle(.secondary)
+                                            }
                                         }
-                                        Spacer(); Image(systemName: "chevron.right").font(.caption)
+                                        Spacer(minLength: 4)
                                     }
                                 }.buttonStyle(.plain)
-                                if let walk = community.next_walk {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Label(walk.title, systemImage: "calendar").font(.subheadline.weight(.medium))
-                                        Text(CommunityHubView.dateLabel(walk.starts_at)).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                } else {
-                                    Text(community.summary_available == true ? "No upcoming walks" : "Open Walks to see upcoming plans")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
                                 HStack(spacing: 12) {
                                     NavigationLink { CommunityHubView(community: community, initialSection: "Walks") } label: {
                                         Label("Walks", systemImage: "figure.walk").frame(minHeight: 44)
@@ -228,50 +242,59 @@ struct CommunityChallengesView: View {
                                 }.font(.subheadline.weight(.semibold)).buttonStyle(.bordered)
                             }.padding(.vertical, 10)
                         }
-                        DisclosureGroup("Progress sharing") {
-                            Toggle("Share my goal totals", isOn: $shareProgress)
-                            Text("Only totals from this account are shared. Routes, locations and Health data stay private. Turning this off removes your totals from group boards.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-
                     }
                 }
-                if !message.isEmpty { Section { Text(message).font(.callout); Button("Retry community connection") { Task { await refresh() } }.disabled(busy) } }
+                if account.isSignedIn && !communities.isEmpty {
+                    Section("Sharing") {
+                        Toggle("Share my goal totals", isOn: $shareProgress)
+                        Text("Shared totals appear in group goals. Your routes, location, and Health data stay private.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if !message.isEmpty { Section { Text(message).font(.callout); Button("Refresh groups") { Task { await refresh(force: true) } }.disabled(busy) } }
             }
             .pausePathSurface()
         .navigationTitle("Community")
-            .task { if UserDefaults.standard.string(forKey: "pausepath.shareProgressOwner") != account.userID { shareProgress = false }; if !pendingInviteCode.isEmpty { showCommunityComposer = true }; await refresh() }
-            .refreshable { await refresh() }
+            .task {
+                if UserDefaults.standard.string(forKey: "pausepath.shareProgressOwner") != account.userID { shareProgress = false }
+                if !pendingInviteCode.isEmpty { communityComposerRoute = CommunityComposerRoute(joining: true, inviteCode: pendingInviteCode) }
+                await refresh()
+            }
+            .refreshable { await refresh(force: true) }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { Task { await refresh() } }
             }
             .onReceive(NotificationCenter.default.publisher(for: .pausePathWalkRecorded)) { _ in
-                Task { await refresh() }
+                Task { await refresh(force: true) }
             }
             .onChange(of: account.userID) { _, userID in
                 communityRevision = UUID(); communities = []
                 communityLoadMessage = nil; message = ""; membershipConfirmation = nil; communitySearch = ""; lastCommunityRefresh = nil
                 if userID != nil {
                     if UserDefaults.standard.string(forKey: "pausepath.shareProgressOwner") != userID { shareProgress = false }
-                    Task { await refresh() }
+                    Task { await refresh(force: true) }
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: .pausePathSocialChanged)) { _ in Task { await refresh() } }
+            .onReceive(NotificationCenter.default.publisher(for: .pausePathCommunityMembershipChanged)) { _ in Task { await refresh(force: true) } }
             .onReceive(NotificationCenter.default.publisher(for: .pausePathJoinCommunity)) { notification in
                 pendingInviteCode = notification.userInfo?["code"] as? String ?? ""
-                showCommunityComposer = true
+                if !pendingInviteCode.isEmpty { communityComposerRoute = CommunityComposerRoute(joining: true, inviteCode: pendingInviteCode) }
             }
-            .onChange(of: pendingInviteCode) { _, code in if !code.isEmpty { showCommunityComposer = true } }
+            .onChange(of: pendingInviteCode) { _, code in
+                if !code.isEmpty && communityComposerRoute?.inviteCode != code {
+                    communityComposerRoute = CommunityComposerRoute(joining: true, inviteCode: code)
+                }
+            }
             .onChange(of: shareProgress) { _, enabled in
                 if !enabled, let owner = account.userID { UserDefaults.standard.set(true, forKey: "pausepath.pendingProgressRemoval." + owner) }
                 if enabled { UserDefaults.standard.set(account.userID, forKey: "pausepath.shareProgressOwner") }
-                Task { await refresh() }
+                Task { await refresh(force: true) }
             }
-            .sheet(isPresented: $showCommunityComposer, onDismiss: {
+            .sheet(item: $communityComposerRoute, onDismiss: {
                 pendingInviteCode = ""
-                Task { await refresh() }
-            }) {
-                CommunityJoinSheet(account: account, onCreate: createCommunity, onJoin: joinCommunity, initialUsername: profile.username ?? "", initialInviteCode: pendingInviteCode, startsWithJoin: communityComposerStartsWithJoin)
+                Task { await refresh(force: true) }
+            }) { route in
+                CommunityJoinSheet(account: account, onCreate: createCommunity, onJoin: joinCommunity, initialUsername: profile.username ?? "", initialInviteCode: route.inviteCode, startsWithJoin: route.joining)
             }
 
         }
@@ -281,36 +304,65 @@ struct CommunityChallengesView: View {
         let query = communitySearch.trimmingCharacters(in: .whitespacesAndNewlines)
         return query.isEmpty ? communities : communities.filter { $0.name.localizedCaseInsensitiveContains(query) }
     }
-    private var communityOverview: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            AdventureHeader(eyebrow: "THE PATH IS BETTER TOGETHER", title: "Find your trail crew.", subtitle: "Familiar faces. New places. Your next outing starts here.")
-            Text("\(communities.count) \(communities.count == 1 ? "community" : "communities")")
-                .font(.subheadline).foregroundStyle(.secondary)
-            ViewThatFits(in: .horizontal) {
-                HStack { communityActions }
-                VStack(alignment: .leading) { communityActions }
+    private var groupHero: some View {
+        let deepTeal = Color(red: 0.025, green: 0.23, blue: 0.22)
+        return VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("WALK TOGETHER")
+                        .font(.caption2.weight(.bold)).tracking(1.8)
+                        .foregroundStyle(.white.opacity(0.75))
+                    Text("Find your trail crew.")
+                        .font(.system(.title2, design: .rounded).bold())
+                        .foregroundStyle(.white)
+                    Text(account.isSignedIn ? "Create a group or join with an invite code." : "Create a group or join with a code. Sign in when prompted.")
+                        .font(.subheadline).foregroundStyle(.white.opacity(0.84))
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "person.3.fill")
+                    .font(.title2).foregroundStyle(PausePathPalette.lime)
+                    .accessibilityHidden(true)
             }
-            if !communitySearch.isEmpty && filteredCommunities.isEmpty {
-                Text("No groups match that name.").font(.caption).foregroundStyle(.secondary)
-                Button("Clear search") { communitySearch = "" }.font(.caption)
+            if typeSize.isAccessibilitySize {
+                VStack(spacing: 10) { groupHeroActions }
+            } else {
+                HStack(spacing: 10) { groupHeroActions }
             }
-        }.padding(.vertical, 10)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(deepTeal, in: RoundedRectangle(cornerRadius: 24))
+        .overlay {
+            AdventureContours().stroke(.white.opacity(0.08), lineWidth: 1)
+                .clipShape(RoundedRectangle(cornerRadius: 24))
+                .allowsHitTesting(false).accessibilityHidden(true)
+        }
     }
-    @ViewBuilder private var communityActions: some View {
-        Button { communityComposerStartsWithJoin = false; showCommunityComposer = true } label: {
-            Label("Create", systemImage: "plus.circle.fill").frame(minHeight: 44)
-        }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
-        Button { communityComposerStartsWithJoin = true; showCommunityComposer = true } label: {
-            Label("Join with a code", systemImage: "person.badge.plus").frame(minHeight: 44)
-        }.buttonStyle(.bordered)
+    @ViewBuilder private var groupHeroActions: some View {
+        Button { communityComposerRoute = CommunityComposerRoute(joining: false, inviteCode: "") } label: {
+            Label("Create group", systemImage: "plus.circle.fill")
+                .lineLimit(1).minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity, minHeight: 46)
+        }.buttonStyle(.plain).foregroundStyle(PausePathPalette.ink)
+            .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 14))
+            .accessibilityLabel("Create a group")
+        Button { communityComposerRoute = CommunityComposerRoute(joining: true, inviteCode: "") } label: {
+            Label("Join by code", systemImage: "person.badge.plus")
+                .lineLimit(1).minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity, minHeight: 46)
+        }.buttonStyle(.plain).foregroundStyle(.white)
+            .background(.white.opacity(0.13), in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.35), lineWidth: 1))
+            .accessibilityLabel("Join a group with an invite code")
     }
-    @MainActor private func refresh() async {
+    @MainActor private func refresh(force: Bool = false) async {
         guard account.isSignedIn else { return }
-        if busy { refreshAgain = true; return }
+        if busy { refreshAgain = refreshAgain || force; return }
+        guard force || CommunityFreshness.shouldRefresh(lastLoaded: lastCommunityRefresh) else { return }
         let revision = UUID(); communityRevision = revision; busy = true
         defer {
             busy = false
-            if refreshAgain { refreshAgain = false; Task { await refresh() } }
+            if refreshAgain { refreshAgain = false; Task { await refresh(force: true) } }
         }
         let loaded: [WalkingCommunity]
         do {
@@ -648,9 +700,12 @@ private struct CommunityJoinSheet: View {
             .interactiveDismissDisabled(busy)
             .onAppear {
                 guard !didRestoreDraft else { return }; didRestoreDraft = true
+                let requestedJoin = startsWithJoin || !initialInviteCode.isEmpty
                 if let restored = try? JSONDecoder().decode(CommunitySubmissionDraft.self, from: savedDraft), restored.ownerID == (account.userID ?? "signed-out") {
-                    draft = restored; username = restored.username; name = restored.name; code = restored.code; isJoining = restored.joining
-                } else { username = initialUsername; code = initialInviteCode; isJoining = startsWithJoin || !initialInviteCode.isEmpty }
+                    draft = restored; username = restored.username
+                    if restored.joining == requestedJoin { name = restored.name; code = restored.code }
+                } else { username = initialUsername }
+                isJoining = requestedJoin
                 if !initialInviteCode.isEmpty { code = initialInviteCode; isJoining = true }
                 storeDraft()
             }
@@ -1045,6 +1100,44 @@ private struct CommunityPendingAction: Identifiable {
     var closes = false
 }
 
+private struct CommunityHubNavigation: View {
+    @Binding var selection: String
+    @Environment(\.dynamicTypeSize) private var typeSize
+    private let primary = ["Walks", "Goals", "Posts"]
+    var body: some View {
+        Group {
+            if typeSize.isAccessibilitySize {
+                Picker("Group section", selection: $selection) {
+                    ForEach(["Walks", "Goals", "Posts", "Members", "Settings"], id: \.self) { title in
+                        Text(title).tag(title)
+                    }
+                }.pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(spacing: 4) {
+                    ForEach(primary, id: \.self) { title in
+                        Button(title) { selection = title }
+                            .accessibilityAddTraits(selection == title ? [.isSelected] : [])
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .foregroundStyle(selection == title ? PausePathPalette.ink : PausePathPalette.teal)
+                            .background(selection == title ? PausePathPalette.lime : Color.clear, in: Capsule())
+                    }
+                    Menu {
+                        Button("Members", systemImage: "person.2") { selection = "Members" }
+                        Button("Settings", systemImage: "gearshape") { selection = "Settings" }
+                    } label: {
+                        Text(selection == "Members" || selection == "Settings" ? selection : "More")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .foregroundStyle(selection == "Members" || selection == "Settings" ? PausePathPalette.ink : PausePathPalette.teal)
+                            .background(selection == "Members" || selection == "Settings" ? PausePathPalette.lime : Color.clear, in: Capsule())
+                    }.accessibilityLabel("Members and group settings")
+                }.font(.subheadline.weight(.semibold)).buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .background(PausePathPalette.background)
+    }
+}
+
 struct CommunityHubView: View {
     let community: WalkingCommunity
     @Environment(\.dismiss) private var dismiss
@@ -1067,6 +1160,7 @@ struct CommunityHubView: View {
     @State private var tasks: [WalkingCommunityChallenge] = []
     @State private var busy = false
     @State private var message = ""
+    @State private var loadFailure = false
     @State private var newName = ""
     @State private var postText = ""
     @State private var postRequest = UUID()
@@ -1085,11 +1179,20 @@ struct CommunityHubView: View {
             else if hubSection == "Posts" { feedSection }
             else if hubSection == "Members" { memberSection }
             else { managementSection }
-            if !message.isEmpty { Section { Text(message); Button("Retry") { Task { await load(force: true) } }.disabled(loading || busy) } }
+            if !message.isEmpty {
+                Section {
+                    Label(message, systemImage: "exclamationmark.circle").font(.callout)
+                    if loadFailure {
+                        Button("Retry this section") { Task { await load(force: true) } }.disabled(loading || busy)
+                    } else {
+                        Button("Dismiss") { message = "" }
+                    }
+                }
+            }
             if loading { ProgressView("Refreshing your community…") }
         }.id(hubSection).pausePathSurface().navigationTitle(displayName.isEmpty ? community.name : displayName).navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .top, spacing: 0) {
-                PathSectionPicker(titles: ["Walks", "Goals", "Posts", "Members", "Settings"], selection: $hubSection)
+                CommunityHubNavigation(selection: $hubSection)
             }
             .toolbar { ToolbarItem(placement: .topBarTrailing) {
                 Button("Invite", systemImage: "person.badge.plus") { showingInvite = true }
@@ -1103,7 +1206,7 @@ struct CommunityHubView: View {
                         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingInvite = false } } }
                 }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
             }
-            .disabled(busy || loading)
+            .disabled(busy)
             .task { displayName = community.name; newName = community.name }
             .task(id: hubSection) { await load() }
             .onChange(of: scenePhase) { _, phase in
@@ -1309,7 +1412,7 @@ struct CommunityHubView: View {
         guard !loadingSections.contains(section), force || CommunityFreshness.shouldRefresh(lastLoaded: lastSectionRefresh[section]), let owner = PausePathAccount.shared.userID else { return }
         loadingSections.insert(section)
         defer { loadingSections.remove(section) }
-        message = ""
+        message = ""; loadFailure = false
         do {
             if force && section != "Members" && section != "Settings" { try? await refreshDirectory(owner: owner) }
             try Task.checkCancellation()
@@ -1333,7 +1436,10 @@ struct CommunityHubView: View {
             try Task.checkCancellation()
             lastSectionRefresh[section] = .now
         } catch {
-            if !Task.isCancelled, PausePathAccount.shared.userID == owner { message = "\(section) could not refresh. Pull down to retry." }
+            if !Task.isCancelled, PausePathAccount.shared.userID == owner, hubSection == section {
+                message = "\(section) could not load. Pull down or tap Retry."
+                loadFailure = true
+            }
         }
     }
     @discardableResult @MainActor private func perform(_ path: String, body: [String: Any] = [:], closes: Bool = false) async -> Bool {
@@ -1347,7 +1453,7 @@ struct CommunityHubView: View {
                 await SocialActivityStore.shared.refresh()
             }
             return true
-        } catch { message = communityErrorMessage(error); return false }
+        } catch { message = communityErrorMessage(error); loadFailure = false; return false }
     }
     static func dateLabel(_ raw: String) -> String {
         let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

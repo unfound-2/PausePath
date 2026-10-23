@@ -4,7 +4,7 @@ Implementation added October 22, 2026. Deploy the matching migration and API bef
 
 ## Where to find things
 
-Profile contains Friends (including username/privacy and blocked people), Community inbox, Notifications, Saved routes, and Downloaded areas. Group-walk creation and invitation actions stay in Community → group → Walks. Replacing a reported unavailable stop stays beside “Your next pause” during navigation. The preference for suggesting alternatives lives in downloaded-area/navigation settings.
+Community now starts with Find friends and Inbox, followed by group creation, joining, and the group list. Profile also contains Friends (including username/privacy and blocked people), Community inbox, Notifications, Saved routes, and Downloaded areas. Group-walk creation and invitation actions stay in Community → group → Walks. Replacing a reported unavailable stop stays beside “Your next pause” during navigation. The preference for suggesting alternatives lives in downloaded-area/navigation settings.
 
 A separate friend username uses 3–24 lowercase ASCII letters, numbers or underscores. Existing local/community display names are not uploaded into the directory automatically. Searchability is off by default and must be explicitly enabled. A person must also allow requests to appear in search. The inbox, local reminders, and existing group memberships work independently of opting into search.
 
