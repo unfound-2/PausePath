@@ -338,7 +338,7 @@ import UIKit
     }
     func updateActivity(force: Bool = false) { liveActivity.update(activityState, force: force) }
     func replaceNextPause(with poi: SharedPOI) async {
-        guard let plan, let next = nextPause, let location, freshLocation(), !poi.unavailable, !poi.reportedUnavailable, !poi.restrictedAccess, let replacement = poi.place else {
+        guard let plan, let next = nextPause, let location, freshLocation(), !isRecalculating, !poi.unavailable, !poi.reportedUnavailable, !poi.restrictedAccess else {
             status = "A fresh location and available public stop are needed to replace a pause."; return
         }
         token = UUID(); let request = token; routeTask?.cancel(); isRecalculating = true
@@ -346,17 +346,34 @@ import UIKit
         var stops = Array(plan.stops.dropFirst(progress.legIndex))
         let replacementIndex = next.index - progress.legIndex
         guard stops.indices.contains(replacementIndex), let finish = plan.paths.last?.last else { return }
-        stops[replacementIndex] = replacement
         do {
+            let data = try await PausePathAPI.request("api/v1/pois/\(poi.id)")
+            let latest = try JSONDecoder().decode(SharedPOI.self, from: data)
+            guard request == token, !latest.unavailable, !latest.reportedUnavailable, !latest.restrictedAccess, let replacement = latest.place else {
+                if request == token { status = "This alternative is no longer available. Your existing route is retained." }; return
+            }
+            stops[replacementIndex] = replacement
             var start = Coordinate(location.coordinate.latitude, location.coordinate.longitude)
             var legs: [MKRoute] = []
-            for point in stops.map({ Coordinate($0.item.placemark.coordinate.latitude, $0.item.placemark.coordinate.longitude) }) + [finish] {
-                let leg = try await WalkingDirections.route(from: start, to: point, departure: .now)
+            var elapsed = 0.0
+            for (index, point) in (stops.map({ Coordinate($0.item.placemark.coordinate.latitude, $0.item.placemark.coordinate.longitude) }) + [finish]).enumerated() {
+                let leg = try await WalkingDirections.route(from: start, to: point, departure: Date().addingTimeInterval(elapsed))
                 try Task.checkCancellation()
-                guard request == token, let end = leg.polyline.walkingCoordinates.last, WalkingGeometry.distance(end, point) <= 30 else { return }
-                legs.append(leg); start = point
+                guard request == token, let first = leg.polyline.walkingCoordinates.first, let end = leg.polyline.walkingCoordinates.last, WalkingGeometry.distance(start, first) <= 30, WalkingGeometry.distance(end, point) <= 30 else { return }
+                elapsed += leg.distance / max(0.3, plan.preferences.speedMetersPerSecond)
+                if index == replacementIndex {
+                    let open = latest.openAtArrival(Date().addingTimeInterval(elapsed))
+                    guard open != false, plan.allowUnknownRestStops || (open == true && latest.accessDescription == "public") else {
+                        status = "This stop is closed at arrival or its access is unverified. Your previous route is retained."; return
+                    }
+                }
+                legs.append(leg); start = point; elapsed += 300
             }
             guard request == token else { return }
+            guard freshLocation(), let currentFix = self.location,
+                  WalkingGeometry.distance(Coordinate(location.coordinate.latitude,location.coordinate.longitude),Coordinate(currentFix.coordinate.latitude,currentFix.coordinate.longitude)) <= 50 else {
+                status = "Your location changed while checking. Choose an alternative again from your current position."; return
+            }
             self.plan = GeneratedWalk(name: plan.name, legs: legs, preferences: plan.preferences, stops: stops, allowUnknownRestStops: plan.allowUnknownRestStops)
             progress = WalkProgress(paths: self.plan!.paths)
             lastSpoken = ""; updateActivity(force: true)

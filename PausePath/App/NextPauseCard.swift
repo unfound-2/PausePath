@@ -7,6 +7,8 @@ struct NextPauseCard: View {
     @State private var message = ""
     @State private var busy = false
     @State private var report: DiscoveredPlace?
+    @AppStorage("pausepath.walk.suggestAlternatives") private var suggestAlternatives = true
+    @State private var autoSuggestedFor: UUID?
     @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -24,7 +26,7 @@ struct NextPauseCard: View {
                     Label("Reported unavailable. Choose another pause before relying on it.", systemImage: "exclamationmark.triangle").font(.callout)
                 }
                 HStack {
-                    Button("Find another pause", systemImage: "arrow.triangle.swap") { Task { await findAlternatives() } }.disabled(busy)
+                    Button("Find another pause", systemImage: "arrow.triangle.swap") { Task { await findAlternatives() } }.disabled(busy || !navigator.freshLocation() || navigator.isRecalculating)
                     Spacer()
                     Button("Report", systemImage: "flag") { report = (poi?.place ?? next.place) }
                 }.font(.subheadline).frame(minHeight: 44)
@@ -32,6 +34,7 @@ struct NextPauseCard: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(alternative.poi.name ?? "Alternative bench").font(.subheadline.bold())
                         Text("\(Int(alternative.meters)) m walking to this stop · remaining route will change").font(.caption)
+                        Text(alternative.poi.attributes?.summary ?? "Accessibility information unknown").font(.caption).foregroundStyle(.secondary)
                         Text(alternative.poi.availabilityDescription(at: Date().addingTimeInterval(alternative.meters / max(0.3, plan.preferences.speedMetersPerSecond)))).font(.caption)
                         Button("Use this alternative") {
                             Task { await navigator.replaceNextPause(with: alternative.poi); alternatives = [] }
@@ -48,6 +51,7 @@ struct NextPauseCard: View {
             .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: PausePathPalette.corner))
             .overlay(RoundedRectangle(cornerRadius: PausePathPalette.corner).strokeBorder(PausePathPalette.teal.opacity(0.1)))
             .task(id: navigator.nextPause?.place.id) {
+                alternatives = []; autoSuggestedFor = nil
                 await refreshStatus()
                 while !Task.isCancelled {
                     do { try await Task.sleep(for: .seconds(60)) } catch { return }
@@ -68,13 +72,17 @@ struct NextPauseCard: View {
             if poi.unavailable || poi.reportedUnavailable { message = "The latest report marks this pause unavailable. Alternatives are available below." }
             else { message = "Status checked just now. Listing data can change." }
             navigator.updateActivity(force: true)
+            if suggestAlternatives, (poi.unavailable || poi.reportedUnavailable), autoSuggestedFor != poi.id, navigator.freshLocation() {
+                autoSuggestedFor = poi.id; await findAlternatives()
+            }
         } catch { if !Task.isCancelled { message = "Could not refresh this stop. Last known information is shown." } }
     }
     private func findAlternatives() async {
-        guard let plan = navigator.plan else { return }
+        guard let plan = navigator.plan, navigator.freshLocation(), !busy, let fix = navigator.location else { message = "Wait for fresh GPS before checking walking alternatives."; return }
         busy = true; alternatives = []; message = ""
         defer { busy = false }
-        let origin = navigator.freshLocation() ? navigator.location!.coordinate : plan.start.mapCoordinate
+        let origin = fix.coordinate
+        let expectedPause = navigator.nextPause?.place.id
         do {
             let region = MKCoordinateRegion(center: origin, latitudinalMeters: 1600, longitudinalMeters: 1600)
             let result = try await PausePathAPI.search(region)
@@ -92,6 +100,7 @@ struct NextPauseCard: View {
                       plan.allowUnknownRestStops || (candidate.openAtArrival(arrival) == true && candidate.accessDescription == "public"),
                       let endpoint = route.polyline.walkingCoordinates.last,
                       WalkingGeometry.distance(endpoint, Coordinate(candidate.coordinate.latitude, candidate.coordinate.longitude)) <= 30 else { continue }
+                guard expectedPause == navigator.nextPause?.place.id, !Task.isCancelled else { return }
                 alternatives.append((candidate, route.distance))
                 } catch { if Task.isCancelled { return } }
                 if alternatives.count == 3 { break }

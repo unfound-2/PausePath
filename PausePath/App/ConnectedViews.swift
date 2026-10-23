@@ -256,6 +256,7 @@ struct CommunityChallengesView: View {
                     Task { await refresh() }
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .pausePathSocialChanged)) { _ in Task { await refresh() } }
             .onReceive(NotificationCenter.default.publisher(for: .pausePathJoinCommunity)) { notification in
                 pendingInviteCode = notification.userInfo?["code"] as? String ?? ""
                 showCommunityComposer = true
@@ -1009,6 +1010,8 @@ private struct CommunityWalkPlan: Decodable, Identifiable {
     let attendees: Int
     let attending: Bool
     let can_manage: Bool
+    let route_snapshot: SharedRouteSnapshot?
+    let meeting_location: SharedRoutePoint?
 }
 private struct CommunityPost: Decodable, Identifiable {
     let id: UUID
@@ -1042,7 +1045,7 @@ private struct CommunityPendingAction: Identifiable {
     var closes = false
 }
 
-private struct CommunityHubView: View {
+struct CommunityHubView: View {
     let community: WalkingCommunity
     @Environment(\.dismiss) private var dismiss
     @State private var hubSection = "Walks"
@@ -1068,6 +1071,7 @@ private struct CommunityHubView: View {
     @State private var postText = ""
     @State private var postRequest = UUID()
     @State private var showWalkComposer = false
+    @State private var invitingToWalk: CommunityWalkPlan?
     @State private var pending: CommunityPendingAction?
     init(community: WalkingCommunity, initialSection: String = "Walks") {
         self.community = community
@@ -1091,6 +1095,7 @@ private struct CommunityHubView: View {
                 Button("Invite", systemImage: "person.badge.plus") { showingInvite = true }
                     .accessibilityLabel("Invite someone")
             } }
+            .sheet(item: $invitingToWalk) { FriendsWalkInviteView(walkID: $0.id) }
             .sheet(isPresented: $showingInvite) {
                 NavigationStack {
                     ScrollView { CommunityInviteCard(code: community.invite_code).padding(20) }
@@ -1145,6 +1150,15 @@ private struct CommunityHubView: View {
                     }
                     Label(plan.meeting_point, systemImage: "mappin.and.ellipse")
                     Text(plan.route_description).font(.callout).foregroundStyle(.secondary)
+                    if let route = plan.route_snapshot {
+                        DisclosureGroup("Route map & \(route.stops.count) planned stops") {
+                            SharedGroupRouteView(route: route, meeting: plan.meeting_location)
+                            Text("\(route.distance_meters / 1000, specifier: "%.1f") km · about \(Int(route.estimated_seconds / 60)) min").font(.subheadline)
+                            Text("Shared plan. Check current stop access, hours and terrain before walking.").font(.caption).foregroundStyle(.secondary)
+                        }
+                    } else if let meeting = plan.meeting_location, let coordinate = meeting.coordinate {
+                        Map { Marker("Meeting point", coordinate: coordinate.mapCoordinate) }.frame(height: 180).clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
                     if plan.cancelled { Label("Cancelled", systemImage: "xmark.circle") }
                     else {
                         Text("\(plan.attendees) going").font(.caption)
@@ -1152,6 +1166,7 @@ private struct CommunityHubView: View {
                             Task { await perform("walks/\(plan.id)/rsvp", body: ["attending": !plan.attending]) }
                         }.buttonStyle(.bordered)
                         if plan.can_manage {
+                            Button("Invite friends", systemImage: "person.badge.plus") { invitingToWalk = plan }
                             Button("Cancel group walk", role: .destructive) { pending = CommunityPendingAction(title: "Cancel this walk?", path: "walks/\(plan.id)/cancel") }
                         }
                     }
@@ -1329,6 +1344,7 @@ private struct CommunityHubView: View {
             if closes { dismiss() } else {
                 if path == "rename" { displayName = newName.trimmingCharacters(in: .whitespacesAndNewlines) }
                 await load(force: true)
+                await SocialActivityStore.shared.refresh()
             }
             return true
         } catch { message = communityErrorMessage(error); return false }
@@ -1337,47 +1353,6 @@ private struct CommunityHubView: View {
         let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let date = f.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
         return date?.formatted(date: .abbreviated, time: .shortened) ?? "Date unavailable"
-    }
-}
-
-private struct GroupWalkComposer: View {
-    let group: UUID
-    @Environment(\.dismiss) private var dismiss
-    @State private var title = "A walk together"
-    @State private var meeting = ""
-    @State private var route = ""
-    @State private var date = Date().addingTimeInterval(3600)
-    @State private var requestID = UUID()
-    @State private var busy = false
-    @State private var message = ""
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("The plan") {
-                    TextField("Walk name", text: $title)
-                    TextField("Meeting point or address", text: $meeting)
-                    TextField("Route and planned breaks", text: $route, axis: .vertical).lineLimit(3...6)
-                    DatePicker("Start", selection: $date, in: Date()...)
-                }
-                Text("These details are shared with your community. Describe a meeting point you are comfortable sharing. Route descriptions are plans, not turn-by-turn navigation.").font(.caption).foregroundStyle(.secondary)
-                if !message.isEmpty { Text(message) }
-            }.pausePathSurface().navigationTitle("Plan a group walk")
-                .onChange(of: [title, meeting, route, date.ISO8601Format()]) { _, _ in requestID = UUID() }
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button(busy ? "Saving…" : "Schedule") { Task { await save() } }
-                            .disabled(busy || !(2...80).contains(title.trimmingCharacters(in: .whitespacesAndNewlines).count) || meeting.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || meeting.count > 160 || route.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || route.count > 500)
-                    }
-                }.disabled(busy).interactiveDismissDisabled(busy)
-        }
-    }
-    @MainActor private func save() async {
-        guard !busy else { return }; busy = true; defer { busy = false }
-        do {
-            _ = try await PausePathAPI.request("api/v1/communities/\(group)/walks", body: ["title": title, "meeting_point": meeting, "route_description": route, "starts_at": ISO8601DateFormatter().string(from: date), "request_id": requestID.uuidString], requiresAccount: true)
-            dismiss()
-        } catch { message = communityErrorMessage(error) }
     }
 }
 

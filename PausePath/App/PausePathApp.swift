@@ -23,6 +23,10 @@ final class PausePathNotificationDelegate: NSObject, UIApplicationDelegate, UNUs
         if response.notification.request.identifier == "pausepath.daily-recap" {
             NotificationCenter.default.post(name: .pausePathShowProgress, object: nil)
         }
+        if response.notification.request.identifier.hasPrefix("pausepath.group-walk.") {
+            UserDefaults.standard.set(true, forKey: "pausepath.pendingInbox")
+            NotificationCenter.default.post(name: .pausePathShowInbox, object: nil)
+        }
         completionHandler()
     }
 }

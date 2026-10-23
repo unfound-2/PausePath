@@ -7,6 +7,8 @@ struct WalkingNavigationView: View {
     @State private var weatherGuidance = WeatherGuidanceStore()
     @State private var camera: MapCameraPosition = .automatic
     @State private var acknowledged = false
+    @State private var savedRoute = false
+    @State private var saveMessage = ""
     @State private var activityKind = "Walking"
     @State private var recordingOwner = PausePathAccount.shared.userID
     @State private var takingBreak = false
@@ -73,6 +75,11 @@ struct WalkingNavigationView: View {
                         Text("Directions and time estimates use walking pace. Your recorded time reflects your actual activity.").font(.caption).foregroundStyle(.secondary)
 
                         Text("\(plan.distance / 1000, specifier: "%.1f") km • about \(Int(plan.duration / 60)) min").font(.title2.bold())
+                        Button(savedRoute ? "Saved in Profile → Saved routes" : "Save this route", systemImage: savedRoute ? "heart.fill" : "heart") {
+                            if var record = SavedRouteStore.saveWalk(plan) { record.isFavorite = true; SavedRouteStore.update(record); savedRoute = true }
+                            else { saveMessage = "Your route library is full. Remove a saved route in Profile and try again." }
+                        }.disabled(savedRoute).buttonStyle(.bordered)
+                        if !saveMessage.isEmpty { Text(saveMessage).font(.caption).foregroundStyle(.secondary) }
                         RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: plan.distance, durationSeconds: plan.duration))
                         Text(plan.requirements).font(.subheadline)
                         RestGapStatusCard(assessment: plan.restAssessment, limit: plan.preferences.maximumRestGapMeters)

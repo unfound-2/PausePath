@@ -282,3 +282,40 @@ class GoalCreate(GoalDetails):
 
 class GoalArchive(StrictModel):
     archived: StrictBool
+
+class SharedRouteStop(StrictModel):
+    id: Optional[UUID] = None
+    name: str = Field(min_length=1,max_length=200)
+    category: Category
+    location: Point
+
+class SharedRouteSnapshot(StrictModel):
+    title: str = Field(min_length=1,max_length=120)
+    geometry: LineString
+    stops: List[SharedRouteStop] = Field(default_factory=list,max_length=12)
+    waypoints: List[Point] = Field(default_factory=list,max_length=24)
+    distance_meters: float = Field(gt=0,le=100000)
+    estimated_seconds: float = Field(gt=0,le=172800)
+    @field_validator('geometry')
+    @classmethod
+    def compact_route(cls, value):
+        if len(value.coordinates)>2000: raise ValueError('Share at most 2,000 route points')
+        return value
+
+class GroupWalkRequest(StrictModel):
+    title: str = Field(min_length=2,max_length=80)
+    meeting_point: str = Field(min_length=1,max_length=160)
+    route_description: str = Field(min_length=1,max_length=500)
+    starts_at: datetime
+    request_id: UUID
+    route_snapshot: Optional[SharedRouteSnapshot] = None
+    meeting_location: Optional[Point] = None
+    @field_validator('title','meeting_point','route_description', mode='before')
+    @classmethod
+    def trim_text(cls, value):
+        return value.strip() if isinstance(value,str) else value
+    @field_validator('starts_at')
+    @classmethod
+    def aware_start(cls,value):
+        if value.tzinfo is None: raise ValueError('Include a timezone')
+        return value

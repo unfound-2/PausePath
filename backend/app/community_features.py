@@ -3,7 +3,10 @@ import hashlib
 from datetime import datetime, timezone
 from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException
-from .models import GoalDetails, GoalArchive
+from .models import GoalDetails, GoalArchive, SharedRouteSnapshot, Point, GroupWalkRequest
+from pydantic import ValidationError
+from psycopg.types.json import Jsonb
+from .social import notify_group
 from .auth import identity
 from .db import transaction
 
@@ -100,18 +103,23 @@ def delete_task(group: UUID, challenge: UUID, user=Depends(identity)):
 def walks(group: UUID, user=Depends(identity)):
     with transaction() as conn:
         owner=member(conn,group,user)
-        rows=conn.execute("""SELECT w.*, (w.created_by=%s OR %s) AS can_manage,
+        rows=conn.execute("""SELECT w.id,w.title,w.meeting_point,w.route_description,w.starts_at,w.cancelled,w.route_snapshot,w.meeting_location, (w.created_by=%s OR %s) AS can_manage,
         (SELECT count(*) FROM community_walk_rsvps r WHERE r.walk_id=w.id) AS attendees,
         EXISTS(SELECT 1 FROM community_walk_rsvps r WHERE r.walk_id=w.id AND r.user_id=%s) AS attending
         FROM community_walks w WHERE community_id=%s AND starts_at > now()-interval '1 day' ORDER BY starts_at LIMIT 100""",(user['sub'],owner,user['sub'],group)).fetchall()
     return {'walks':rows}
 
 @router.post('/{group}/walks')
-def create_walk(group: UUID, body: dict=Body(...), user=Depends(identity)):
+def create_walk(group: UUID, body: GroupWalkRequest, user=Depends(identity)):
+    body=body.model_dump(mode='json')
     from .main import rate_limit
     rate_limit(user,"group-walk",12)
     title=text_field(body,'title',80,2); meeting=text_field(body,'meeting_point',160)
     route=text_field(body,'route_description',500); key=request_id(body)
+    try:
+        snapshot=SharedRouteSnapshot.model_validate(body['route_snapshot']).model_dump(mode='json') if body.get('route_snapshot') is not None else None
+        location=Point.model_validate(body['meeting_location']).model_dump(mode='json') if body.get('meeting_location') is not None else None
+    except (ValidationError,TypeError): raise HTTPException(422,'Choose a valid route and meeting point')
     try:
         start=datetime.fromisoformat(body.get('starts_at','').replace('Z','+00:00'))
         if start.tzinfo is None: raise ValueError()
@@ -121,10 +129,11 @@ def create_walk(group: UUID, body: dict=Body(...), user=Depends(identity)):
         conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',(user['sub']+str(key),))
         old=conn.execute('SELECT * FROM community_walks WHERE created_by=%s AND request_id=%s',(user['sub'],key)).fetchone()
         if old:
-            if old['community_id'] != group or old['title'] != title or old['meeting_point'] != meeting or old['route_description'] != route or old['starts_at'] != start: raise HTTPException(409,'This request changed. Review your entries and submit again.')
+            if old['community_id'] != group or old['title'] != title or old['meeting_point'] != meeting or old['route_description'] != route or old['starts_at'] != start or old.get('route_snapshot') != snapshot or old.get('meeting_location') != location: raise HTTPException(409,'This request changed. Review your entries and submit again.')
             return old
         if start <= datetime.now(timezone.utc): raise HTTPException(422,'Choose a future start time')
-        row=conn.execute('INSERT INTO community_walks(community_id,created_by,request_id,title,meeting_point,route_description,starts_at) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING *',(group,user['sub'],key,title,meeting,route,start)).fetchone()
+        row=conn.execute('INSERT INTO community_walks(community_id,created_by,request_id,title,meeting_point,route_description,starts_at,route_snapshot,meeting_location) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *',(group,user['sub'],key,title,meeting,route,start,Jsonb(snapshot) if snapshot else None,Jsonb(location) if location else None)).fetchone()
+        notify_group(conn,group,user['sub'],'walks','A new group walk is planned.',row['id'])
     return row
 
 @router.post('/{group}/walks/{walk}/rsvp')
@@ -144,7 +153,8 @@ def cancel_walk(group: UUID, walk: UUID, user=Depends(identity)):
         row=conn.execute('SELECT created_by FROM community_walks WHERE id=%s AND community_id=%s',(walk,group)).fetchone()
         if not row: raise HTTPException(404,'Walk not found')
         if not owner and row['created_by'] != user['sub']: raise HTTPException(403,'Only the organizer or owner can cancel')
-        conn.execute('UPDATE community_walks SET cancelled=true WHERE id=%s',(walk,))
+        changed=conn.execute('UPDATE community_walks SET cancelled=true WHERE id=%s AND NOT cancelled RETURNING id',(walk,)).fetchone()
+        if changed: notify_group(conn,group,user['sub'],'walks','A group walk was cancelled.',walk)
     return {'saved':True}
 
 @router.get('/{group}/posts')
@@ -213,11 +223,14 @@ def edit_goal(group: UUID, challenge: UUID, body: GoalDetails, user=Depends(iden
                 raise HTTPException(409, 'A goal with shared progress must keep its measure and group mode. Create a new goal instead.')
         conn.execute('UPDATE walking_challenges SET name=%s,metric=%s,target=%s,shared_goal=%s WHERE id=%s',
                      (body.name,body.metric,body.target,body.shared_goal,challenge))
+        notify_group(conn,group,user['sub'],'goals','A community goal was updated.')
     return {'saved':True}
 
 @router.post('/{group}/challenges/{challenge}/archive')
 def archive_goal(group: UUID, challenge: UUID, body: GoalArchive, user=Depends(identity)):
     with transaction() as conn:
-        managed_goal(conn,group,challenge,user)
+        previous=managed_goal(conn,group,challenge,user)
+        if (previous['archived_at'] is not None) == body.archived: return {'saved':True,'archived':body.archived}
         conn.execute('UPDATE walking_challenges SET archived_at=CASE WHEN %s THEN coalesce(archived_at,now()) ELSE NULL END WHERE id=%s',(body.archived,challenge))
+        notify_group(conn,group,user['sub'],'goals','A community goal was archived.' if body.archived else 'A community goal was restored.')
     return {'saved':True,'archived':body.archived}

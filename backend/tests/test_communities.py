@@ -26,7 +26,7 @@ def client(monkeypatch):
 
 @pytest.fixture
 def database(monkeypatch):
-    url = os.environ.get("TEST_DATABASE_URL")
+    url = os.environ.get("TEST_DATABASE_URL") or os.environ.get("SOCIAL_TEST_DATABASE_URL")
     if not url:
         pytest.skip("Requires isolated PostgreSQL; available in GitHub Actions")
     with psycopg.connect(url, row_factory=dict_row) as conn:
@@ -34,8 +34,12 @@ def database(monkeypatch):
         schema = "community_test_" + uuid4().hex
         conn.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
         conn.execute(sql.SQL("SET LOCAL search_path TO {}, public").format(sql.Identifier(schema)))
-        for migration in sorted((Path(__file__).resolve().parents[1] / "migrations").glob("*.sql")):
-            conn.execute(migration.read_text(encoding="utf-8"))
+        if os.environ.get("TEST_DATABASE_URL"):
+            for migration in sorted((Path(__file__).resolve().parents[1] / "migrations").glob("*.sql")):
+                conn.execute(migration.read_text(encoding="utf-8"))
+        else:
+            from database_fixtures import create_community_schema
+            create_community_schema(conn)
 
         @contextmanager
         def transaction():

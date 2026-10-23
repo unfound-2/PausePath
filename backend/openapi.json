@@ -447,9 +447,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/GroupWalkRequest"
               }
             }
           }
@@ -932,6 +930,642 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/GoalArchive"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/social/profile": {
+      "get": {
+        "tags": [
+          "social"
+        ],
+        "summary": "Get Profile",
+        "operationId": "get_profile_api_v1_social_profile_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "social"
+        ],
+        "summary": "Save Profile",
+        "operationId": "save_profile_api_v1_social_profile_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/social/notification-preferences": {
+      "post": {
+        "tags": [
+          "social"
+        ],
+        "summary": "Notification Preferences",
+        "operationId": "notification_preferences_api_v1_social_notification_preferences_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPreferences"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/social/search": {
+      "get": {
+        "tags": [
+          "social"
+        ],
+        "summary": "Search",
+        "operationId": "search_api_v1_social_search_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 24,
+              "pattern": "^[a-z0-9_]+$",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeopleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/social/friends": {
+      "get": {
+        "tags": [
+          "social"
+        ],
+        "summary": "Friends",
+        "operationId": "friends_api_v1_social_friends_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FriendsResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "social"
+        ],
+        "summary": "Request Friend",
+        "operationId": "request_friend_api_v1_social_friends_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Target"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/social/friends/{friendship}": {
+      "post": {
+        "tags": [
+          "social"
+        ],
+        "summary": "Act Friend",
+        "operationId": "act_friend_api_v1_social_friends__friendship__post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "friendship",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Friendship"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FriendshipAction"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/social/blocks": {
+      "get": {
+        "tags": [
+          "social"
+        ],
+        "summary": "Blocks",
+        "operationId": "blocks_api_v1_social_blocks_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeopleResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "social"
+        ],
+        "summary": "Block",
+        "operationId": "block_api_v1_social_blocks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Target"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/social/blocks/{person}/remove": {
+      "post": {
+        "tags": [
+          "social"
+        ],
+        "summary": "Unblock",
+        "operationId": "unblock_api_v1_social_blocks__person__remove_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "person",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Person"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/social/inbox": {
+      "get": {
+        "tags": [
+          "social"
+        ],
+        "summary": "Inbox",
+        "operationId": "inbox_api_v1_social_inbox_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/social/inbox/read": {
+      "post": {
+        "tags": [
+          "social"
+        ],
+        "summary": "Read Inbox",
+        "operationId": "read_inbox_api_v1_social_inbox_read_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationRead"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/social/reminders": {
+      "get": {
+        "tags": [
+          "social"
+        ],
+        "summary": "Reminders",
+        "operationId": "reminders_api_v1_social_reminders_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemindersResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/social/invitations": {
+      "get": {
+        "tags": [
+          "social"
+        ],
+        "summary": "Invitations",
+        "operationId": "invitations_api_v1_social_invitations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationsResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/social/invitations/{invitation}": {
+      "post": {
+        "tags": [
+          "social"
+        ],
+        "summary": "Invitation Action",
+        "operationId": "invitation_action_api_v1_social_invitations__invitation__post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "invitation",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Invitation"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitationAction"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/social/walks/{walk}/invite": {
+      "post": {
+        "tags": [
+          "social"
+        ],
+        "summary": "Invite Friend",
+        "operationId": "invite_friend_api_v1_social_walks__walk__invite_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "walk",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Walk"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Target"
               }
             }
           }
@@ -2738,6 +3372,83 @@
         ],
         "title": "ExistingReport"
       },
+      "FriendRow": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "accepted"
+            ],
+            "title": "Status"
+          },
+          "incoming": {
+            "type": "boolean",
+            "title": "Incoming"
+          },
+          "person_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Person Id"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "incoming",
+          "person_id",
+          "username"
+        ],
+        "title": "FriendRow"
+      },
+      "FriendsResponse": {
+        "properties": {
+          "friends": {
+            "items": {
+              "$ref": "#/components/schemas/FriendRow"
+            },
+            "type": "array",
+            "title": "Friends"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "friends"
+        ],
+        "title": "FriendsResponse"
+      },
+      "FriendshipAction": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "decline",
+              "cancel",
+              "remove"
+            ],
+            "title": "Action"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "FriendshipAction"
+      },
       "GoalArchive": {
         "properties": {
           "archived": {
@@ -2842,6 +3553,68 @@
         ],
         "title": "GoalDetails"
       },
+      "GroupWalkRequest": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 2,
+            "title": "Title"
+          },
+          "meeting_point": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Meeting Point"
+          },
+          "route_description": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Route Description"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Starts At"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Request Id"
+          },
+          "route_snapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SharedRouteSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meeting_location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Point"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "meeting_point",
+          "route_description",
+          "starts_at",
+          "request_id"
+        ],
+        "title": "GroupWalkRequest"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2854,6 +3627,98 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "InboxItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "invites",
+              "walks",
+              "goals"
+            ],
+            "title": "Category"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "community_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Community Id"
+          },
+          "walk_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Walk Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "category",
+          "message",
+          "community_id",
+          "walk_id",
+          "created_at",
+          "read_at"
+        ],
+        "title": "InboxItem"
+      },
+      "InboxResponse": {
+        "properties": {
+          "notifications": {
+            "items": {
+              "$ref": "#/components/schemas/InboxItem"
+            },
+            "type": "array",
+            "title": "Notifications"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "notifications"
+        ],
+        "title": "InboxResponse"
       },
       "IngestRequest": {
         "properties": {
@@ -2891,6 +3756,37 @@
           "east"
         ],
         "title": "IngestRequest"
+      },
+      "InvitationAction": {
+        "properties": {
+          "accept": {
+            "type": "boolean",
+            "title": "Accept"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "accept"
+        ],
+        "title": "InvitationAction"
+      },
+      "InvitationsResponse": {
+        "properties": {
+          "invitations": {
+            "items": {
+              "$ref": "#/components/schemas/WalkInvitation"
+            },
+            "type": "array",
+            "title": "Invitations"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "invitations"
+        ],
+        "title": "InvitationsResponse"
       },
       "LineString": {
         "properties": {
@@ -3090,6 +3986,50 @@
         ],
         "title": "MapboxSuggest"
       },
+      "NotificationPreferences": {
+        "properties": {
+          "notify_invites": {
+            "type": "boolean",
+            "title": "Notify Invites"
+          },
+          "notify_walks": {
+            "type": "boolean",
+            "title": "Notify Walks"
+          },
+          "notify_goals": {
+            "type": "boolean",
+            "title": "Notify Goals"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "notify_invites",
+          "notify_walks",
+          "notify_goals"
+        ],
+        "title": "NotificationPreferences"
+      },
+      "NotificationRead": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "title": "NotificationRead"
+      },
       "POIReview": {
         "properties": {
           "is_active": {
@@ -3200,6 +4140,23 @@
         ],
         "title": "POISummary"
       },
+      "PeopleResponse": {
+        "properties": {
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/PublicPerson"
+            },
+            "type": "array",
+            "title": "People"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "people"
+        ],
+        "title": "PeopleResponse"
+      },
       "Point": {
         "properties": {
           "type": {
@@ -3283,6 +4240,142 @@
         "type": "object",
         "title": "Preferences"
       },
+      "ProfileResponse": {
+        "properties": {
+          "profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profile"
+        ],
+        "title": "ProfileResponse"
+      },
+      "ProfileSettings": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]{3,24}$",
+            "title": "Username"
+          },
+          "discoverable": {
+            "type": "boolean",
+            "title": "Discoverable",
+            "default": false
+          },
+          "allow_requests": {
+            "type": "boolean",
+            "title": "Allow Requests",
+            "default": true
+          },
+          "allow_walk_invites": {
+            "type": "boolean",
+            "title": "Allow Walk Invites",
+            "default": true
+          },
+          "notify_invites": {
+            "type": "boolean",
+            "title": "Notify Invites",
+            "default": true
+          },
+          "notify_walks": {
+            "type": "boolean",
+            "title": "Notify Walks",
+            "default": true
+          },
+          "notify_goals": {
+            "type": "boolean",
+            "title": "Notify Goals",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "username"
+        ],
+        "title": "ProfileSettings"
+      },
+      "PublicPerson": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "username"
+        ],
+        "title": "PublicPerson"
+      },
+      "PublicProfile": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]{3,24}$",
+            "title": "Username"
+          },
+          "discoverable": {
+            "type": "boolean",
+            "title": "Discoverable",
+            "default": false
+          },
+          "allow_requests": {
+            "type": "boolean",
+            "title": "Allow Requests",
+            "default": true
+          },
+          "allow_walk_invites": {
+            "type": "boolean",
+            "title": "Allow Walk Invites",
+            "default": true
+          },
+          "notify_invites": {
+            "type": "boolean",
+            "title": "Notify Invites",
+            "default": true
+          },
+          "notify_walks": {
+            "type": "boolean",
+            "title": "Notify Walks",
+            "default": true
+          },
+          "notify_goals": {
+            "type": "boolean",
+            "title": "Notify Goals",
+            "default": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "username",
+          "id"
+        ],
+        "title": "PublicProfile"
+      },
       "QueueEdit": {
         "properties": {
           "poi_id": {
@@ -3337,6 +4430,23 @@
           "changeset_id"
         ],
         "title": "QueueReceipt"
+      },
+      "RemindersResponse": {
+        "properties": {
+          "walks": {
+            "items": {
+              "$ref": "#/components/schemas/WalkReminder"
+            },
+            "type": "array",
+            "title": "Walks"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "walks"
+        ],
+        "title": "RemindersResponse"
       },
       "ReportReceipt": {
         "properties": {
@@ -3498,6 +4608,99 @@
         ],
         "title": "RouteProperties"
       },
+      "SharedRouteSnapshot": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "geometry": {
+            "$ref": "#/components/schemas/LineString"
+          },
+          "stops": {
+            "items": {
+              "$ref": "#/components/schemas/SharedRouteStop"
+            },
+            "type": "array",
+            "maxItems": 12,
+            "title": "Stops"
+          },
+          "waypoints": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "type": "array",
+            "maxItems": 24,
+            "title": "Waypoints"
+          },
+          "distance_meters": {
+            "type": "number",
+            "maximum": 100000.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Distance Meters"
+          },
+          "estimated_seconds": {
+            "type": "number",
+            "maximum": 172800.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Estimated Seconds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "geometry",
+          "distance_meters",
+          "estimated_seconds"
+        ],
+        "title": "SharedRouteSnapshot"
+      },
+      "SharedRouteStop": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "bench",
+              "toilet",
+              "drinking_water",
+              "cafe"
+            ],
+            "title": "Category"
+          },
+          "location": {
+            "$ref": "#/components/schemas/Point"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "category",
+          "location"
+        ],
+        "title": "SharedRouteStop"
+      },
       "Suggestion": {
         "properties": {
           "kind": {
@@ -3549,6 +4752,21 @@
         ],
         "title": "Suggestion"
       },
+      "Target": {
+        "properties": {
+          "person_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Person Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "person_id"
+        ],
+        "title": "Target"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -3581,6 +4799,74 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WalkInvitation": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "walk_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Walk Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Starts At"
+          },
+          "community_name": {
+            "type": "string",
+            "title": "Community Name"
+          },
+          "sender": {
+            "type": "string",
+            "title": "Sender"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "walk_id",
+          "title",
+          "starts_at",
+          "community_name",
+          "sender"
+        ],
+        "title": "WalkInvitation"
+      },
+      "WalkReminder": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Starts At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "starts_at"
+        ],
+        "title": "WalkReminder"
       }
     },
     "securitySchemes": {

@@ -50,14 +50,29 @@ struct ContentView: View {
     @AppStorage("pausepath.personalProfile") private var profileData = Data()
     @AppStorage("pausepath.pendingCommunityInvite") private var pendingCommunityInvite = ""
     private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
+    @State private var social = SocialActivityStore.shared
+    @State private var account = PausePathAccount.shared
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("pausepath.pendingInbox") private var pendingInbox = false
     let health: HealthActivityStore
     var body: some View {
         TabView(selection: $selectedTab) {
             DiscoverView(preferences: preferences, profile: profile).tabItem { Label("Explore", systemImage: "map.fill") }.tag(0)
             CommunityChallengesView(preferences: preferences).tabItem { Label("Community", systemImage: "person.3.fill") }.tag(1)
             MyPathView(preferences: preferences, health: health).tabItem { Label("My Path", systemImage: "chart.bar.fill") }.tag(2)
-            ProfileSettingsView(preferences: $preferences, health: health).tabItem { Label("Profile", systemImage: "person.crop.circle") }.tag(3)
+            ProfileSettingsView(preferences: $preferences, health: health).tabItem { Label("Profile", systemImage: "person.crop.circle") }.badge(social.unread).tag(3)
         }.tint(PausePathPalette.teal)
+        .task(id: account.userID) {
+            guard account.isSignedIn else { social.reset(); return }
+            while !Task.isCancelled {
+                if scenePhase == .active { await social.refresh() }
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+            }
+        }
+        .onChange(of: account.userID) { _, _ in social.reset() }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await social.refresh() } } }
+        .onReceive(NotificationCenter.default.publisher(for: .pausePathShowInbox)) { _ in pendingInbox = true }
+        .sheet(isPresented: $pendingInbox) { NavigationStack { SocialInboxView().toolbar { Button("Done") { pendingInbox = false } } } }
         .toolbarBackground(PausePathPalette.background, for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
         .onAppear {
@@ -170,9 +185,26 @@ struct ProfileSettingsView: View {
                             row("Location", detail: "Manage access in iOS Settings", icon: "location")
                         }
                     }
+                    section("People & notifications") {
+                        NavigationLink { FriendsSettingsView() } label: {
+                            row("Friends", detail: "Find people · Requests · Privacy", icon: "person.2")
+                        }
+                        Divider().padding(.leading, 60)
+                        NavigationLink { SocialInboxView() } label: {
+                            row("Community inbox", detail: "Invitations, walk and goal updates", icon: "tray")
+                        }
+                        Divider().padding(.leading, 60)
+                        NavigationLink { NotificationSettingsView() } label: {
+                            row("Notifications", detail: "Inbox preferences & walk reminders", icon: "bell")
+                        }
+                    }
                     section("Saved areas & navigation") {
+                        NavigationLink { SavedRoutesSettingsView(preferences: preferences) } label: {
+                            row("Saved routes", detail: "Favorites, collections & repeat walks", icon: "heart")
+                        }
+                        Divider().padding(.leading, 60)
                         NavigationLink { SavedAreasSettingsView() } label: {
-                            row("Saved map areas", detail: "On this device · up to 5 MB", icon: "square.and.arrow.down")
+                            row("Downloaded areas", detail: "On this device · up to 5 MB", icon: "square.and.arrow.down")
                         }
                     }
                     section("Account & privacy") {

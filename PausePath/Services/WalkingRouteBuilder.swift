@@ -77,6 +77,10 @@ struct SavedRouteRecord: Codable, Identifiable {
     let difficulty: String
     let savedAt: Date
 
+    var isFavorite: Bool? = nil
+    var collection: String? = nil
+    var stops: [SavedRouteStop]? = nil
+
     fileprivate var identity: String {
         let start = String(format: "%.4f,%.4f", origin.latitude, origin.longitude)
         let end = String(format: "%.4f,%.4f", destination.latitude, destination.longitude)
@@ -92,6 +96,21 @@ enum SavedRouteStore {
         return (try? JSONDecoder().decode([SavedRouteRecord].self, from: data)) ?? []
     }
 
+    static func update(_ record: SavedRouteRecord) {
+        var values = load(); values.removeAll { $0.id == record.id }; values.insert(record, at: 0)
+        persist(values)
+    }
+    static func delete(_ id: UUID) { persist(load().filter { $0.id != id }) }
+    private static func persist(_ values: [SavedRouteRecord]) {
+        if let data = try? JSONEncoder().encode(values) { UserDefaults.standard.set(data, forKey: storageKey) }
+    }
+    static func saveWalk(_ walk: GeneratedWalk) -> SavedRouteRecord? {
+        guard let start = walk.paths.first?.first, let end = walk.paths.last?.last else { return nil }
+        let option = WalkingRouteOption(id: walk.id, title: walk.name, destinationName: walk.name, stops: walk.stops, legs: walk.legs)
+        save([option], origin: start.mapCoordinate, destination: end.mapCoordinate)
+        return load().first { $0.legCoordinates == walk.paths }
+    }
+
     static func save(_ options: [WalkingRouteOption], origin: CLLocationCoordinate2D, destination: CLLocationCoordinate2D) {
         var records = load()
         let start = Coordinate(origin.latitude, origin.longitude)
@@ -104,11 +123,11 @@ enum SavedRouteStore {
                 RouteDifficultyInput(distanceMeters: option.distance, durationSeconds: option.duration),
                 preferences: difficultyPreferences
             ).label
-            let record = SavedRouteRecord(
+            var record = SavedRouteRecord(
                 id: option.id,
                 title: option.title,
                 destinationName: option.destinationName,
-                stopNames: option.stops.map { $0.item.name ?? $0.kind.rawValue },
+                stopNames: option.stops.map { $0.provider == "Mapbox" ? "Café (refresh required)" : ($0.item.name ?? $0.kind.rawValue) },
                 stopKinds: option.stops.map(\.kind),
                 origin: start,
                 destination: end,
@@ -118,10 +137,21 @@ enum SavedRouteStore {
                 difficulty: rating,
                 savedAt: Date()
             )
+            record.stops = option.stops.enumerated().map { index, place in
+                let waypoint = option.legs.indices.contains(index) ? option.legs[index].polyline.walkingCoordinates.last : nil
+                return SavedRouteStop(place, routeWaypoint: waypoint)
+            }
+            if let previous = records.first(where: { $0.identity == record.identity }) {
+                record = SavedRouteRecord(id: previous.id, title: record.title, destinationName: record.destinationName,
+                    stopNames: record.stopNames, stopKinds: record.stopKinds, origin: record.origin, destination: record.destination,
+                    legCoordinates: record.legCoordinates, distanceMeters: record.distanceMeters, estimatedSeconds: record.estimatedSeconds,
+                    difficulty: record.difficulty, savedAt: record.savedAt, isFavorite: previous.isFavorite, collection: previous.collection, stops: record.stops)
+            }
             records.removeAll { $0.identity == record.identity }
             records.insert(record, at: 0)
         }
-        records = Array(records.prefix(100))
+        let favorites = records.filter { $0.isFavorite == true }
+        records = favorites + records.filter { $0.isFavorite != true }.prefix(max(0, 100 - favorites.count))
         if let data = try? JSONEncoder().encode(records) {
             UserDefaults.standard.set(data, forKey: storageKey)
         }
