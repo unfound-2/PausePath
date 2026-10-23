@@ -150,7 +150,15 @@ def list_communities(user=Depends(identity)):
         rows=conn.execute('''SELECT c.id,c.name,c.invite_code,c.created_at,m.display_name AS my_display_name, (c.created_by=m.user_id) AS is_owner,
             (SELECT count(*) FROM walking_community_members m2 WHERE m2.community_id=c.id) AS member_count,
             (SELECT coalesce(jsonb_agg(m3.display_name ORDER BY lower(m3.display_name)),'[]'::jsonb)
-                FROM walking_community_members m3 WHERE m3.community_id=c.id) AS members
+                FROM walking_community_members m3 WHERE m3.community_id=c.id) AS members,
+            true AS summary_available,
+            (SELECT count(*) FROM walking_challenges g WHERE g.community_id=c.id AND g.archived_at IS NULL
+                AND g.target > CASE WHEN g.shared_goal THEN
+                    (SELECT coalesce(sum(p.amount),0) FROM walking_challenge_progress p WHERE p.challenge_id=g.id)
+                ELSE (SELECT coalesce(max(p.amount),0) FROM walking_challenge_progress p WHERE p.challenge_id=g.id AND p.user_id=m.user_id) END) AS active_goal_count,
+            (SELECT jsonb_build_object('id',w.id,'title',w.title,'starts_at',w.starts_at)
+                FROM community_walks w WHERE w.community_id=c.id AND NOT w.cancelled AND w.starts_at > now()
+                ORDER BY w.starts_at,w.id LIMIT 1) AS next_walk
             FROM walking_community_members m JOIN walking_communities c ON c.id=m.community_id
             WHERE m.user_id=%s ORDER BY c.created_at DESC''',(user['sub'],)).fetchall()
     return {'communities':rows}

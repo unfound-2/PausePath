@@ -113,27 +113,17 @@ struct CommunityChallengesView: View {
     @State private var communitySearch = ""
     @State private var lastCommunityRefresh: Date?
     @State private var refreshAgain = false
-    @State private var challenges: [UUID: [WalkingCommunityChallenge]] = [:]
     @State private var showCommunityComposer = false
     @State private var communityComposerStartsWithJoin = false
     @AppStorage("pausepath.pendingCommunityInvite") private var pendingInviteCode = ""
     @State private var message = ""
+    @State private var membershipConfirmation: String?
     @State private var communityLoadMessage: String?
-    @State private var challengeLoadMessages: [UUID: String] = [:]
     @State private var communityRevision = UUID()
     @State private var busy = false
     @AppStorage("pausepath.trackedWalks") private var trackedWalkData = Data()
     @AppStorage("pausepath.shareChallengeProgress") private var shareProgress = false
     @AppStorage("pausepath.personalProfile") private var profileData = Data()
-    @AppStorage("pausepath.weeklyChallengeDeck") private var weeklyChallengeData = Data()
-    @AppStorage("pausepath.weeklyChallengeWeek") private var challengeWeekKey = ""
-    @AppStorage("pausepath.weeklyChallengeRefreshes") private var weeklyRefreshesUsed = 0
-    @AppStorage("pausepath.weeklyChallengeRefreshWeek") private var refreshWeekKey = ""
-    @AppStorage("pausepath.monthlyChallengePoints") private var monthlyPoints = 0
-    @AppStorage("pausepath.challengePointsMonth") private var pointsMonthKey = ""
-    @State private var weeklyChallenges: [WeeklyPersonalChallenge] = []
-    @State private var showWeeklyChallenges = false
-    @AppStorage("pausepath.weeklyChallengeRewards") private var rewardLedgerData = Data()
     @Environment(\.scenePhase) private var scenePhase
     private var walks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedWalkData)) ?? [] }
     private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
@@ -174,6 +164,15 @@ struct CommunityChallengesView: View {
                     }.frame(maxWidth: .infinity).padding(.vertical, 16)
                     }
                 }.listRowBackground(PausePathPalette.teal.opacity(0.05))
+                if let membershipConfirmation {
+                    Section {
+                        HStack {
+                            Label(membershipConfirmation, systemImage: "checkmark.circle.fill").foregroundStyle(PausePathPalette.teal)
+                            Spacer()
+                            Button { self.membershipConfirmation = nil } label: { Image(systemName: "xmark").frame(minWidth: 44, minHeight: 44) }.accessibilityLabel("Dismiss confirmation")
+                        }
+                    }
+                }
                 Section("Your communities") {
                     if communities.count > 1 {
                         TextField("Find your community", text: $communitySearch).autocorrectionDisabled()
@@ -199,18 +198,35 @@ struct CommunityChallengesView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(filteredCommunities) { community in
-                            NavigationLink {
-                                CommunityHubView(community: community)
-                            } label: {
-                                HStack(spacing: 14) {
-                                    TrailEmblem(seed: community.id.uuidString)
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        Text(community.name).font(.headline)
-                                        Text("\(community.member_count) members · \(challenges[community.id]?.count ?? 0) goals")
-                                            .font(.caption).foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 12) {
+                                NavigationLink { CommunityHubView(community: community) } label: {
+                                    HStack(spacing: 12) {
+                                        TrailEmblem(seed: community.id.uuidString)
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(community.name).font(.headline)
+                                            Text("\(community.member_count) members").font(.caption).foregroundStyle(.secondary)
+                                        }
+                                        Spacer(); Image(systemName: "chevron.right").font(.caption)
                                     }
-                                }.padding(.vertical, 8)
-                            }
+                                }.buttonStyle(.plain)
+                                if let walk = community.next_walk {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Label(walk.title, systemImage: "calendar").font(.subheadline.weight(.medium))
+                                        Text(CommunityHubView.dateLabel(walk.starts_at)).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                } else {
+                                    Text(community.summary_available == true ? "No upcoming walks" : "Open Walks to see upcoming plans")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                HStack(spacing: 12) {
+                                    NavigationLink { CommunityHubView(community: community, initialSection: "Walks") } label: {
+                                        Label("Walks", systemImage: "figure.walk").frame(minHeight: 44)
+                                    }
+                                    NavigationLink { CommunityHubView(community: community, initialSection: "Goals") } label: {
+                                        Label(community.active_goal_count.map { "Goals · \($0) active" } ?? "Goals", systemImage: "flag").frame(minHeight: 44)
+                                    }
+                                }.font(.subheadline.weight(.semibold)).buttonStyle(.bordered)
+                            }.padding(.vertical, 10)
                         }
                         DisclosureGroup("Progress sharing") {
                             Toggle("Share my goal totals", isOn: $shareProgress)
@@ -220,7 +236,188 @@ struct CommunityChallengesView: View {
 
                     }
                 }
-                Section {
+                if !message.isEmpty { Section { Text(message).font(.callout); Button("Retry community connection") { Task { await refresh() } }.disabled(busy) } }
+            }
+            .pausePathSurface()
+        .navigationTitle("Community")
+            .task { if UserDefaults.standard.string(forKey: "pausepath.shareProgressOwner") != account.userID { shareProgress = false }; if !pendingInviteCode.isEmpty { showCommunityComposer = true }; await refresh() }
+            .refreshable { await refresh() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await refresh() } }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .pausePathWalkRecorded)) { _ in
+                Task { await refresh() }
+            }
+            .onChange(of: account.userID) { _, userID in
+                communityRevision = UUID(); communities = []
+                communityLoadMessage = nil; message = ""; membershipConfirmation = nil; communitySearch = ""; lastCommunityRefresh = nil
+                if userID != nil {
+                    if UserDefaults.standard.string(forKey: "pausepath.shareProgressOwner") != userID { shareProgress = false }
+                    Task { await refresh() }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .pausePathJoinCommunity)) { notification in
+                pendingInviteCode = notification.userInfo?["code"] as? String ?? ""
+                showCommunityComposer = true
+            }
+            .onChange(of: pendingInviteCode) { _, code in if !code.isEmpty { showCommunityComposer = true } }
+            .onChange(of: shareProgress) { _, enabled in
+                if !enabled, let owner = account.userID { UserDefaults.standard.set(true, forKey: "pausepath.pendingProgressRemoval." + owner) }
+                if enabled { UserDefaults.standard.set(account.userID, forKey: "pausepath.shareProgressOwner") }
+                Task { await refresh() }
+            }
+            .sheet(isPresented: $showCommunityComposer, onDismiss: {
+                pendingInviteCode = ""
+                Task { await refresh() }
+            }) {
+                CommunityJoinSheet(account: account, onCreate: createCommunity, onJoin: joinCommunity, initialUsername: profile.username ?? "", initialInviteCode: pendingInviteCode, startsWithJoin: communityComposerStartsWithJoin)
+            }
+
+        }
+    }
+
+    private var filteredCommunities: [WalkingCommunity] {
+        let query = communitySearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty ? communities : communities.filter { $0.name.localizedCaseInsensitiveContains(query) }
+    }
+    private var communityOverview: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            AdventureHeader(eyebrow: "THE PATH IS BETTER TOGETHER", title: "Find your trail crew.", subtitle: "Familiar faces. New places. Your next outing starts here.")
+            Text("\(communities.count) \(communities.count == 1 ? "community" : "communities")")
+                .font(.subheadline).foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack { communityActions }
+                VStack(alignment: .leading) { communityActions }
+            }
+            if !communitySearch.isEmpty && filteredCommunities.isEmpty {
+                Text("No groups match that name.").font(.caption).foregroundStyle(.secondary)
+                Button("Clear search") { communitySearch = "" }.font(.caption)
+            }
+        }.padding(.vertical, 10)
+    }
+    @ViewBuilder private var communityActions: some View {
+        Button { communityComposerStartsWithJoin = false; showCommunityComposer = true } label: {
+            Label("Create", systemImage: "plus.circle.fill").frame(minHeight: 44)
+        }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
+        Button { communityComposerStartsWithJoin = true; showCommunityComposer = true } label: {
+            Label("Join with a code", systemImage: "person.badge.plus").frame(minHeight: 44)
+        }.buttonStyle(.bordered)
+    }
+    @MainActor private func refresh() async {
+        guard account.isSignedIn else { return }
+        if busy { refreshAgain = true; return }
+        let revision = UUID(); communityRevision = revision; busy = true
+        defer {
+            busy = false
+            if refreshAgain { refreshAgain = false; Task { await refresh() } }
+        }
+        let loaded: [WalkingCommunity]
+        do {
+            loaded = try await PausePathAPI.communities()
+            guard communityRevision == revision, account.isSignedIn else { return }
+            communities = loaded
+            communityLoadMessage = nil; message = ""; lastCommunityRefresh = .now
+        } catch {
+            guard communityRevision == revision else { return }
+            communityLoadMessage = communityErrorMessage(error)
+            return
+        }
+        guard !loaded.isEmpty, let progressOwner = account.userID else { return }
+        let removalKey = "pausepath.pendingProgressRemoval." + progressOwner
+        guard shareProgress || UserDefaults.standard.object(forKey: removalKey) as? Bool != false else { return }
+        // Only list calls run together. Mutations below remain ordered and optional.
+        var loadedTasks: [UUID: [WalkingCommunityChallenge]] = [:]
+        await withTaskGroup(of: (UUID, Result<[WalkingCommunityChallenge], Error>).self) { group in
+            var remaining = loaded.dropFirst(4).makeIterator()
+            for community in loaded.prefix(4) {
+                group.addTask {
+                    do { return (community.id, .success(try await PausePathAPI.challenges(in: community.id))) }
+                    catch { return (community.id, .failure(error)) }
+                }
+            }
+            for await (id, result) in group {
+                guard communityRevision == revision, account.isSignedIn else { group.cancelAll(); return }
+                switch result {
+                case .success(let list): loadedTasks[id] = list
+                case .failure: break
+                }
+                if let community = remaining.next() {
+                    group.addTask {
+                        do { return (community.id, .success(try await PausePathAPI.challenges(in: community.id))) }
+                        catch { return (community.id, .failure(error)) }
+                    }
+                }
+            }
+        }
+        guard communityRevision == revision else { return }
+        if loadedTasks.count < loaded.count {
+            message = shareProgress ? "Some goal totals could not refresh. Pull down to retry." : "Removing shared totals is not finished. Pull down to retry."
+        }
+        do {
+            let changed: Set<UUID>
+            if shareProgress { changed = try await PausePathAPI.syncChallengeProgress(walks: walks, groups: loaded, tasks: loadedTasks) }
+            else { changed = try await PausePathAPI.clearChallengeProgress(groups: loaded, tasks: loadedTasks) }
+            if !shareProgress && loadedTasks.count == loaded.count { UserDefaults.standard.set(false, forKey: removalKey) }
+            if !changed.isEmpty {
+                let summaries = try await PausePathAPI.communities()
+                guard communityRevision == revision else { return }; communities = summaries
+            }
+        } catch {
+            guard communityRevision == revision else { return }
+            message = shareProgress ? "Your groups and goals are loaded. Progress syncing will retry on refresh." : "Removing shared totals hasn’t finished. Pull down to retry."
+        }
+    }
+    private func saveCommunityUsername(_ username: String) {
+        var updated = profile; updated.username = username
+        profileData = (try? JSONEncoder().encode(updated)) ?? profileData
+    }
+    private func createCommunity(name: String, username: String, requestID: UUID) async throws -> WalkingCommunity {
+        let community = try await PausePathAPI.createCommunity(name: name, username: username, requestID: requestID)
+        communityRevision = UUID()
+        communityLoadMessage = nil
+        saveCommunityUsername(username)
+        communities.removeAll { $0.id == community.id }
+        communities.insert(community, at: 0)
+        communitySearch = ""; lastCommunityRefresh = .now
+        message = ""
+        membershipConfirmation = "\(community.name) is ready"
+        return community
+    }
+    private func joinCommunity(code: String, username: String, requestID: UUID) async throws -> WalkingCommunity {
+        let community = try await PausePathAPI.joinCommunity(code: code, username: username, requestID: requestID)
+        communityRevision = UUID()
+        communityLoadMessage = nil
+        saveCommunityUsername(username)
+        communities.removeAll { $0.id == community.id }
+        communities.insert(community, at: 0)
+        communitySearch = ""; lastCommunityRefresh = .now
+        message = ""
+        membershipConfirmation = "You joined \(community.name)"
+        return community
+    }
+
+}
+
+
+struct WeeklySuggestionsView: View {
+    let preferences: RoutePreferences
+    @AppStorage("pausepath.weeklyChallengeDeck") private var weeklyChallengeData = Data()
+    @AppStorage("pausepath.weeklyChallengeWeek") private var challengeWeekKey = ""
+    @AppStorage("pausepath.weeklyChallengeRefreshes") private var weeklyRefreshesUsed = 0
+    @AppStorage("pausepath.weeklyChallengeRefreshWeek") private var refreshWeekKey = ""
+    @AppStorage("pausepath.monthlyChallengePoints") private var monthlyPoints = 0
+    @AppStorage("pausepath.challengePointsMonth") private var pointsMonthKey = ""
+    @State private var weeklyChallenges: [WeeklyPersonalChallenge] = []
+    @State private var showWeeklyChallenges = false
+    @AppStorage("pausepath.weeklyChallengeRewards") private var rewardLedgerData = Data()
+    @AppStorage("pausepath.trackedWalks") private var trackedWalkData = Data()
+    @AppStorage("pausepath.personalProfile") private var profileData = Data()
+    @Environment(\.scenePhase) private var scenePhase
+    private var walks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedWalkData)) ?? [] }
+    private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
+    var body: some View {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Small steps this week", systemImage: "sparkles").font(.headline)
                     DisclosureGroup("Weekly suggestions", isExpanded: $showWeeklyChallenges) {
                     ForEach(weeklyChallenges) { challenge in
                         let progress = weeklyProgress(for: challenge)
@@ -254,48 +451,14 @@ struct CommunityChallengesView: View {
                     }
                     if weeklyChallenges.isEmpty { Text("No weekly suggestions. Use Refresh to choose new ones.").font(.caption).foregroundStyle(.secondary) }
                     }
-                } header: { Label("Small steps this week", systemImage: "sparkles") }
-                if !message.isEmpty { Section { Text(message).font(.callout); Button("Retry community connection") { Task { await refresh() } }.disabled(busy) } }
-            }
-            .pausePathSurface()
-        .navigationTitle("Community")
-            .task { if UserDefaults.standard.string(forKey: "pausepath.shareProgressOwner") != account.userID { shareProgress = false }; loadWeeklyChallenges(); if !pendingInviteCode.isEmpty { showCommunityComposer = true }; await refresh() }
-            .refreshable { loadWeeklyChallenges(); await refresh() }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active { loadWeeklyChallenges(); Task { await refresh() } }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .pausePathWalkRecorded)) { _ in
-                updateWeeklyProgress(); Task { await refresh() }
-            }
-            .onChange(of: account.userID) { _, userID in
-                communityRevision = UUID(); communities = []; challenges = [:]; challengeLoadMessages = [:]
-                communityLoadMessage = nil; message = ""; communitySearch = ""; lastCommunityRefresh = nil
-                if userID != nil {
-                    if UserDefaults.standard.string(forKey: "pausepath.shareProgressOwner") != userID { shareProgress = false }
-                    Task { await refresh() }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .pausePathJoinCommunity)) { notification in
-                pendingInviteCode = notification.userInfo?["code"] as? String ?? ""
-                showCommunityComposer = true
-            }
-            .onChange(of: pendingInviteCode) { _, code in if !code.isEmpty { showCommunityComposer = true } }
+                }.padding(16).background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 22))
+            .onAppear { loadWeeklyChallenges() }
+            .onChange(of: scenePhase) { _, phase in if phase == .active { loadWeeklyChallenges() } }
+            .onChange(of: trackedWalkData) { _, _ in loadWeeklyChallenges() }
             .onChange(of: preferences) { _, _ in personalizeUnstartedChallenges() }
             .onChange(of: profileData) { _, _ in personalizeUnstartedChallenges() }
-            .onChange(of: shareProgress) { _, enabled in
-                if enabled { UserDefaults.standard.set(account.userID, forKey: "pausepath.shareProgressOwner") }
-                Task { await refresh() }
-            }
-            .sheet(isPresented: $showCommunityComposer, onDismiss: {
-                pendingInviteCode = ""
-                Task { await refresh() }
-            }) {
-                CommunityJoinSheet(account: account, onCreate: createCommunity, onJoin: joinCommunity, initialUsername: profile.username ?? "", initialInviteCode: pendingInviteCode, startsWithJoin: communityComposerStartsWithJoin)
-            }
-
-        }
+            .onReceive(NotificationCenter.default.publisher(for: .pausePathWalkRecorded)) { _ in loadWeeklyChallenges() }
     }
-
     private var currentWeekKey: String {
         let parts = Calendar.current.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date())
         return "\(parts.yearForWeekOfYear ?? 0)-\(parts.weekOfYear ?? 0)"
@@ -385,122 +548,7 @@ struct CommunityChallengesView: View {
     private func unit(_ metric: String) -> String {
         switch metric { case "distance_km": "km"; case "minutes": "minutes"; case "new_routes": "routes"; default: "walks" }
     }
-    private var filteredCommunities: [WalkingCommunity] {
-        let query = communitySearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        return query.isEmpty ? communities : communities.filter { $0.name.localizedCaseInsensitiveContains(query) }
-    }
-    private var communityOverview: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            AdventureHeader(eyebrow: "THE PATH IS BETTER TOGETHER", title: "Find your trail crew.", subtitle: "Familiar faces. New places. Your next outing starts here.")
-            Text("\(communities.count) \(communities.count == 1 ? "community" : "communities") · \(challenges.values.flatMap { $0 }.count) shared goals")
-                .font(.subheadline).foregroundStyle(.secondary)
-            ViewThatFits(in: .horizontal) {
-                HStack { communityActions }
-                VStack(alignment: .leading) { communityActions }
-            }
-            if !communitySearch.isEmpty && filteredCommunities.isEmpty {
-                Text("No groups match that name.").font(.caption).foregroundStyle(.secondary)
-                Button("Clear search") { communitySearch = "" }.font(.caption)
-            }
-        }.padding(.vertical, 10)
-    }
-    @ViewBuilder private var communityActions: some View {
-        Button { communityComposerStartsWithJoin = false; showCommunityComposer = true } label: {
-            Label("Create", systemImage: "plus.circle.fill").frame(minHeight: 44)
-        }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
-        Button { communityComposerStartsWithJoin = true; showCommunityComposer = true } label: {
-            Label("Join with a code", systemImage: "person.badge.plus").frame(minHeight: 44)
-        }.buttonStyle(.bordered)
-    }
-    @MainActor private func refresh() async {
-        guard account.isSignedIn else { return }
-        if busy { refreshAgain = true; return }
-        let revision = UUID(); communityRevision = revision; busy = true
-        defer {
-            busy = false
-            if refreshAgain { refreshAgain = false; Task { await refresh() } }
-        }
-        let loaded: [WalkingCommunity]
-        do {
-            loaded = try await PausePathAPI.communities()
-            guard communityRevision == revision, account.isSignedIn else { return }
-            communities = loaded
-            let ids = Set(loaded.map(\.id))
-            challenges = challenges.filter { ids.contains($0.key) }
-            challengeLoadMessages = challengeLoadMessages.filter { ids.contains($0.key) }
-            communityLoadMessage = nil; message = ""; lastCommunityRefresh = .now
-        } catch {
-            guard communityRevision == revision else { return }
-            communityLoadMessage = communityErrorMessage(error)
-            return
-        }
-        guard !loaded.isEmpty else { return }
-        // Only list calls run together. Mutations below remain ordered and optional.
-        var loadedTasks: [UUID: [WalkingCommunityChallenge]] = [:]
-        await withTaskGroup(of: (UUID, Result<[WalkingCommunityChallenge], Error>).self) { group in
-            var remaining = loaded.dropFirst(4).makeIterator()
-            for community in loaded.prefix(4) {
-                group.addTask {
-                    do { return (community.id, .success(try await PausePathAPI.challenges(in: community.id))) }
-                    catch { return (community.id, .failure(error)) }
-                }
-            }
-            for await (id, result) in group {
-                guard communityRevision == revision, account.isSignedIn else { group.cancelAll(); return }
-                switch result {
-                case .success(let list): loadedTasks[id] = list; challenges[id] = list; challengeLoadMessages[id] = nil
-                case .failure: challengeLoadMessages[id] = "Shared goals could not refresh. Pull down to retry; your group and invite code remain available."
-                }
-                if let community = remaining.next() {
-                    group.addTask {
-                        do { return (community.id, .success(try await PausePathAPI.challenges(in: community.id))) }
-                        catch { return (community.id, .failure(error)) }
-                    }
-                }
-            }
-        }
-        guard communityRevision == revision else { return }
-        do {
-            let changed: Set<UUID>
-            if shareProgress { changed = try await PausePathAPI.syncChallengeProgress(walks: walks, groups: loaded, tasks: loadedTasks) }
-            else { changed = try await PausePathAPI.clearChallengeProgress(groups: loaded, tasks: loadedTasks) }
-            for id in changed {
-                let list = try await PausePathAPI.challenges(in: id)
-                guard communityRevision == revision else { return }; challenges[id] = list
-            }
-        } catch {
-            guard communityRevision == revision else { return }
-            message = shareProgress ? "Your groups and goals are loaded. Progress syncing will retry on refresh." : "Removing shared totals hasn’t finished. Pull down to retry."
-        }
-    }
-    private func saveCommunityUsername(_ username: String) {
-        var updated = profile; updated.username = username
-        profileData = (try? JSONEncoder().encode(updated)) ?? profileData
-    }
-    private func createCommunity(name: String, username: String, requestID: UUID) async throws -> WalkingCommunity {
-        let community = try await PausePathAPI.createCommunity(name: name, username: username, requestID: requestID)
-        communityRevision = UUID()
-        communityLoadMessage = nil
-        saveCommunityUsername(username)
-        communities.removeAll { $0.id == community.id }
-        communities.insert(community, at: 0)
-        communitySearch = ""; lastCommunityRefresh = .now
-        message = ""
-        return community
-    }
-    private func joinCommunity(code: String, username: String, requestID: UUID) async throws -> WalkingCommunity {
-        let community = try await PausePathAPI.joinCommunity(code: code, username: username, requestID: requestID)
-        communityRevision = UUID()
-        communityLoadMessage = nil
-        saveCommunityUsername(username)
-        communities.removeAll { $0.id == community.id }
-        communities.insert(community, at: 0)
-        communitySearch = ""; lastCommunityRefresh = .now
-        message = ""
-        return community
-    }
-
-}
+ }
 
 private struct SegmentedChallengeProgress: View {
     let value: Double
@@ -972,13 +1020,20 @@ private struct CommunityPost: Decodable, Identifiable {
     let can_delete: Bool
 }
 private struct CommunityMember: Decodable, Identifiable {
-    let user_id: String
+    let user_id: String?
+    let member_id: String?
     let display_name: String
-    var id: String { user_id }
+    let is_owner: Bool?
+    let is_self: Bool?
+    var id: String { member_id ?? user_id ?? display_name }
 }
 private struct CommunityWalkList: Decodable { let walks: [CommunityWalkPlan] }
 private struct CommunityPostList: Decodable { let posts: [CommunityPost] }
-private struct CommunityMemberList: Decodable { let members: [CommunityMember] }
+private struct CommunityMemberList: Decodable {
+    let members: [CommunityMember]
+    let viewer_is_owner: Bool?
+    let community_name: String?
+}
 private struct CommunityPendingAction: Identifiable {
     let id = UUID()
     let title: String
@@ -995,9 +1050,12 @@ private struct CommunityHubView: View {
     @State private var composingPost = false
     @State private var showGoalComposer = false
     @State private var editingGoal: WalkingCommunityChallenge?
-    @State private var showArchivedGoals = false
+    @State private var goalFilter = CommunityGoalState.active
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var lastSectionRefresh: [String: Date] = [:]
     @State private var displayName = ""
-    @State private var loadedSections = Set<String>()
+    @State private var viewerIsOwner: Bool?
+    private var isOwner: Bool { viewerIsOwner ?? (community.is_owner == true) }
     @State private var loadingSections = Set<String>()
     private var loading: Bool { loadingSections.contains(hubSection) }
     @State private var plans: [CommunityWalkPlan] = []
@@ -1011,21 +1069,26 @@ private struct CommunityHubView: View {
     @State private var postRequest = UUID()
     @State private var showWalkComposer = false
     @State private var pending: CommunityPendingAction?
+    init(community: WalkingCommunity, initialSection: String = "Walks") {
+        self.community = community
+        _hubSection = State(initialValue: initialSection)
+    }
     private var base: String { "api/v1/communities/" + community.id.uuidString }
     var body: some View {
         Form {
             if hubSection == "Walks" { walkSection }
             else if hubSection == "Goals" { taskSection }
             else if hubSection == "Posts" { feedSection }
+            else if hubSection == "Members" { memberSection }
             else { managementSection }
             if !message.isEmpty { Section { Text(message); Button("Retry") { Task { await load(force: true) } }.disabled(loading || busy) } }
             if loading { ProgressView("Refreshing your community…") }
         }.id(hubSection).pausePathSurface().navigationTitle(displayName.isEmpty ? community.name : displayName).navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .top, spacing: 0) {
-                PathSectionPicker(titles: ["Walks", "Goals", "Posts", "Settings"], selection: $hubSection)
+                PathSectionPicker(titles: ["Walks", "Goals", "Posts", "Members", "Settings"], selection: $hubSection)
             }
             .toolbar { ToolbarItem(placement: .topBarTrailing) {
-                Button { showingInvite = true } label: { Image(systemName: "person.badge.plus") }
+                Button("Invite", systemImage: "person.badge.plus") { showingInvite = true }
                     .accessibilityLabel("Invite someone")
             } }
             .sheet(isPresented: $showingInvite) {
@@ -1038,6 +1101,9 @@ private struct CommunityHubView: View {
             .disabled(busy || loading)
             .task { displayName = community.name; newName = community.name }
             .task(id: hubSection) { await load() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await load(force: true) } }
+            }
             .onChange(of: PausePathAccount.shared.userID) { _, _ in
                 plans = []; posts = []; members = []; tasks = []; postText = ""; dismiss()
             }
@@ -1132,29 +1198,32 @@ private struct CommunityHubView: View {
     private var taskSection: some View {
         Section("Goals") {
             Button("Add a goal", systemImage: "plus.circle.fill") { showGoalComposer = true }
-            if tasks.contains(where: { $0.archived_at != nil }) { Toggle("Show archived goals", isOn: $showArchivedGoals) }
-            ForEach(tasks.filter { showArchivedGoals || $0.archived_at == nil }) { goal in
+            Picker("Goals", selection: $goalFilter) {
+                ForEach(CommunityGoalState.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }.pickerStyle(.menu)
+            ForEach(tasks.filter { goalState($0) == goalFilter }) { goal in
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .top) {
                         Text(goal.name).font(.headline)
                         Spacer()
                         if goal.can_delete == true {
+                            if goal.archived_at == nil {
+                                Button("Edit") { editingGoal = goal }.font(.subheadline.weight(.semibold)).frame(minHeight: 44).buttonStyle(.borderless)
+                            }
                             Menu {
-                                if goal.archived_at == nil {
-                                    Button("Edit goal", systemImage: "pencil") { editingGoal = goal }
-                                }
                                 Button(goal.archived_at == nil ? "Archive goal" : "Restore goal", systemImage: "archivebox") {
                                     Task { await perform("challenges/\(goal.id)/archive", body: ["archived": goal.archived_at == nil]) }
                                 }
                             } label: { Image(systemName: "ellipsis.circle").frame(minWidth: 44, minHeight: 44) }
-                                .accessibilityLabel("Edit or archive \(goal.name)")
+                                .accessibilityLabel("Archive or restore \(goal.name)")
                             Button(role: .destructive) {
                                 pending = CommunityPendingAction(title: "Delete this goal and its progress?", path: "challenges/\(goal.id)/delete")
                             } label: { Image(systemName: "trash").frame(minWidth: 44, minHeight: 44) }
                                 .buttonStyle(.borderless).accessibilityLabel("Delete \(goal.name)")
                         }
                     }
-                    if goal.archived_at != nil { Label("Archived", systemImage: "archivebox").font(.caption).foregroundStyle(.secondary) }
+                    if goalState(goal) == .archived { Label("Archived", systemImage: "archivebox").font(.caption).foregroundStyle(.secondary) }
+                    else if goalState(goal) == .completed { Label("Completed", systemImage: "checkmark.circle.fill").font(.caption.weight(.semibold)).foregroundStyle(PausePathPalette.teal) }
                     let progress = goal.shared_goal == true ? (goal.group_progress ?? 0) : (goal.my_progress ?? 0)
                     ProgressView(value: min(progress, goal.target), total: goal.target).tint(PausePathPalette.teal)
                     Text("\(progress, specifier: "%.1f") / \(goal.target, specifier: "%.0f") \(goal.metric == "distance_km" ? "km" : goal.metric.replacingOccurrences(of: "_", with: " "))")
@@ -1168,19 +1237,38 @@ private struct CommunityHubView: View {
                     }
                 }.padding(.vertical, 6)
             }
-            if tasks.isEmpty && !loading { Text("No goals yet.").foregroundStyle(.secondary) }
+            if !loading && tasks.filter({ goalState($0) == goalFilter }).isEmpty { Text("No \(goalFilter.rawValue.lowercased()) goals.").foregroundStyle(.secondary) }
+        }
+    }
+    private func goalState(_ goal: WalkingCommunityChallenge) -> CommunityGoalState {
+        let progress = goal.shared_goal == true ? (goal.group_progress ?? 0) : (goal.my_progress ?? 0)
+        return .classify(archived: goal.archived_at != nil, progress: progress, target: goal.target)
+    }
+    private var memberSection: some View {
+        Section("Members") {
+            ForEach(members) { member in
+                HStack(spacing: 12) {
+                    Image(systemName: "person.crop.circle.fill").font(.title2).foregroundStyle(PausePathPalette.teal)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(member.display_name).font(.headline)
+                        if member.is_owner == true { Label("Owner", systemImage: "crown.fill").font(.caption).foregroundStyle(PausePathPalette.teal) }
+                        if member.is_self == true { Text("You").font(.caption).foregroundStyle(.secondary) }
+                    }
+                }.padding(.vertical, 6)
+            }
+            if members.isEmpty && !loading { Text("Members could not be loaded. Pull down to retry.").foregroundStyle(.secondary) }
         }
     }
     private var managementSection: some View {
         Section("Community settings") {
-            if community.is_owner == true {
+            if isOwner {
                 TextField("Community name", text: $newName)
                 Button("Save name") { Task { await perform("rename", body: ["name": newName]) } }
                     .disabled(!(2...60).contains(newName.trimmingCharacters(in: .whitespacesAndNewlines).count))
-                ForEach(members.filter { $0.user_id != PausePathAccount.shared.userID }) { member in
+                ForEach(members.filter { $0.is_self != true && $0.user_id != nil }) { member in
                     Menu(member.display_name) {
-                        Button("Transfer ownership") { pending = CommunityPendingAction(title: "Make \(member.display_name) the owner?", path: "transfer", body: ["user_id": member.id], closes: true) }
-                        Button("Remove member", role: .destructive) { pending = CommunityPendingAction(title: "Remove \(member.display_name)?", path: "members/remove", body: ["user_id": member.id]) }
+                        Button("Transfer ownership") { pending = CommunityPendingAction(title: "Make \(member.display_name) the owner?", path: "transfer", body: ["user_id": member.user_id ?? ""], closes: true) }
+                        Button("Remove member", role: .destructive) { pending = CommunityPendingAction(title: "Remove \(member.display_name)?", path: "members/remove", body: ["user_id": member.user_id ?? ""]) }
                     }
                 }
                 Text("Transfer ownership to a member before leaving, or delete the group.").font(.caption).foregroundStyle(.secondary)
@@ -1190,13 +1278,26 @@ private struct CommunityHubView: View {
             }
         }
     }
+    @MainActor private func refreshDirectory(owner: String) async throws {
+        let directory = try JSONDecoder().decode(CommunityMemberList.self, from: await PausePathAPI.request(base + "/members", requiresAccount: true))
+        try Task.checkCancellation()
+        guard PausePathAccount.shared.userID == owner else { throw CancellationError() }
+        members = directory.members
+        viewerIsOwner = directory.viewer_is_owner
+        if let title = directory.community_name {
+            if newName == displayName || displayName.isEmpty { newName = title }
+            displayName = title
+        }
+    }
     @MainActor private func load(force: Bool = false) async {
         let section = hubSection
-        guard !loadingSections.contains(section), force || !loadedSections.contains(section), let owner = PausePathAccount.shared.userID else { return }
+        guard !loadingSections.contains(section), force || CommunityFreshness.shouldRefresh(lastLoaded: lastSectionRefresh[section]), let owner = PausePathAccount.shared.userID else { return }
         loadingSections.insert(section)
         defer { loadingSections.remove(section) }
         message = ""
         do {
+            if force && section != "Members" && section != "Settings" { try? await refreshDirectory(owner: owner) }
+            try Task.checkCancellation()
             switch section {
             case "Walks":
                 let value = try JSONDecoder().decode(CommunityWalkList.self, from: await PausePathAPI.request(base + "/walks", requiresAccount: true)).walks
@@ -1210,15 +1311,12 @@ private struct CommunityHubView: View {
                 let value = try await PausePathAPI.challenges(in: community.id)
                 try Task.checkCancellation()
                 guard PausePathAccount.shared.userID == owner else { return }; tasks = value
-            default:
-                if community.is_owner == true {
-                    let value = try JSONDecoder().decode(CommunityMemberList.self, from: await PausePathAPI.request(base + "/members", requiresAccount: true)).members
-                    try Task.checkCancellation()
-                guard PausePathAccount.shared.userID == owner else { return }; members = value
-                }
+            case "Members", "Settings":
+                try await refreshDirectory(owner: owner)
+            default: break
             }
             try Task.checkCancellation()
-            loadedSections.insert(section)
+            lastSectionRefresh[section] = .now
         } catch {
             if !Task.isCancelled, PausePathAccount.shared.userID == owner { message = "\(section) could not refresh. Pull down to retry." }
         }

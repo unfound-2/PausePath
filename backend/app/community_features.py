@@ -1,4 +1,5 @@
 """Member-only group plans and opt-in posts. No recorded journeys are published."""
+import hashlib
 from datetime import datetime, timezone
 from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -50,9 +51,15 @@ def remove_member(conn,group,target):
 @router.get('/{group}/members')
 def members(group: UUID, user=Depends(identity)):
     with transaction() as conn:
-        member(conn,group,user,True)
-        rows=conn.execute('SELECT user_id,display_name FROM walking_community_members WHERE community_id=%s ORDER BY display_name',(group,)).fetchall()
-    return {'members':rows}
+        owner=member(conn,group,user)
+        rows=conn.execute('SELECT m.user_id,m.display_name,c.name AS community_name,(m.user_id=c.created_by) AS is_owner FROM walking_community_members m JOIN walking_communities c ON c.id=m.community_id WHERE m.community_id=%s ORDER BY is_owner DESC,lower(m.display_name),m.user_id',(group,)).fetchall()
+    community_name=rows[0]['community_name'] if rows else None
+    for row in rows:
+        row.pop('community_name')
+        row['member_id']=hashlib.sha256((str(group)+':'+row['user_id']).encode()).hexdigest()
+        row['is_self']=row['user_id']==user['sub']
+        if not owner: row.pop('user_id')
+    return {'members':rows,'viewer_is_owner':owner,'community_name':community_name}
 
 @router.post('/{group}/members/remove')
 def remove(group: UUID, body: dict=Body(...), user=Depends(identity)):

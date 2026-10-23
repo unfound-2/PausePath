@@ -422,6 +422,11 @@ struct CuratedResponse: Decodable {
         let total_distance_with_detours_meters: Double
     }
 }
+struct CommunityNextWalk: Codable, Sendable {
+    let id: UUID
+    let title: String
+    let starts_at: String
+}
 struct WalkingCommunity: Codable, Identifiable, Sendable {
     let id: UUID
     let name: String
@@ -431,6 +436,9 @@ struct WalkingCommunity: Codable, Identifiable, Sendable {
     let member_count: Int
     let my_display_name: String
     let members: [String]?
+    let active_goal_count: Int?
+    let next_walk: CommunityNextWalk?
+    let summary_available: Bool?
 }
 struct WalkingChallengeMember: Decodable, Identifiable, Sendable {
     var id: String { name }

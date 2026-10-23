@@ -55,7 +55,7 @@ struct ContentView: View {
         TabView(selection: $selectedTab) {
             DiscoverView(preferences: preferences, profile: profile).tabItem { Label("Explore", systemImage: "map.fill") }.tag(0)
             CommunityChallengesView(preferences: preferences).tabItem { Label("Community", systemImage: "person.3.fill") }.tag(1)
-            MyPathView(health: health).tabItem { Label("My Path", systemImage: "chart.bar.fill") }.tag(2)
+            MyPathView(preferences: preferences, health: health).tabItem { Label("My Path", systemImage: "chart.bar.fill") }.tag(2)
             ProfileSettingsView(preferences: $preferences, health: health).tabItem { Label("Profile", systemImage: "person.crop.circle") }.tag(3)
         }.tint(PausePathPalette.teal)
         .toolbarBackground(PausePathPalette.background, for: .tabBar)
@@ -420,6 +420,7 @@ private struct PathActivity: Identifiable {
 }
 
 struct MyPathView: View {
+    let preferences: RoutePreferences
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let health: HealthActivityStore
     @AppStorage("pausepath.trackedWalks") private var trackedData = Data()
@@ -458,7 +459,9 @@ struct MyPathView: View {
     }
     var body: some View {
         NavigationStack {
-            ScrollView {
+            VStack(spacing: 0) {
+                PathSectionPicker(titles: ["Overview", "History", "Insights"], selection: $pathSection)
+                ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     sectionIntro
                     sourceControls
@@ -481,6 +484,7 @@ struct MyPathView: View {
                         else {
                             Button("Set a weekly goal", systemImage: "plus.circle") { goalEnabled = true }.pathCard()
                         }
+                        WeeklySuggestionsView(preferences: preferences)
                         weeklyRecap
                         Button { pathSection = "History" } label: {
                             Label("See your full history", systemImage: "arrow.right").frame(maxWidth: .infinity, minHeight: 44)
@@ -498,15 +502,18 @@ struct MyPathView: View {
                         healthConnection
                     }
                 }.padding(20).frame(maxWidth: 680).frame(maxWidth: .infinity)
-            }.id(pathSection).pausePathSurface().navigationTitle("My Path")
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    PathSectionPicker(titles: ["Overview", "History", "Insights"], selection: $pathSection)
-                }
-                .task { await health.refreshIfConnected() }
-                .onChange(of: pathScenePhase) { _, phase in if phase == .active { Task { await health.refreshIfConnected() } } }
+                }.id(pathSection)
                 .refreshable {
                     if source == "Apple Health", health.hasConnected { await health.connect() }
                 }
+            }
+                .pausePathSurface()
+                .navigationTitle("My Path")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(PausePathPalette.background, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
+                .task { await health.refreshIfConnected() }
+                .onChange(of: pathScenePhase) { _, phase in if phase == .active { Task { await health.refreshIfConnected() } } }
                 .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .commaSeparatedText, defaultFilename: "PausePath-history") { result in
                     if case .failure = result { exportMessage = "Export could not be saved. Try again." }
                 }
@@ -1152,7 +1159,7 @@ struct PathSectionPicker: View {
                 .padding(.horizontal, 16).padding(.vertical, 8)
         }
         }
-        }.background(.regularMaterial)
+        }.background(PausePathPalette.background)
     }
 }
 

@@ -52,3 +52,19 @@ final class GoalSubmissionTests: XCTestCase {
         XCTAssertNotEqual(draft.requestID, second)
     }
 }
+
+final class CommunityPresentationTests: XCTestCase {
+    func testGoalStateSeparatesCompletedAndArchived() {
+        XCTAssertEqual(CommunityGoalState.classify(archived: false, progress: 2, target: 3), .active)
+        XCTAssertEqual(CommunityGoalState.classify(archived: false, progress: 3, target: 3), .completed)
+        XCTAssertEqual(CommunityGoalState.classify(archived: false, progress: 4, target: 3), .completed)
+        XCTAssertEqual(CommunityGoalState.classify(archived: true, progress: 4, target: 3), .archived)
+    }
+    func testSectionFreshnessHasBoundedLifetime() {
+        let now = Date(timeIntervalSince1970: 1000)
+        XCTAssertTrue(CommunityFreshness.shouldRefresh(lastLoaded: nil, now: now))
+        XCTAssertFalse(CommunityFreshness.shouldRefresh(lastLoaded: now.addingTimeInterval(-59), now: now))
+        XCTAssertTrue(CommunityFreshness.shouldRefresh(lastLoaded: now.addingTimeInterval(-60), now: now))
+        XCTAssertTrue(CommunityFreshness.shouldRefresh(lastLoaded: now.addingTimeInterval(10), now: now))
+    }
+}

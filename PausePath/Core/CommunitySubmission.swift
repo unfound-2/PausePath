@@ -55,3 +55,19 @@ public struct GoalSubmissionDraft: Codable, Equatable, Sendable {
         self.ownerID = ownerID; self.scope = scope; self.name = clean; self.metric = metric; self.target = target; self.shared = shared
     }
 }
+
+public enum CommunityGoalState: String, CaseIterable, Sendable {
+    case active = "Active", completed = "Completed", archived = "Archived"
+    public static func classify(archived: Bool, progress: Double, target: Double) -> Self {
+        if archived { return .archived }
+        return progress >= target ? .completed : .active
+    }
+}
+
+public enum CommunityFreshness {
+    public static func shouldRefresh(lastLoaded: Date?, now: Date = Date(), lifetime: TimeInterval = 60) -> Bool {
+        guard let lastLoaded else { return true }
+        let age = now.timeIntervalSince(lastLoaded)
+        return age < 0 || age >= lifetime
+    }
+}

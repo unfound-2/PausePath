@@ -176,7 +176,7 @@ def test_owner_transfer_and_removal(client,database):
     g=group(client); base=f"/api/v1/communities/{g['id']}"
     main.app.dependency_overrides[main.identity]=lambda:{'sub':'friend'}
     client.post('/api/v1/communities/join',json={'invite_code':g['invite_code'],'display_name':'Friend'})
-    assert client.get(base+'/members').status_code==403
+    assert client.get(base+'/members').status_code==200
     main.app.dependency_overrides[main.identity]=lambda:{'sub':'creator'}
     assert len(client.get(base+'/members').json()['members'])==2
     assert client.post(base+'/rename',json={'name':'Renamed paths'}).status_code==200
@@ -187,3 +187,66 @@ def test_owner_transfer_and_removal(client,database):
     assert len(client.get(base+'/members').json()['members'])==1
     main.app.dependency_overrides[main.identity]=lambda:{'sub':'creator'}
     assert client.get(base+'/walks').status_code==403
+
+
+def test_group_cards_summarize_next_walk_and_active_goals(client,database):
+    from datetime import datetime,timedelta,timezone
+    g=group(client); base=f"/api/v1/communities/{g['id']}"
+    def goal(name,shared=False):
+        response=client.post(base+'/challenges',json={'name':name,'metric':'walks','target':3,'shared_goal':shared,'request_id':str(uuid4())})
+        assert response.status_code==200,response.text
+        return response.json()['id']
+    personal=goal('Personal total'); shared=goal('Shared total',True); archived=goal('Archived goal'); goal('Still active')
+    client.post(f'/api/v1/challenges/{personal}/progress',json={'amount':3})
+    client.post(f'/api/v1/challenges/{shared}/progress',json={'amount':3})
+    client.post(base+f'/challenges/{archived}/archive',json={'archived':True})
+    now=datetime.now(timezone.utc)
+    def plan(title,hours):
+        result=client.post(base+'/walks',json={'title':title,'meeting_point':'Public test gate','route_description':'Test plan','starts_at':(now+timedelta(hours=hours)).isoformat(),'request_id':str(uuid4())})
+        assert result.status_code==200,result.text
+        return result.json()['id']
+    cancelled=plan('Cancelled first',1)
+    client.post(base+f'/walks/{cancelled}/cancel',json={})
+    next_id=plan('Next public walk',2); plan('Later walk',3)
+    summary=client.get('/api/v1/communities').json()['communities'][0]
+    assert summary['summary_available'] is True and summary['active_goal_count']==1
+    assert summary['next_walk']['id']==next_id and summary['next_walk']['title']=='Next public walk'
+    main.app.dependency_overrides[main.identity]=lambda:{'sub':'friend'}
+    assert client.get('/api/v1/communities').json()['communities']==[]
+    assert client.get(base+'/members').status_code==403
+    client.post('/api/v1/communities/join',json={'invite_code':g['invite_code'],'display_name':'Friend'})
+    summary=client.get('/api/v1/communities').json()['communities'][0]
+    assert summary['active_goal_count']==2
+    directory=client.get(base+'/members').json()
+    assert directory['viewer_is_owner'] is False and directory['community_name']==g['name']
+    assert len(directory['members'])==2
+    assert all('user_id' not in person for person in directory['members'])
+    assert directory['members'][0]['is_owner'] is True
+    assert sum(person['is_self'] for person in directory['members'])==1
+    assert len({person['member_id'] for person in directory['members']})==2
+    assert client.post(base+'/rename',json={'name':'Not owner'}).status_code==403
+
+
+@pytest.mark.parametrize('is_owner',[False,True])
+def test_member_directory_only_owners_receive_management_ids(client,monkeypatch,is_owner):
+    class Rows:
+        def fetchall(self):
+            return [
+                {'user_id':'creator','display_name':'QA owner','community_name':'QA circle','is_owner':True},
+                {'user_id':'friend','display_name':'QA member','community_name':'QA circle','is_owner':False},
+            ]
+    class DB:
+        def execute(self,*args): return Rows()
+    @contextmanager
+    def transaction(): yield DB()
+    monkeypatch.setattr(community_features,'transaction',transaction)
+    monkeypatch.setattr(community_features,'member',lambda *args:is_owner)
+    result=client.get(f'/api/v1/communities/{uuid4()}/members')
+    assert result.status_code==200,result.text
+    body=result.json()
+    assert body['community_name']=='QA circle' and body['viewer_is_owner'] is is_owner
+    assert [v['is_owner'] for v in body['members']]==[True,False]
+    assert [v['is_self'] for v in body['members']]==[True,False]
+    assert all(('user_id' in v) is is_owner for v in body['members'])
+    assert all(len(v['member_id'])==64 for v in body['members'])
+    assert all('community_name' not in v for v in body['members'])
