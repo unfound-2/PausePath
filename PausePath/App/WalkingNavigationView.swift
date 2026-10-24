@@ -16,10 +16,15 @@ struct WalkingNavigationView: View {
     @State private var showEndConfirmation = false
     @State private var showReturnConfirmation = false
     @State private var walkRecorded = false
+    @State private var checkInWalk: TrackedWalk?
+    @State private var checkInFeeling: Manageability?
+    @State private var checkInFacilities: Bool?
+    @State private var checkInNote = ""
     @AppStorage("pausepath.walk.background") private var backgroundWalks = true
     @AppStorage("pausepath.walk.liveActivity") private var liveActivities = true
     @State private var milestoneMessage: String?
     @AppStorage("pausepath.trackedWalks") private var trackedWalkData = Data()
+    @AppStorage("pausepath.walkFeedback") private var feedbackData = Data()
     @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherGuidanceEnabled = true
     @AppStorage("pausepath.weather.openMeteo.walkUpdates.enabled") private var weatherWalkUpdatesEnabled = true
     @Environment(\.dismiss) private var dismiss
@@ -187,7 +192,48 @@ struct WalkingNavigationView: View {
                 navigator.pause()
             }
         }
+        .sheet(item: $checkInWalk) { recorded in
+            NavigationStack {
+                Form {
+                    Section("How did this walk feel?") {
+                        ForEach(Manageability.allCases, id: \.self) { feeling in
+                            Button { checkInFeeling = feeling } label: {
+                                HStack { Text(feeling.rawValue); Spacer(); if checkInFeeling == feeling { Image(systemName: "checkmark") } }
+                            }
+                        }
+                    }
+                    Section("Were the planned facilities available?") {
+                        HStack {
+                            Button("Yes") { checkInFacilities = true }
+                            Button("No") { checkInFacilities = false }
+                            Button("Not sure") { checkInFacilities = nil }
+                        }
+                        Text(checkInFacilities.map { $0 ? "Available" : "Unavailable" } ?? "Unknown")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Section("Optional note") { TextField("Anything to remember?", text: $checkInNote, axis: .vertical).lineLimit(2...4) }
+                    Section { Text("Your check-in stays on this device. It can help order future routes, but it never changes your walking preferences automatically or judges medical readiness.")
+                        .font(.footnote).foregroundStyle(.secondary) }
+                }
+                .pausePathSurface().navigationTitle("Walk check-in")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Skip") { closeCheckIn() } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            if let feeling = checkInFeeling {
+                                var feedback = (try? JSONDecoder().decode([WalkFeedback].self, from: feedbackData)) ?? []
+                                feedback.insert(WalkFeedback(routeName: recorded.routeName, manageability: feeling,
+                                    facilitiesAvailable: checkInFacilities, note: checkInNote, activityID: recorded.id.uuidString), at: 0)
+                                feedbackData = (try? JSONEncoder().encode(feedback)) ?? feedbackData
+                            }
+                            closeCheckIn()
+                        }.disabled(checkInFeeling == nil)
+                    }
+                }
+            }
+        }
     }
+    private func closeCheckIn() { checkInWalk = nil; navigator.stop(); dismiss() }
     private var navigationStatus: some View {
         VStack(alignment: .leading, spacing: 10) {
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
@@ -257,7 +303,8 @@ struct WalkingNavigationView: View {
             }
         }
         Task { await DailyRecapNotifications.schedule() }
-        if !completed { navigator.stop(); dismiss() }
+        if !completed { navigator.stop() }
+        checkInWalk = activity
     }
 
     private func elapsedText(_ seconds: TimeInterval) -> String {

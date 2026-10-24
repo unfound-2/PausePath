@@ -57,7 +57,7 @@ struct ContentView: View {
     let health: HealthActivityStore
     var body: some View {
         TabView(selection: $selectedTab) {
-            DiscoverView(preferences: preferences, profile: profile).tabItem { Label("Explore", systemImage: "map.fill") }.tag(0)
+            DiscoverView(preferences: preferences, profile: profile, health: health).tabItem { Label("Explore", systemImage: "map.fill") }.tag(0)
             CommunityChallengesView(preferences: preferences).tabItem { Label("Community", systemImage: "person.3.fill") }.tag(1)
             MyPathView(preferences: preferences, health: health).tabItem { Label("My Path", systemImage: "chart.bar.fill") }.tag(2)
             ProfileSettingsView(preferences: $preferences, health: health).tabItem { Label("Profile", systemImage: "person.crop.circle") }.badge(social.unread).tag(3)
@@ -101,6 +101,7 @@ struct ProfileSettingsView: View {
     @AppStorage("pausepath.profilePhoto") private var photoData = Data()
     @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherEnabled = true
     @AppStorage("pausepath.weather.openMeteo.walkUpdates.enabled") private var weatherUpdates = true
+    @AppStorage("pausepath.demoMode") private var demoMode = false
     @State private var photo: PhotosPickerItem?
     @State private var photoError: String?
     @State private var account = PausePathAccount.shared
@@ -171,6 +172,15 @@ struct ProfileSettingsView: View {
                         NavigationLink { GoalPreferencesEditor(preferences: $preferences) } label: {
                             row("Your goals", detail: profile.goal.rawValue, icon: "scope")
                         }
+                    }
+                    section("Product demo") {
+                        Toggle(isOn: $demoMode) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Sample walking insights")
+                                Text("Use labeled synthetic activity for the Insights graph and route suggestions. Your own records stay separate.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }.padding(16)
                     }
                     section("Connected services") {
                         NavigationLink { healthSettings } label: {
@@ -273,7 +283,7 @@ struct ProfileSettingsView: View {
     private var healthSettings: some View {
         Form {
             Section { Text(health.status); Button(health.isLoading ? "Reading…" : "Connect / refresh Health") { Task { await health.connect() } }.disabled(health.isLoading) }
-            Section { Text("Health activity stays on this device and is shown separately from PausePath-tracked walks to avoid double counting."); Button("Clear session data", role: .destructive) { health.clear() } }
+            Section { Text("Health activity stays on this device. History stays source-specific; walking-minute insights combine likely duplicate workouts only once."); Button("Clear session data", role: .destructive) { health.clear() } }
         }.pausePathSurface().navigationTitle("Apple Health")
     }
     private var weatherSettings: some View {
@@ -456,6 +466,8 @@ struct MyPathView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let health: HealthActivityStore
     @AppStorage("pausepath.trackedWalks") private var trackedData = Data()
+    @AppStorage("pausepath.walkFeedback") private var feedbackData = Data()
+    @AppStorage("pausepath.demoMode") private var demoMode = false
     @State private var source = "PausePath"
     @State private var pathSection = "Overview"
     @State private var editingGoal = false
@@ -475,6 +487,14 @@ struct MyPathView: View {
     @State private var exporting = false
     @State private var exportMessage = ""
     private var walks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedData)) ?? [] }
+    private var walkingHistory: [WalkingHistoryEntry] {
+        if demoMode { return WalkingHistoryBuilder.sample() }
+        let feedback = (try? JSONDecoder().decode([WalkFeedback].self, from: feedbackData)) ?? []
+        let hidden = (try? JSONDecoder().decode(Set<String>.self, from: hiddenHealthData)) ?? []
+        let workouts = health.activities.filter { $0.kind == "Walking" && !hidden.contains($0.id) }
+            .map { HealthWalkingRecord(id: $0.id, start: $0.date, seconds: $0.seconds, distanceMeters: $0.meters) }
+        return WalkingHistoryBuilder.combine(tracked: walks, health: workouts, feedback: feedback)
+    }
     private var milestones: PathMilestones { PathMilestones(walks: walks) }
     private var activities: [PathActivity] {
         let all = source == "PausePath" ? walks.map(PathActivity.init) : health.activities.map(PathActivity.init)
@@ -496,7 +516,7 @@ struct MyPathView: View {
                 ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     sectionIntro
-                    sourceControls
+                    if !(demoMode && pathSection == "Insights") { sourceControls }
                     if pathSection == "Overview" {
                         summary
                     if let latest = recent.first {
@@ -524,11 +544,18 @@ struct MyPathView: View {
                     } else if pathSection == "History" {
                         history
                     } else {
-                        if source == "Apple Health" { healthTotals }
-                        trends
-                        records
-                        bodyMetrics
-                        healthConnection
+                        if demoMode {
+                            walkingMinutesTrend
+                            Text("Sample mode shows an illustration of the walking trend. Turn it off in Profile to return to your own Insights.")
+                                .font(.callout).foregroundStyle(.secondary).pathCard()
+                        } else {
+                            if source == "Apple Health" { healthTotals }
+                            walkingMinutesTrend
+                            trends
+                            records
+                            bodyMetrics
+                            healthConnection
+                        }
                     }
                     if source == "Apple Health" && !health.hasConnected && pathSection != "Insights" {
                         healthConnection
@@ -554,8 +581,8 @@ struct MyPathView: View {
     private var sectionIntro: some View {
         AdventureHeader(
             eyebrow: "YOUR FIELD JOURNAL",
-            title: pathSection == "Overview" ? "Find your next chapter." : (pathSection == "History" ? "Trails you've travelled." : "Look how far you've come."),
-            subtitle: pathSection == "Overview" ? "Small steps. Fresh air. A path of your own." : (pathSection == "History" ? "Revisit a journey and the moments along the way." : "Your rhythm, your milestones, your next horizon."),
+            title: demoMode && pathSection == "Insights" ? "A sample walking story." : (pathSection == "Overview" ? "Find your next chapter." : (pathSection == "History" ? "Trails you've travelled." : "Look how far you've come.")),
+            subtitle: demoMode && pathSection == "Insights" ? "Illustrative data for exploring the idea." : (pathSection == "Overview" ? "Small steps. Fresh air. A path of your own." : (pathSection == "History" ? "Revisit a journey and the moments along the way." : "Your rhythm, your milestones, your next horizon.")),
             symbol: pathSection == "History" ? "map.fill" : "mountain.2.fill")
     }
     private var sourceControls: some View {
@@ -569,7 +596,8 @@ struct MyPathView: View {
                     Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90)
                 }.pickerStyle(.menu)
             }
-            Text("Sources stay separate to avoid counting the same journey twice.").font(.caption2).foregroundStyle(.secondary)
+            Text("History and distance summaries use one source at a time. The walking-minutes trend combines walking sessions and removes likely duplicates.")
+                .font(.caption2).foregroundStyle(.secondary)
         }.padding(14).background(PausePathPalette.teal.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
     }
     private var sourceMenu: some View {
@@ -735,6 +763,44 @@ struct MyPathView: View {
             trendRow(days: 30, title: "Long term")
             Text("Compares equal periods ending yesterday. All available \(source) activity types are included; history filters apply only to History.")
                 .font(.caption).foregroundStyle(.secondary)
+        }.pathCard()
+    }
+    private var walkingMinutesTrend: some View {
+        let summary = WalkingTrendSummary.calculate(history: walkingHistory)
+        return VStack(alignment: .leading, spacing: 14) {
+            Label("Walking minutes over time", systemImage: "chart.xyaxis.line").font(.headline)
+            if demoMode {
+                Label("Sample profile · synthetic data, not your activity", systemImage: "sparkles")
+                    .font(.caption.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
+            } else {
+                Text("Recorded PausePath walks + available Apple Health walking workouts. Overlapping sessions count once; missing records do not mean no walking.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let summary {
+                Chart {
+                    ForEach(0..<summary.weeklyAverageMinutes.count, id: \.self) { index in
+                        LineMark(x: .value("Week", index + 1), y: .value("Observed min/day", summary.weeklyAverageMinutes[index]))
+                            .foregroundStyle(by: .value("Series", "Recorded")).symbol(.circle)
+                        LineMark(x: .value("Week", index + 1), y: .value("Trend min/day", summary.fittedMinutes[index]))
+                            .foregroundStyle(by: .value("Series", "Smoothed trend"))
+                            .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 4]))
+                    }
+                }.chartForegroundStyleScale(["Recorded": PausePathPalette.teal, "Smoothed trend": PausePathPalette.lime])
+                    .chartYAxisLabel("min/day").frame(height: 190)
+                    .accessibilityLabel("Walking minutes per day by week, with a fitted trend")
+                Text(String(format: "Observed trend: %+.1f min/day each week", summary.slopeMinutesPerDayPerWeek))
+                    .font(.subheadline.weight(.semibold))
+                if let change = summary.percentChange {
+                    Text(String(format: "Recent four weeks vs first four: %+.1f%%", change)).font(.subheadline)
+                }
+                Text(String(format: "%.0f total minutes · %+.0f minutes versus holding the first-four-week average", summary.totalMinutes, summary.additionalMinutesOverBaseline))
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("This describes an observed change, not an effect caused by PausePath or a measure of medical readiness.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Record walks in at least two weeks or connect Apple Health to see a walking trend. For a sample, turn on Demo in Profile.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
         }.pathCard()
     }
     private func trendRow(days: Int, title: String) -> some View {

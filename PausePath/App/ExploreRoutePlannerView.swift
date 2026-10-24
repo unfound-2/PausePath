@@ -23,6 +23,7 @@ struct ExploreRoutePlannerView: View {
     let discovery: PlaceDiscovery
     let preferences: RoutePreferences
     let profile: PausePathProfile
+    let health: HealthActivityStore
     let initialDestination: DiscoveredPlace?
     @Binding var destinationQuery: String
     @Binding var destination: MKMapItem?
@@ -47,6 +48,11 @@ struct ExploreRoutePlannerView: View {
     @State private var allowUnknownRestStops = true
     @State private var routeTask: Task<Void, Never>?
     @State private var routeWeather = WeatherGuidanceStore()
+    @State private var dismissedSuggestionID: String?
+    @AppStorage("pausepath.trackedWalks") private var trackedData = Data()
+    @AppStorage("pausepath.walkFeedback") private var feedbackData = Data()
+    @AppStorage("pausepath.hiddenHealthWorkouts") private var hiddenHealthData = Data()
+    @AppStorage("pausepath.demoMode") private var demoMode = false
     @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherGuidanceEnabled = true
     @AppStorage(RouteDifficultyPreferences.storageKey)
     private var factorSelection = RouteDifficultyPreferences.defaultStorageValue
@@ -74,13 +80,38 @@ struct ExploreRoutePlannerView: View {
     }
     private var originTitle: String { usesCurrentLocation ? "Current location" : customOriginName }
 
+    private var walkingHistory: [WalkingHistoryEntry] {
+        if demoMode { return WalkingHistoryBuilder.sample() }
+        let tracked = (try? JSONDecoder().decode([TrackedWalk].self, from: trackedData)) ?? []
+        let feedback = (try? JSONDecoder().decode([WalkFeedback].self, from: feedbackData)) ?? []
+        let hidden = (try? JSONDecoder().decode(Set<String>.self, from: hiddenHealthData)) ?? []
+        let workouts = health.activities.filter { $0.kind == "Walking" && !hidden.contains($0.id) }
+            .map { HealthWalkingRecord(id: $0.id, start: $0.date, seconds: $0.seconds, distanceMeters: $0.meters) }
+        return WalkingHistoryBuilder.combine(tracked: tracked, health: workouts, feedback: feedback)
+    }
+
+    private var rankedSuggestions: [RouteSuggestion] {
+        let features = discovery.routeOptions.map { option in
+            let rest = option.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops)
+            return RouteFeatureSnapshot(id: option.id.uuidString, distanceMeters: option.distance, estimatedSeconds: option.duration,
+                longestRestGapMeters: rest.longestGap, restStatus: rest.status, facilityKinds: Set(option.stops.map(\.kind)))
+        }
+        return PersonalRouteRanker.rank(features, preferences: routePreferences, history: walkingHistory)
+    }
+
     private var visibleOptions: [WalkingRouteOption] {
         let selectedPreferences = routePreferences
         let includeUnknown = allowUnknownRestStops
+        let positions = Dictionary(uniqueKeysWithValues: rankedSuggestions.enumerated().map { ($0.element.routeID, $0.offset) })
         let filtered = difficultyFilter.level.map { level in discovery.routeOptions.filter { difficulty(of: $0) == level } } ?? discovery.routeOptions
         return filtered.sorted { left, right in
             switch sortOrder {
             case .recommended:
+                let leftPosition = positions[left.id.uuidString]
+                let rightPosition = positions[right.id.uuidString]
+                if let leftPosition, let rightPosition { return leftPosition < rightPosition }
+                if leftPosition != nil { return true }
+                if rightPosition != nil { return false }
                 func restRank(_ option: WalkingRouteOption) -> Int {
                     switch option.restAssessment(selectedPreferences, allowUnknown: includeUnknown).status {
                     case .meets: 0; case .unverified: 1; case .exceeds: 2; case .unknown: 3
@@ -148,6 +179,7 @@ struct ExploreRoutePlannerView: View {
 
                     if !status.isEmpty { Text(status).font(.callout).foregroundStyle(.secondary) }
                     if !discovery.routeOptions.isEmpty {
+                        recommendationCard
                         routeFilters
                         if !visibleOptions.isEmpty && (difficultyFilter != .all || !mandatoryKinds.isEmpty) {
                             Button("Clear route filters") {
@@ -253,6 +285,42 @@ struct ExploreRoutePlannerView: View {
         }
     }
 
+    @ViewBuilder private var recommendationCard: some View {
+        if let recommendation = rankedSuggestions.first,
+           dismissedSuggestionID != recommendation.routeID,
+           let option = discovery.routeOptions.first(where: { $0.id.uuidString == recommendation.routeID }) {
+            VStack(alignment: .leading, spacing: 9) {
+                Label(demoMode ? "Sample profile route" : (recommendation.provisional ? "Possible route · verify details" : "Suggested for your walk"), systemImage: "sparkles")
+                    .font(.headline)
+                Text(option.title).font(.title3.weight(.semibold))
+                Text(recommendation.reason).font(.subheadline)
+                if recommendation.provisional {
+                    Label("Provisional: requested route details are not fully verified.", systemImage: "questionmark.circle")
+                        .font(.caption.weight(.semibold))
+                }
+                if !recommendation.unknownDetails.isEmpty {
+                    Text("Unknown: \(recommendation.unknownDetails.joined(separator: ", ")).")
+                        .font(.caption)
+                }
+                Text("Planning detail confidence: \(recommendation.confidence >= 0.7 ? "higher" : recommendation.confidence >= 0.45 ? "moderate" : "limited") · not a safety rating")
+                    .font(.caption)
+                HStack {
+                    Button("Preview route") { discovery.selectRouteOption(option.id) }
+                        .buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
+                    Button("Adjust stops") { showRestPreferences = true }.buttonStyle(.bordered)
+                    Spacer(minLength: 0)
+                    Button("Dismiss") { dismissedSuggestionID = recommendation.routeID }.font(.caption)
+                }
+            }
+            .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            .foregroundStyle(.white)
+            .background(PausePathPalette.teal, in: RoundedRectangle(cornerRadius: 20))
+        } else if rankedSuggestions.isEmpty {
+            Label("No route meets the requested distance, stops and verified rest-gap limits. Change your choices or review other routes below.", systemImage: "line.3.horizontal.decrease.circle")
+                .font(.callout).foregroundStyle(.secondary)
+        }
+    }
+
     private var difficultyMenu: some View {
         Menu {
             ForEach(RoutePlannerDifficultyFilter.allCases) { filter in
@@ -320,6 +388,8 @@ struct ExploreRoutePlannerView: View {
             }
             if isSelected {
             RestGapStatusCard(assessment: option.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops), limit: requestedRestGap)
+            Text("Slope, surface and crossing details are unknown for this route unless independently verified. Review real-world conditions before walking.")
+                .font(.caption).foregroundStyle(.secondary)
             }
             if !option.stops.isEmpty {
                 Text(option.stops.enumerated().map { "\($0.offset + 1). \($0.element.item.name ?? $0.element.kind.rawValue)" }.joined(separator: " → "))

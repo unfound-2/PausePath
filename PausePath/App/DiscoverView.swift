@@ -25,6 +25,7 @@ extension FacilityKind {
 struct DiscoverView: View {
     let preferences: RoutePreferences
     let profile: PausePathProfile
+    let health: HealthActivityStore
     @State private var discovery = PlaceDiscovery()
     @State private var camera: MapCameraPosition = .automatic
     @State private var visibleRegion: MKCoordinateRegion?
@@ -239,7 +240,7 @@ struct DiscoverView: View {
             .onChange(of: navigationWalk?.id) { if navigationWalk != nil { cancelAreaRefresh() } }
             .onChange(of: discovery.selectedRouteOptionID) { fitRouteInMap() }
             .sheet(isPresented: $showRoutePlanner) {
-                ExploreRoutePlannerView(discovery: discovery, preferences: preferences, profile: profile, initialDestination: selectedPlace,
+                ExploreRoutePlannerView(discovery: discovery, preferences: preferences, profile: profile, health: health, initialDestination: selectedPlace,
                     destinationQuery: $routeDestinationQuery, destination: $routeDestination,
                     mandatoryKinds: $mandatoryRouteStops, difficultyFilter: $routeDifficultyFilter,
                     routeRequestID: $routeRequestID, usesCurrentLocation: usesCurrentRouteStart,

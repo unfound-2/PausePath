@@ -224,12 +224,200 @@ public struct WalkFeedback: Identifiable, Codable, Sendable {
     public var date = Date()
     public var routeName: String
     public var manageability: Manageability
-    public var facilitiesAvailable: Bool
+    /// nil means the walker did not know or did not answer.
+    public var facilitiesAvailable: Bool?
     public var note: String
     public var activityID: String?
-    public init(routeName: String, manageability: Manageability, facilitiesAvailable: Bool, note: String, activityID: String?) {
+    public init(routeName: String, manageability: Manageability, facilitiesAvailable: Bool?, note: String, activityID: String?) {
         self.routeName = routeName; self.manageability = manageability; self.facilitiesAvailable = facilitiesAvailable
         self.note = note; self.activityID = activityID
+    }
+}
+
+/// A local planning timeline. Health records are read with permission and never uploaded
+/// by this model. A matching PausePath recording wins so one walk counts only once.
+public struct WalkingHistoryEntry: Identifiable, Sendable {
+    public enum Source: Sendable { case pausePath, appleHealth, sample }
+    public let id: String
+    public let source: Source
+    public let start: Date
+    public let end: Date
+    public let activeSeconds: Double
+    public let distanceMeters: Double?
+    public let completed: Bool
+    public let feedback: WalkFeedback?
+    public var minutes: Double { activeSeconds / 60 }
+    public init(id: String, source: Source, start: Date, end: Date, distanceMeters: Double?, completed: Bool,
+                activeSeconds: Double? = nil, feedback: WalkFeedback? = nil) {
+        self.id = id; self.source = source; self.start = start; self.end = end
+        self.activeSeconds = max(0, activeSeconds ?? end.timeIntervalSince(start))
+        self.distanceMeters = distanceMeters.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        self.completed = completed; self.feedback = feedback
+    }
+}
+
+public struct HealthWalkingRecord: Sendable {
+    public let id: String
+    public let start: Date
+    public let seconds: Double
+    public let distanceMeters: Double?
+    public init(id: String, start: Date, seconds: Double, distanceMeters: Double?) {
+        self.id = id; self.start = start; self.seconds = seconds; self.distanceMeters = distanceMeters
+    }
+}
+
+public enum WalkingHistoryBuilder {
+    public static func combine(tracked: [TrackedWalk], health: [HealthWalkingRecord], feedback: [WalkFeedback] = []) -> [WalkingHistoryEntry] {
+        let feedbackByID = Dictionary(feedback.compactMap { item in item.activityID.map { ($0, item) } }, uniquingKeysWith: { newer, _ in newer })
+        let local = tracked.filter { ($0.activityKind ?? "Walking") == "Walking" && $0.activeSeconds.isFinite && $0.activeSeconds > 0 }.map { walk in
+            let start = walk.startedAt ?? walk.date.addingTimeInterval(-walk.activeSeconds)
+            return WalkingHistoryEntry(id: walk.id.uuidString, source: .pausePath, start: start, end: max(walk.date, start.addingTimeInterval(walk.activeSeconds)),
+                                       distanceMeters: walk.distanceMeters, completed: walk.completed, activeSeconds: walk.activeSeconds,
+                                       feedback: feedbackByID[walk.id.uuidString])
+        }
+        let external = health.filter { $0.seconds.isFinite && $0.seconds > 0 }.map { walk in
+            WalkingHistoryEntry(id: walk.id, source: .appleHealth, start: walk.start, end: walk.start.addingTimeInterval(walk.seconds),
+                                distanceMeters: walk.distanceMeters, completed: true)
+        }
+        var result = local
+        for candidate in external where !local.contains(where: { overlaps($0, candidate) }) {
+            result.append(candidate)
+        }
+        return result.sorted { $0.start > $1.start }
+    }
+
+    private static func overlaps(_ a: WalkingHistoryEntry, _ b: WalkingHistoryEntry) -> Bool {
+        let shared = min(a.end, b.end).timeIntervalSince(max(a.start, b.start))
+        let shorterWindow = min(a.end.timeIntervalSince(a.start), b.end.timeIntervalSince(b.start))
+        guard shared > 0, shorterWindow > 0, shared / shorterWindow >= 0.7 else { return false }
+        if let left = a.distanceMeters, let right = b.distanceMeters, max(left, right) > 100 {
+            return abs(left - right) / max(left, right) <= 0.35
+        }
+        return true
+    }
+
+    /// Eight complete synthetic weeks, clearly separated from personal records.
+    public static func sample(reference: Date = .now, calendar: Calendar = .current) -> [WalkingHistoryEntry] {
+        let thisWeek = calendar.dateInterval(of: .weekOfYear, for: reference)?.start ?? calendar.startOfDay(for: reference)
+        return (0..<8).flatMap { week -> [WalkingHistoryEntry] in
+            guard let start = calendar.date(byAdding: .weekOfYear, value: week - 8, to: thisWeek) else { return [] }
+            return (0..<7).compactMap { day in
+                guard let date = calendar.date(byAdding: .day, value: day, to: start) else { return nil }
+                let minutes = Double(12 + week)
+                return WalkingHistoryEntry(id: "sample-\(week)-\(day)", source: .sample,
+                    start: date.addingTimeInterval(12 * 3600), end: date.addingTimeInterval(12 * 3600 + minutes * 60),
+                    distanceMeters: minutes * 70, completed: true)
+            }
+        }
+    }
+}
+
+public struct WalkingTrendSummary: Sendable {
+    public let weeklyAverageMinutes: [Double]
+    public let fittedMinutes: [Double]
+    public let slopeMinutesPerDayPerWeek: Double
+    public let baselineAverage: Double
+    public let recentAverage: Double
+    public let percentChange: Double?
+    public let totalMinutes: Double
+    public let additionalMinutesOverBaseline: Double
+
+    public static func calculate(weeklyAverageMinutes values: [Double]) -> Self? {
+        guard values.count >= 2, values.allSatisfy({ $0.isFinite && $0 >= 0 }) else { return nil }
+        let n = Double(values.count)
+        let xMean = (n - 1) / 2
+        let yMean = values.reduce(0, +) / n
+        let denominator = (0..<values.count).reduce(0.0) { $0 + pow(Double($1) - xMean, 2) }
+        let slope = zip(values.indices, values).reduce(0.0) { $0 + (Double($1.0) - xMean) * ($1.1 - yMean) } / denominator
+        let fit = values.indices.map { yMean + slope * (Double($0) - xMean) }
+        let half = values.count / 2
+        let baseline = values.prefix(half).reduce(0, +) / Double(half)
+        let recent = values.suffix(half).reduce(0, +) / Double(half)
+        let total = values.reduce(0, +) * 7
+        return Self(weeklyAverageMinutes: values, fittedMinutes: fit, slopeMinutesPerDayPerWeek: slope,
+            baselineAverage: baseline, recentAverage: recent, percentChange: baseline > 0 ? (recent - baseline) / baseline * 100 : nil,
+            totalMinutes: total, additionalMinutesOverBaseline: total - baseline * Double(values.count) * 7)
+    }
+
+    public static func calculate(history: [WalkingHistoryEntry], reference: Date = .now, calendar: Calendar = .current) -> Self? {
+        guard !history.isEmpty, let thisWeek = calendar.dateInterval(of: .weekOfYear, for: reference)?.start else { return nil }
+        var recordedWeeks = 0
+        let values = (0..<8).map { week -> Double in
+            guard let start = calendar.date(byAdding: .weekOfYear, value: week - 8, to: thisWeek),
+                  let end = calendar.date(byAdding: .day, value: 7, to: start) else { return 0 }
+            let relevant = history.filter { $0.start < end && $0.end > start }
+            if !relevant.isEmpty { recordedWeeks += 1 }
+            let seconds = relevant.reduce(0.0) { total, entry in
+                let overlap = max(0, min(entry.end, end).timeIntervalSince(max(entry.start, start)))
+                let duration = max(1, entry.end.timeIntervalSince(entry.start))
+                return total + entry.activeSeconds * overlap / duration
+            }
+            return seconds / 60 / 7
+        }
+        guard recordedWeeks >= 2 else { return nil }
+        return calculate(weeklyAverageMinutes: values)
+    }
+}
+
+public struct RouteFeatureSnapshot: Sendable {
+    public let id: String
+    public let distanceMeters: Double
+    public let estimatedSeconds: Double
+    public let maximumGradePercent: Double?
+    public let surface: String?
+    public let crossings: String?
+    public let longestRestGapMeters: Double?
+    public let restStatus: RestGapAssessment.Status
+    public let facilityKinds: Set<FacilityKind>
+    public init(id: String, distanceMeters: Double, estimatedSeconds: Double, maximumGradePercent: Double? = nil,
+                surface: String? = nil, crossings: String? = nil, longestRestGapMeters: Double? = nil,
+                restStatus: RestGapAssessment.Status, facilityKinds: Set<FacilityKind>) {
+        self.id = id; self.distanceMeters = distanceMeters; self.estimatedSeconds = estimatedSeconds
+        self.maximumGradePercent = maximumGradePercent; self.surface = surface; self.crossings = crossings
+        self.longestRestGapMeters = longestRestGapMeters; self.restStatus = restStatus; self.facilityKinds = facilityKinds
+    }
+}
+
+public struct RouteSuggestion: Sendable {
+    public let routeID: String
+    public let score: Double
+    public let confidence: Double
+    public let provisional: Bool
+    public let reason: String
+    public let unknownDetails: [String]
+}
+
+public enum PersonalRouteRanker {
+    public static func rank(_ routes: [RouteFeatureSnapshot], preferences: RoutePreferences, history: [WalkingHistoryEntry]) -> [RouteSuggestion] {
+        let reference = history.filter { $0.completed && $0.feedback?.manageability != .difficult }
+            .prefix(12).compactMap(\.distanceMeters).filter { $0 > 0 }.sorted()
+        let target = reference.isEmpty ? preferences.distanceMeters : reference[reference.count / 2]
+        return routes.compactMap { route -> RouteSuggestion? in
+            guard route.distanceMeters.isFinite, route.distanceMeters > 0,
+                  abs(route.distanceMeters - preferences.distanceMeters) <= preferences.distanceMeters * 0.25,
+                  preferences.facilities.isSubset(of: route.facilityKinds), route.restStatus != .exceeds else { return nil }
+            if preferences.terrain != .any, let grade = route.maximumGradePercent, grade > preferences.terrain.maximumGrade { return nil }
+            var unknown: [String] = []
+            if route.maximumGradePercent == nil { unknown.append("slope") }
+            if route.surface == nil { unknown.append("surface") }
+            if route.crossings == nil { unknown.append("crossings") }
+            if route.restStatus != .meets { unknown.append("rest-stop reliability") }
+            let provisional = (preferences.terrain != .any && route.maximumGradePercent == nil) || route.restStatus != .meets
+            let distanceFit = max(0, 1 - abs(route.distanceMeters - target) / max(target, 1))
+            let restFit = route.longestRestGapMeters.map { max(0, 1 - $0 / max(preferences.maximumRestGapMeters, 1)) } ?? 0
+            let confidence = max(0.1, min(1, 0.25 + (reference.isEmpty ? 0 : min(0.25, Double(reference.count) * 0.04)) +
+                (route.maximumGradePercent == nil ? 0 : 0.15) + (route.restStatus == .meets ? 0.2 : 0) +
+                (route.surface == nil ? 0 : 0.075) + (route.crossings == nil ? 0 : 0.075)))
+            let score = distanceFit * 0.7 + restFit * 0.2 + confidence * 0.1
+            let distanceReason = reference.isEmpty ? "close to your chosen distance" : "close to distances in your completed walks"
+            let reason = "Suggested because it is \(distanceReason)" + (route.restStatus == .meets ? " and fits your mapped rest gap." : ".")
+            return RouteSuggestion(routeID: route.id, score: score, confidence: confidence, provisional: provisional,
+                                   reason: reason, unknownDetails: unknown)
+        }.sorted { left, right in
+            if left.provisional != right.provisional { return !left.provisional }
+            if left.score != right.score { return left.score > right.score }
+            return left.routeID < right.routeID
+        }
     }
 }
 
