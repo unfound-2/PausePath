@@ -542,8 +542,7 @@ struct MyPathView: View {
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: 60)
                 ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    sectionIntro
+                VStack(alignment: .leading, spacing: 16) {
                     if !(demoMode && pathSection == "Insights") { sourceControls }
                     if pathSection == "Overview" {
                         summary
@@ -605,13 +604,6 @@ struct MyPathView: View {
                     if case .failure = result { exportMessage = "Export could not be saved. Try again." }
                 }
         }
-    }
-    private var sectionIntro: some View {
-        AdventureHeader(
-            eyebrow: "YOUR FIELD JOURNAL",
-            title: demoMode && pathSection == "Insights" ? "A sample walking story." : (pathSection == "Overview" ? "Find your next chapter." : (pathSection == "History" ? "Trails you've travelled." : "Look how far you've come.")),
-            subtitle: demoMode && pathSection == "Insights" ? "Illustrative data for exploring the idea." : (pathSection == "Overview" ? "Small steps. Fresh air. A path of your own." : (pathSection == "History" ? "Revisit a journey and the moments along the way." : "Your rhythm, your milestones, your next horizon.")),
-            symbol: pathSection == "History" ? "map.fill" : "mountain.2.fill")
     }
     private var sourceControls: some View {
         VStack(alignment: .leading, spacing: 10) {
