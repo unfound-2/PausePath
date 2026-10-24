@@ -15,6 +15,7 @@ struct WalkingNavigationView: View {
     @State private var suggestedStops: [SharedPOI] = []
     @State private var showEndConfirmation = false
     @State private var showReturnConfirmation = false
+    @State private var walkCompletionMessage = ""
     @State private var walkRecorded = false
     @State private var checkInWalk: TrackedWalk?
     @State private var checkInFeeling: Manageability?
@@ -195,6 +196,9 @@ struct WalkingNavigationView: View {
         .sheet(item: $checkInWalk) { recorded in
             NavigationStack {
                 Form {
+                    if !walkCompletionMessage.isEmpty {
+                        Section("Walk complete") { Text(walkCompletionMessage) }
+                    }
                     Section("How did this walk feel?") {
                         ForEach(Manageability.allCases, id: \.self) { feeling in
                             Button { checkInFeeling = feeling } label: {
@@ -233,7 +237,7 @@ struct WalkingNavigationView: View {
             }
         }
     }
-    private func closeCheckIn() { checkInWalk = nil; navigator.stop(); dismiss() }
+    private func closeCheckIn() { checkInWalk = nil; walkCompletionMessage = ""; navigator.stop(); dismiss() }
     private var navigationStatus: some View {
         VStack(alignment: .leading, spacing: 10) {
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
@@ -303,7 +307,14 @@ struct WalkingNavigationView: View {
             }
         }
         Task { await DailyRecapNotifications.schedule() }
-        if !completed { navigator.stop() }
+        if completed {
+            let distanceText = distance >= 1_000
+                ? String(format: "%.2f km", distance / 1_000)
+                : String(format: "%.0f m", distance)
+            walkCompletionMessage = "\(distanceText) recorded in \(elapsedText(activity.activeSeconds)) active time. Saved in My Path."
+        } else {
+            navigator.stop()
+        }
         checkInWalk = activity
     }
 

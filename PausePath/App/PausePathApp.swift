@@ -31,6 +31,28 @@ final class PausePathNotificationDelegate: NSObject, UIApplicationDelegate, UNUs
     }
 }
 
+enum PausePathAppearance: String, CaseIterable, Identifiable {
+    case system
+    case light
+    case dark
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
+
 /// Adaptive brand colors; ink stays dark for readable text on lime controls.
 enum PausePathPalette {
     static let background = Color("BrandBackground")
@@ -69,9 +91,11 @@ private struct LaunchExperienceView: View {
     @AppStorage("pausepath.onboarding.permissions-gate.v2.complete") private var onboardingComplete = false
     @AppStorage("pausepath.onboarding.personal-goals.v2.complete") private var personalizationComplete = false
     @AppStorage("pausepath.personalProfile") private var profileData = Data()
+    @AppStorage("pausepath.appearance") private var appearanceRawValue = PausePathAppearance.system.rawValue
+    private var appearance: PausePathAppearance { PausePathAppearance(rawValue: appearanceRawValue) ?? .system }
 
     private let mint = PausePathPalette.background
-    private let teal = PausePathPalette.ink
+    private let teal = PausePathPalette.teal
     private let lime = PausePathPalette.lime
 
     var body: some View {
@@ -111,6 +135,7 @@ private struct LaunchExperienceView: View {
                 .accessibilityLabel("PausePath")
             }
         }
+        .preferredColorScheme(appearance.colorScheme)
         .onOpenURL { url in
             if url.scheme == "pausepath", url.host == "walk" || url.host == "explore" {
                 NotificationCenter.default.post(name: .pausePathOpenExplore, object: nil)
@@ -210,9 +235,9 @@ private struct WelcomeSetupView: View {
                     Image("PausePathLogo").resizable().scaledToFit().frame(height: 88)
                         .frame(maxWidth: .infinity)
                     HStack(spacing: 8) {
-                        ForEach(0..<5, id: \.self) { index in
+                        ForEach(0..<6, id: \.self) { index in
                             stepDot(index)
-                            if index < 4 { Capsule().fill(step > index ? Color.accentColor : Color.secondary.opacity(0.2)).frame(height: 3) }
+                            if index < 5 { Capsule().fill(step > index ? Color.accentColor : Color.secondary.opacity(0.2)).frame(height: 3) }
                         }
                     }
                     page.transition(reduceMotion ? .opacity : .asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .move(edge: .leading).combined(with: .opacity)))
@@ -243,6 +268,7 @@ private struct WelcomeSetupView: View {
         case 1: goalStep
         case 2: weeklyGoalStep
         case 3: usernameStep
+        case 4: stopReportsStep
         default: connectionStep
         }
     }
@@ -250,12 +276,12 @@ private struct WelcomeSetupView: View {
     private var introductionStep: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("A little more room for what matters.").font(.largeTitle.bold())
-            Text("PausePath helps you find walking routes, notice your progress, and make space for a pause in a way that fits your day.")
+            Text("Find walking routes, nearby stops, and a clear record of your walks.")
                 .font(.body).foregroundStyle(.secondary)
-            Label("Choose a goal that feels relevant", systemImage: "scope")
-            Label("Find routes with details that matter to you", systemImage: "map")
-            Label("Reflect on activity without pressure", systemImage: "chart.bar")
-            Text("You choose your goal. Sign-in, location, Health, and notifications are optional; PausePath asks for location when you use a location-based feature.")
+            Label("Choose a personal goal", systemImage: "scope")
+            Label("Plan routes with nearby stops", systemImage: "map")
+            Label("Review your walks in My Path", systemImage: "chart.bar")
+            Text("Location is requested for maps and active walks. Sign in with Apple to submit stop reports and use shared community features. Health and reminders are optional.")
                 .font(.callout).foregroundStyle(.secondary)
             Button("Get started") { advance(to: 1) }
                 .buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink).frame(maxWidth: .infinity)
@@ -344,6 +370,43 @@ private struct WelcomeSetupView: View {
         }
     }
 
+    private var stopReportsStep: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Image(systemName: "mappin.and.ellipse")
+                .font(.system(size: 32, weight: .medium))
+                .foregroundStyle(PausePathPalette.teal)
+                .frame(width: 64, height: 64)
+                .background(PausePathPalette.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
+                .accessibilityHidden(true)
+            Text("See a stop that’s missing or out of date?")
+                .font(.largeTitle.bold())
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Suggest a missing stop", systemImage: "exclamationmark.bubble")
+                    .font(.headline)
+                Text("On the map, tap the ! button to suggest a bench, restroom, water fountain, or café at the map center.")
+                    .font(.body).foregroundStyle(.secondary)
+                Label("Report a stop that’s already listed", systemImage: "mappin.and.ellipse")
+                    .font(.headline)
+                Text("Open its map details and tap Report if it’s broken, closed, or no longer there.")
+                    .font(.body).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Reports are reviewed before suggestions are shared. Sign in with Apple to submit one. Only report places you’ve checked yourself.")
+                    .font(.callout)
+                Text("A suggestion includes the pinned map location and stop type. A name is optional.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.background, in: RoundedRectangle(cornerRadius: 16))
+            HStack {
+                Button("Back") { advance(to: 3) }.buttonStyle(.bordered)
+                Button("Continue") { advance(to: 5) }
+                    .buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
+            }.frame(maxWidth: .infinity)
+        }
+    }
+
     private var connectionStep: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
@@ -412,7 +475,7 @@ private struct WelcomeSetupView: View {
             Button(action: onContinue) {
                 Text("Continue to Explore").fontWeight(.semibold).frame(maxWidth: .infinity).padding(.vertical, 6)
             }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
-            Button("Back to username") { advance(to: 3) }
+            Button("Back") { advance(to: 4) }
                 .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity)
             Text("You can connect or change access later in Profile. If Health has no shared data, PausePath still uses walks recorded in the app.").font(.caption).foregroundStyle(.secondary)
         }

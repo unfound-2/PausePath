@@ -126,7 +126,7 @@ struct DiscoverView: View {
                     Annotation("Selected route start", coordinate: start, anchor: .bottom) {
                         Image(systemName: "location.fill")
                             .font(.headline).foregroundStyle(.white).frame(width: 42, height: 42)
-                            .background(PausePathPalette.ink, in: Circle())
+                            .background(PausePathPalette.teal, in: Circle())
                             .overlay(Circle().stroke(.white, lineWidth: 3)).shadow(radius: 4)
                             .accessibilityLabel("Selected route starting point")
                     }.annotationTitles(.hidden)
@@ -251,7 +251,7 @@ struct DiscoverView: View {
                     .presentationContentInteraction(.scrolls)
                     .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.5)))
                     .presentationDragIndicator(.visible)
-                    .presentationBackground(Color(.systemGroupedBackground))
+                    .presentationBackground(PausePathPalette.background)
             }
             .fullScreenCover(item: $navigationWalk) { WalkingNavigationView(walk: $0) }
         }

@@ -475,23 +475,35 @@ public struct PathMilestones {
     }
     public var badges: [PathBadge] {
         var result: [PathBadge] = []
-        for (goal, name) in [(1, "First footprint"), (5, "Finding rhythm"), (10, "Path regular"), (25, "Trail keeper")] {
-            result.append(PathBadge(id: "walks-\(goal)", name: name, symbol: "figure.walk", requirement: "Complete \(goal) PausePath journeys", value: Double(walks.count), target: Double(goal)))
+        for (goal, name, symbol) in [
+            (1, "First footprint", "shoeprints.fill"),
+            (5, "Finding rhythm", "figure.walk"),
+            (10, "Path regular", "figure.hiking"),
+            (25, "Trail keeper", "mountain.2.fill")
+        ] {
+            result.append(PathBadge(id: "walks-\(goal)", name: name, symbol: symbol, requirement: "Complete \(goal) PausePath journeys", value: Double(walks.count), target: Double(goal)))
         }
-        for (goal, name) in [(1, "First kilometre"), (5, "Green explorer"), (10, "Winding way"), (25, "Beyond the bend"), (50, "Horizon seeker"), (100, "Path pioneer")] {
-            result.append(PathBadge(id: "distance-\(goal)", name: name, symbol: "point.topleft.down.to.point.bottomright.curvepath", requirement: "Travel \(goal) km across completed journeys", value: distance / 1000, target: Double(goal)))
+        for (goal, name, symbol) in [
+            (1, "First kilometre", "point.topleft.down.to.point.bottomright.curvepath"),
+            (5, "Green explorer", "location.north.circle.fill"),
+            (10, "Winding way", "map.fill"),
+            (25, "Beyond the bend", "signpost.right.fill"),
+            (50, "Horizon seeker", "sun.horizon.fill"),
+            (100, "Path pioneer", "globe.americas.fill")
+        ] {
+            result.append(PathBadge(id: "distance-\(goal)", name: name, symbol: symbol, requirement: "Travel \(goal) km across completed journeys", value: distance / 1000, target: Double(goal)))
         }
-        for (goal, name) in [(3, "Long way home"), (5, "Going the distance")] {
-            result.append(PathBadge(id: "longest-\(goal)", name: name, symbol: "map.fill", requirement: "Complete a \(goal) km journey", value: longest / 1000, target: Double(goal)))
+        for (goal, name, symbol) in [(3, "Long way home", "map.fill"), (5, "Going the distance", "mountain.2.fill")] {
+            result.append(PathBadge(id: "longest-\(goal)", name: name, symbol: symbol, requirement: "Complete a \(goal) km journey", value: longest / 1000, target: Double(goal)))
         }
-        for (goal, name) in [(30, "Time to wander"), (60, "An hour outdoors")] {
-            result.append(PathBadge(id: "minutes-\(goal)", name: name, symbol: "sun.max.fill", requirement: "Complete a journey with \(goal) active minutes", value: longestTime / 60, target: Double(goal)))
+        for (goal, name, symbol) in [(30, "Time to wander", "clock.fill"), (60, "An hour outdoors", "sun.max.fill")] {
+            result.append(PathBadge(id: "minutes-\(goal)", name: name, symbol: symbol, requirement: "Complete a journey with \(goal) active minutes", value: longestTime / 60, target: Double(goal)))
         }
-        for (goal, name) in [(3, "Showing up"), (7, "Seven green days")] {
-            result.append(PathBadge(id: "days-\(goal)", name: name, symbol: "leaf.fill", requirement: "Complete journeys on \(goal) different days", value: Double(activeDays), target: Double(goal)))
+        for (goal, name, symbol) in [(3, "Showing up", "calendar"), (7, "Seven green days", "calendar.badge.checkmark")] {
+            result.append(PathBadge(id: "days-\(goal)", name: name, symbol: symbol, requirement: "Complete journeys on \(goal) different days", value: Double(activeDays), target: Double(goal)))
         }
-        for (goal, name) in [(1, "A new personal best"), (5, "Your own trailblazer")] {
-            result.append(PathBadge(id: "pr-\(goal)", name: name, symbol: "trophy.fill", requirement: "Beat your longest journey \(goal) time(s)", value: Double(recordIDs.count), target: Double(goal)))
+        for (goal, name, symbol) in [(1, "A new personal best", "trophy.fill"), (5, "Your own trailblazer", "rosette")] {
+            result.append(PathBadge(id: "pr-\(goal)", name: name, symbol: symbol, requirement: "Beat your longest journey \(goal) time(s)", value: Double(recordIDs.count), target: Double(goal)))
         }
         return result
     }

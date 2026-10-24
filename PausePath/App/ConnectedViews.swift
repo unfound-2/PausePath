@@ -541,7 +541,7 @@ struct WeeklySuggestionsView: View {
             ("Complete a PausePath walk when it suits you", "walks", 1),
             ("Try a different route this week", "new_routes", 1),
             ("Walk a distance that fits your route preferences", "distance_km", suggestedDistance),
-            ("Complete two walks at your own pace", "walks", 2),
+            ("Complete two walks", "walks", 2),
             ("Explore two routes you have not completed before", "new_routes", 2),
             ("Walk 2 km in total across completed walks", "distance_km", 2),
             ("Complete three walks whenever they fit your week", "walks", 3)
@@ -781,7 +781,7 @@ private struct ChallengeComposer: View {
     var existing: WalkingCommunityChallenge? = nil
     let onSave: (String, String, Double, Bool, UUID) async throws -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var name = "Walk a little at your pace"
+    @State private var name = "Walk three times this week"
     @State private var metric = "walks"
     @State private var target = 3.0
     @State private var shared = false
@@ -795,9 +795,9 @@ private struct ChallengeComposer: View {
         NavigationStack {
             Form {
                 if existing == nil { Section("Start with an idea") {
-                    Button("One walk together", systemImage: "figure.walk") { name = "One walk at your own pace"; metric = "walks"; target = 1 }
+                    Button("One walk together", systemImage: "figure.walk") { name = "One walk together"; metric = "walks"; target = 1 }
                     Button("Explore somewhere new", systemImage: "map") { name = "Try a new route"; metric = "new_routes"; target = 1 }
-                    Text("Choose or customize a goal. Everyone can take part at their own pace.").font(.caption).foregroundStyle(.secondary)
+                    Text("Choose a goal and change it whenever you like.").font(.caption).foregroundStyle(.secondary)
                 }
                 }
                 Section("Make it yours") {
@@ -1284,7 +1284,7 @@ struct CommunityHubView: View {
         Section("Small wins") {
             Text("Visible to this group. No route or Health data is attached.").font(.caption).foregroundStyle(.secondary)
             DisclosureGroup("Share a small win", isExpanded: $composingPost) {
-            TextField("A small win from your path…", text: $postText, axis: .vertical).lineLimit(2...5)
+            TextField("Write an update…", text: $postText, axis: .vertical).lineLimit(2...5)
                 .onChange(of: postText) { _, _ in postRequest = UUID() }
             Text("\(postText.count)/280").font(.caption).foregroundStyle(.secondary)
             Button("Post to community", systemImage: "paperplane") {

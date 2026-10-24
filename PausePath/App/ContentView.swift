@@ -102,6 +102,7 @@ struct ProfileSettingsView: View {
     @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherEnabled = true
     @AppStorage("pausepath.weather.openMeteo.walkUpdates.enabled") private var weatherUpdates = true
     @AppStorage("pausepath.demoMode") private var demoMode = false
+    @AppStorage("pausepath.appearance") private var appearanceRawValue = PausePathAppearance.system.rawValue
     @State private var photo: PhotosPickerItem?
     @State private var photoError: String?
     @State private var account = PausePathAccount.shared
@@ -136,7 +137,6 @@ struct ProfileSettingsView: View {
                         }.accessibilityLabel("Choose profile photo")
                         VStack(alignment: .leading, spacing: 6) {
                             Text(name).font(.title.bold()).foregroundStyle(PausePathPalette.teal)
-                            Text("Your pace. Your path.").font(.subheadline).foregroundStyle(.secondary)
                             NavigationLink("Edit profile") { ChangeUsernameView() }.font(.subheadline.weight(.semibold))
                         }
                         Spacer(minLength: 0)
@@ -159,7 +159,7 @@ struct ProfileSettingsView: View {
                             HStack(spacing: 24) { walkMetric; minuteMetric }
                             VStack(alignment: .leading, spacing: 20) { walkMetric; minuteMetric }
                         }
-                        Text(weeklyWalks.isEmpty ? "A little fresh air is a good place to start. Your tracked walks will appear here." : "Time outside, at your own pace. Keep your goals flexible.")
+                        Text(weeklyWalks.isEmpty ? "Completed PausePath walks will appear here." : "You can change your weekly goal at any time.")
                             .font(.subheadline).foregroundStyle(.secondary)
                         Text("PausePath-tracked walks · This device").font(.caption2).foregroundStyle(.secondary)
                     }.padding(22).background(PausePathPalette.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 26))
@@ -216,6 +216,23 @@ struct ProfileSettingsView: View {
                         NavigationLink { SavedAreasSettingsView() } label: {
                             row("Downloaded areas", detail: "On this device · up to 5 MB", icon: "square.and.arrow.down")
                         }
+                    }
+                    section("Appearance") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Picker("App appearance", selection: $appearanceRawValue) {
+                                ForEach(PausePathAppearance.allCases) { appearance in
+                                    Text(appearance.title).tag(appearance.rawValue)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            Text("System follows your device appearance. Light and Dark keep PausePath in your chosen mode.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            HStack(spacing: 16) {
+                                paletteSwatch("Mint", color: PausePathPalette.background)
+                                paletteSwatch("Teal", color: PausePathPalette.teal)
+                                paletteSwatch("Lime", color: PausePathPalette.lime)
+                            }
+                        }.padding(16)
                     }
                     section("Account & privacy") {
                         NavigationLink { AccountView() } label: {
@@ -279,6 +296,14 @@ struct ProfileSettingsView: View {
             Spacer(minLength: 0)
             Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
         }.padding(16).contentShape(Rectangle())
+    }
+    private func paletteSwatch(_ title: String, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(color).frame(width: 16, height: 16)
+                .overlay(Circle().strokeBorder(Color.primary.opacity(0.18), lineWidth: 1))
+            Text(title).font(.caption)
+        }
+        .accessibilityElement(children: .combine)
     }
     private var healthSettings: some View {
         Form {
@@ -387,8 +412,8 @@ struct PlannerView: View {
         NavigationStack {
             Form {
                 Section {
-                    Text("A walk at your pace").font(.title2.bold())
-                    Text("Choose what matters today. You control every adjustment.").foregroundStyle(.secondary)
+                    Text("Route preferences").font(.title2.bold())
+                    Text("Set distance, terrain, and rest-stop preferences for route suggestions.").foregroundStyle(.secondary)
                 }
                 Section("Your preferences") {
                     Picker("Goal", selection: $preferences.goal) { ForEach(WalkingGoal.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
@@ -496,6 +521,7 @@ struct MyPathView: View {
         return WalkingHistoryBuilder.combine(tracked: walks, health: workouts, feedback: feedback)
     }
     private var milestones: PathMilestones { PathMilestones(walks: walks) }
+    private var totalPathBadgeCount: Int { milestones.badges.count + 1 }
     private var activities: [PathActivity] {
         let all = source == "PausePath" ? walks.map(PathActivity.init) : health.activities.map(PathActivity.init)
         let hidden = (try? JSONDecoder().decode(Set<String>.self, from: hiddenHealthData)) ?? []
@@ -512,7 +538,9 @@ struct MyPathView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                PathSectionPicker(titles: ["Overview", "History", "Insights"], selection: $pathSection)
+                PathSectionPicker(titles: ["Overview", "History", "Insights"], selection: $pathSection, usesMaterialBackground: false)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 60)
                 ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     sectionIntro
@@ -726,8 +754,8 @@ struct MyPathView: View {
                 }
             }
             if recent.contains(where: { !$0.hasDistance }) { Text("Distance excludes sessions without a recorded distance.").font(.caption) }
-            Text(recent.isEmpty ? "Your next chapter starts with a journey. Track one in Explore or connect Health below." :
-                    "\(recent.count) sessions, at your own pace. Tap a journey to see what happened.")
+            Text(recent.isEmpty ? "No activity recorded in this period." :
+                    "\(recent.count) sessions. Tap a journey for details.")
                 .font(.subheadline)
         }.padding(22).foregroundStyle(PausePathPalette.ink)
             .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 26))
@@ -832,7 +860,7 @@ struct MyPathView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             NavigationLink { ScrollView { PathBadgeCollection(walks: walks).padding(20) }.pausePathSurface().navigationTitle("Path badges") } label: {
-                Label("Explore all 18 badges", systemImage: "seal.fill").font(.subheadline.weight(.semibold))
+                Label("Explore all \(totalPathBadgeCount) badges", systemImage: "seal.fill").font(.subheadline.weight(.semibold))
             }
         }.pathCard()
     }
@@ -1129,64 +1157,156 @@ private struct BodyTrendView: View {
     }
 }
 
+private struct PathBadgeArtStyle {
+    let primary: Color
+    let highlight: Color
+    let flourish: String
+
+    static func forID(_ id: String) -> PathBadgeArtStyle {
+        switch id {
+        case "welcome": PathBadgeArtStyle(primary: Color(red: 0.02, green: 0.42, blue: 0.47), highlight: Color(red: 0.35, green: 0.84, blue: 0.72), flourish: "sparkles")
+        case "walks-1": PathBadgeArtStyle(primary: Color(red: 0.16, green: 0.55, blue: 0.35), highlight: Color(red: 0.63, green: 0.88, blue: 0.40), flourish: "leaf.fill")
+        case "walks-5": PathBadgeArtStyle(primary: Color(red: 0.04, green: 0.53, blue: 0.63), highlight: Color(red: 0.42, green: 0.84, blue: 0.87), flourish: "wind")
+        case "walks-10": PathBadgeArtStyle(primary: Color(red: 0.77, green: 0.42, blue: 0.12), highlight: Color(red: 1.00, green: 0.78, blue: 0.30), flourish: "sun.max.fill")
+        case "walks-25": PathBadgeArtStyle(primary: Color(red: 0.13, green: 0.43, blue: 0.31), highlight: Color(red: 0.54, green: 0.78, blue: 0.36), flourish: "mountain.2.fill")
+        case "distance-1": PathBadgeArtStyle(primary: Color(red: 0.10, green: 0.50, blue: 0.76), highlight: Color(red: 0.46, green: 0.82, blue: 0.95), flourish: "location.fill")
+        case "distance-5": PathBadgeArtStyle(primary: Color(red: 0.00, green: 0.55, blue: 0.54), highlight: Color(red: 0.37, green: 0.85, blue: 0.71), flourish: "point.topleft.down.to.point.bottomright.curvepath")
+        case "distance-10": PathBadgeArtStyle(primary: Color(red: 0.19, green: 0.38, blue: 0.79), highlight: Color(red: 0.47, green: 0.69, blue: 0.98), flourish: "map.fill")
+        case "distance-25": PathBadgeArtStyle(primary: Color(red: 0.46, green: 0.29, blue: 0.72), highlight: Color(red: 0.76, green: 0.57, blue: 0.91), flourish: "signpost.right.fill")
+        case "distance-50": PathBadgeArtStyle(primary: Color(red: 0.86, green: 0.37, blue: 0.16), highlight: Color(red: 1.00, green: 0.69, blue: 0.34), flourish: "sun.horizon.fill")
+        case "distance-100": PathBadgeArtStyle(primary: Color(red: 0.73, green: 0.48, blue: 0.08), highlight: Color(red: 1.00, green: 0.83, blue: 0.33), flourish: "sparkles")
+        case "longest-3": PathBadgeArtStyle(primary: Color(red: 0.22, green: 0.55, blue: 0.34), highlight: Color(red: 0.71, green: 0.88, blue: 0.38), flourish: "leaf.fill")
+        case "longest-5": PathBadgeArtStyle(primary: Color(red: 0.78, green: 0.29, blue: 0.23), highlight: Color(red: 1.00, green: 0.64, blue: 0.34), flourish: "flag.fill")
+        case "minutes-30": PathBadgeArtStyle(primary: Color(red: 0.06, green: 0.48, blue: 0.56), highlight: Color(red: 0.36, green: 0.80, blue: 0.73), flourish: "clock.fill")
+        case "minutes-60": PathBadgeArtStyle(primary: Color(red: 0.77, green: 0.46, blue: 0.08), highlight: Color(red: 1.00, green: 0.79, blue: 0.33), flourish: "sun.max.fill")
+        case "days-3": PathBadgeArtStyle(primary: Color(red: 0.31, green: 0.55, blue: 0.26), highlight: Color(red: 0.73, green: 0.88, blue: 0.40), flourish: "calendar")
+        case "days-7": PathBadgeArtStyle(primary: Color(red: 0.04, green: 0.48, blue: 0.41), highlight: Color(red: 0.40, green: 0.82, blue: 0.64), flourish: "calendar.badge.checkmark")
+        case "pr-1": PathBadgeArtStyle(primary: Color(red: 0.58, green: 0.34, blue: 0.19), highlight: Color(red: 0.89, green: 0.65, blue: 0.34), flourish: "trophy.fill")
+        case "pr-5": PathBadgeArtStyle(primary: Color(red: 0.63, green: 0.43, blue: 0.10), highlight: Color(red: 1.00, green: 0.85, blue: 0.43), flourish: "rosette")
+        default: PathBadgeArtStyle(primary: PausePathPalette.teal, highlight: PausePathPalette.lime, flourish: "sparkles")
+        }
+    }
+}
+
+private struct PathBadgeMedallion: View {
+    let badge: PathBadge
+    let isEarned: Bool
+    let size: CGFloat
+
+    private var style: PathBadgeArtStyle { PathBadgeArtStyle.forID(badge.id) }
+    private var fill: LinearGradient {
+        let colors = isEarned ? [style.highlight, style.primary] : [Color.gray.opacity(0.14), Color.gray.opacity(0.25)]
+        return LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    var body: some View {
+        ZStack {
+            Circle().fill(fill)
+            Circle()
+                .strokeBorder(isEarned ? Color.white.opacity(0.86) : Color.gray.opacity(0.22), lineWidth: max(1, size * 0.035))
+                .padding(size * 0.10)
+            Circle()
+                .strokeBorder(isEarned ? style.highlight.opacity(0.8) : Color.gray.opacity(0.16), lineWidth: max(1, size * 0.025))
+                .padding(size * 0.20)
+            Image(systemName: badge.symbol)
+                .font(.system(size: size * 0.38, weight: .semibold))
+                .foregroundStyle(isEarned ? Color.white : Color.gray.opacity(0.64))
+            if isEarned {
+                Image(systemName: style.flourish)
+                    .font(.system(size: size * 0.17, weight: .bold))
+                    .foregroundStyle(Color.white)
+                    .offset(x: size * 0.29, y: -size * 0.28)
+            }
+        }
+        .frame(width: size, height: size)
+        .overlay(alignment: .bottomTrailing) {
+            Image(systemName: isEarned ? "checkmark.circle.fill" : "lock.circle.fill")
+                .font(.system(size: size * 0.27))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(isEarned ? style.primary : Color.gray.opacity(0.72), PausePathPalette.surface)
+                .offset(x: size * 0.06, y: size * 0.05)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 struct PathBadgeCollection: View {
+    private var welcomeBadge: PathBadge {
+        PathBadge(
+            id: "welcome", name: "Welcome to PausePath", symbol: "hand.wave.fill",
+            requirement: "Welcome to PausePath. This badge is yours from day one.",
+            value: 1, target: 1
+        )
+    }
+
     let walks: [TrackedWalk]
     @AppStorage("pausepath.earnedBadges.v1") private var earnedData = Data()
     @State private var selected: PathBadge?
     private var saved: [String: Date] { (try? JSONDecoder().decode([String: Date].self, from: earnedData)) ?? [:] }
-    private var badges: [PathBadge] { PathMilestones(walks: walks).badges }
+    private var badges: [PathBadge] { [welcomeBadge] + PathMilestones(walks: walks).badges }
     private func earned(_ badge: PathBadge) -> Bool { badge.earned || saved[badge.id] != nil }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Label("Your path badges", systemImage: "seal.fill").font(.title3.bold())
                 Spacer()
-                Text("\(badges.filter { earned($0) }.count) / 18").font(.subheadline.monospacedDigit())
+                Text("\(badges.filter { earned($0) }.count) / \(badges.count)").font(.subheadline.monospacedDigit())
             }.foregroundStyle(PausePathPalette.teal)
-            Text("Little milestones. Lasting reminders. Earn these through completed PausePath journeys.")
+            Text("A welcome keepsake plus milestones from your completed PausePath journeys. Locked badges stay muted until you earn them.")
                 .font(.subheadline).foregroundStyle(.secondary)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 94))], spacing: 18) {
-                ForEach(badges) { badge in
-                    Button { selected = badge } label: {
-                        VStack(spacing: 9) {
-                            ZStack(alignment: .bottomTrailing) {
-                                Image(systemName: "seal.fill").font(.system(size: 62)).foregroundStyle(earned(badge) ? PausePathPalette.teal : Color.secondary.opacity(0.12))
-                                Image(systemName: badge.symbol).font(.title3.bold())
-                                    .foregroundStyle(earned(badge) ? PausePathPalette.lime : Color.secondary)
-                                    .frame(width: 62, height: 62)
-                                Image(systemName: earned(badge) ? "checkmark.circle.fill" : "lock.circle.fill")
-                                    .foregroundStyle(earned(badge) ? PausePathPalette.teal : Color.secondary)
-                                    .background(.background, in: Circle())
-                            }
-                            Text(badge.name).font(.caption.weight(.semibold)).multilineTextAlignment(.center)
-                                .foregroundStyle(.primary).frame(minHeight: 34)
-                            ProgressView(value: earned(badge) ? 1 : badge.fraction).tint(PausePathPalette.teal)
-                        }.padding(10).frame(maxWidth: .infinity)
-                            .background(earned(badge) ? PausePathPalette.teal.opacity(0.07) : Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 20))
-                    }.buttonStyle(.plain).accessibilityLabel("\(badge.name), \(earned(badge) ? "earned" : "locked"). \(badge.requirement)")
-                }
+                ForEach(badges) { badge in badgeCard(badge) }
             }
         }
         .onAppear { saveEarned() }
         .onChange(of: walks.map(\.id)) { saveEarned() }
         .sheet(item: $selected) { badge in
+            let isEarned = earned(badge)
+            let style = PathBadgeArtStyle.forID(badge.id)
             NavigationStack {
-                VStack(spacing: 22) {
-                    Image(systemName: badge.symbol).font(.system(size: 56)).foregroundStyle(PausePathPalette.teal)
-                        .padding(30).background(PausePathPalette.lime, in: Circle())
-                    Text(badge.name).font(.title2.bold())
-                    Text(earned(badge) ? "Earned · part of your path" : "A milestone ahead").font(.headline).foregroundStyle(PausePathPalette.teal)
+                VStack(spacing: 18) {
+                    PathBadgeMedallion(badge: badge, isEarned: isEarned, size: 112)
+                    Text(badge.name).font(.title2.bold()).multilineTextAlignment(.center)
+                        .foregroundStyle(isEarned ? style.primary : Color.primary)
+                    Text(isEarned ? "Earned" : "Locked")
+                        .font(.headline).foregroundStyle(isEarned ? style.primary : Color.secondary)
                     Text(badge.requirement).multilineTextAlignment(.center)
-                    if !earned(badge) {
-                        ProgressView(value: badge.fraction).tint(PausePathPalette.teal)
-                        Text("\(min(badge.value, badge.target), specifier: "%.1f") of \(badge.target, specifier: "%.0f")").font(.caption)
+                    if !isEarned {
+                        ProgressView(value: badge.fraction).tint(Color.gray.opacity(0.55))
+                        Text("\(min(badge.value, badge.target), specifier: "%.1f") of \(badge.target, specifier: "%.0f")")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    Text("Your pace. Your path. There’s no deadline.").font(.footnote).foregroundStyle(.secondary)
-                }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity).pausePathSurface()
-                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { selected = nil } } }
+                }
+                .padding(30).frame(maxWidth: .infinity, maxHeight: .infinity).pausePathSurface()
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { selected = nil } }
+                }
             }.presentationDetents([.medium, .large])
         }
     }
+
+    @ViewBuilder private func badgeCard(_ badge: PathBadge) -> some View {
+        let isEarned = earned(badge)
+        let style = PathBadgeArtStyle.forID(badge.id)
+        Button { selected = badge } label: {
+            VStack(spacing: 9) {
+                PathBadgeMedallion(badge: badge, isEarned: isEarned, size: 66)
+                Text(badge.name).font(.caption.weight(.semibold)).multilineTextAlignment(.center)
+                    .foregroundStyle(isEarned ? style.primary : Color.primary).frame(minHeight: 34)
+                if isEarned {
+                    Text("Earned").font(.caption2.weight(.bold)).foregroundStyle(style.primary)
+                } else {
+                    ProgressView(value: badge.fraction).tint(Color.gray.opacity(0.55))
+                }
+            }
+            .padding(10).frame(maxWidth: .infinity)
+            .background(isEarned ? style.primary.opacity(0.09) : Color.gray.opacity(0.035), in: RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(isEarned ? style.primary.opacity(0.28) : Color.gray.opacity(0.10), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(badge.name), \(isEarned ? "earned" : "locked"). \(badge.requirement)")
+    }
+
     private func saveEarned() {
         var result = saved
         for badge in badges where badge.earned && result[badge.id] == nil { result[badge.id] = Date() }
@@ -1233,6 +1353,7 @@ struct PathSectionPicker: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let titles: [String]
     @Binding var selection: String
+    var usesMaterialBackground = true
     var body: some View {
         Group {
         if dynamicTypeSize.isAccessibilitySize {
@@ -1257,7 +1378,10 @@ struct PathSectionPicker: View {
                 .padding(.horizontal, 16).padding(.vertical, 8)
         }
         }
-        }.background(PausePathPalette.background)
+        }.background {
+            if usesMaterialBackground { Rectangle().fill(.regularMaterial) }
+            else { Rectangle().fill(PausePathPalette.background) }
+        }
     }
 }
 
