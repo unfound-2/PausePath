@@ -67,13 +67,15 @@ public struct PausePathProfile: Codable, Equatable, Sendable {
     public var goal: PersonalGoalProfile
     public var weeklyWalkTarget: Int
     public var weeklyMinutesTarget: Int
+    public var weeklyActiveEnergyTargetKcal: Int?
     public var dailyRecapNotifications: Bool
 
-    public init(username: String? = nil, goal: PersonalGoalProfile = .generalFitness, weeklyWalkTarget: Int = 3, weeklyMinutesTarget: Int = 90, dailyRecapNotifications: Bool = false) {
+    public init(username: String? = nil, goal: PersonalGoalProfile = .generalFitness, weeklyWalkTarget: Int = 3, weeklyMinutesTarget: Int = 90, weeklyActiveEnergyTargetKcal: Int? = nil, dailyRecapNotifications: Bool = false) {
         self.username = username
         self.goal = goal
         self.weeklyWalkTarget = weeklyWalkTarget
         self.weeklyMinutesTarget = weeklyMinutesTarget
+        self.weeklyActiveEnergyTargetKcal = weeklyActiveEnergyTargetKcal
         self.dailyRecapNotifications = dailyRecapNotifications
     }
 }

@@ -27,4 +27,18 @@ final class PersonalGoalsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(TrackedWalk.self, from: JSONEncoder().encode(walk))
         XCTAssertEqual(decoded.ownerID, "alice"); XCTAssertEqual(decoded.activityKind, "Running")
     }
+    func testOptionalEnergyGoalPreservesExistingProfiles() throws {
+        let oldProfile = try JSONSerialization.data(withJSONObject: [
+            "goal": PersonalGoalProfile.generalFitness.rawValue,
+            "weeklyWalkTarget": 4,
+            "weeklyMinutesTarget": 90,
+            "dailyRecapNotifications": false
+        ])
+        var profile = try JSONDecoder().decode(PausePathProfile.self, from: oldProfile)
+        XCTAssertNil(profile.weeklyActiveEnergyTargetKcal)
+        XCTAssertEqual(profile.weeklyWalkTarget, 4)
+        profile.weeklyActiveEnergyTargetKcal = 500
+        let saved = try JSONDecoder().decode(PausePathProfile.self, from: JSONEncoder().encode(profile))
+        XCTAssertEqual(saved.weeklyActiveEnergyTargetKcal, 500)
+    }
 }

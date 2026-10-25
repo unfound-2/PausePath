@@ -397,6 +397,20 @@ private struct GoalPreferencesEditor: View {
             Section("Weekly goals") {
                 Stepper("Weekly walks: \(profile.weeklyWalkTarget)", value: Binding(get: { profile.weeklyWalkTarget }, set: { value in var updated = profile; updated.weeklyWalkTarget = value; profileData = (try? JSONEncoder().encode(updated)) ?? profileData }), in: 1...14)
                 Stepper("Weekly minutes: \(profile.weeklyMinutesTarget)", value: Binding(get: { profile.weeklyMinutesTarget }, set: { value in var updated = profile; updated.weeklyMinutesTarget = value; profileData = (try? JSONEncoder().encode(updated)) ?? profileData }), in: 10...600, step: 10)
+                Toggle("Weekly active-calorie goal", isOn: Binding(get: { profile.weeklyActiveEnergyTargetKcal != nil }, set: { enabled in
+                    var updated = profile
+                    updated.weeklyActiveEnergyTargetKcal = enabled ? 500 : nil
+                    profileData = (try? JSONEncoder().encode(updated)) ?? profileData
+                }))
+                if let target = profile.weeklyActiveEnergyTargetKcal {
+                    Stepper("\(target) active kcal", value: Binding(get: { target }, set: { value in
+                        var updated = profile
+                        updated.weeklyActiveEnergyTargetKcal = value
+                        profileData = (try? JSONEncoder().encode(updated)) ?? profileData
+                    }), in: 100...5000, step: 50)
+                    Text("Progress uses available Apple Health daily active-energy readings across all activity. A planned route does not predict calories burned.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             Section { Text("PausePath does not assess medical recovery readiness or safe exertion. Follow your healthcare professional’s advice.").font(.footnote).foregroundStyle(.secondary) }
         }.pausePathSurface()
@@ -491,6 +505,7 @@ struct MyPathView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let health: HealthActivityStore
     @AppStorage("pausepath.trackedWalks") private var trackedData = Data()
+    @AppStorage("pausepath.personalProfile") private var profileData = Data()
     @AppStorage("pausepath.walkFeedback") private var feedbackData = Data()
     @AppStorage("pausepath.demoMode") private var demoMode = false
     @State private var source = "PausePath"
@@ -512,6 +527,7 @@ struct MyPathView: View {
     @State private var exporting = false
     @State private var exportMessage = ""
     private var walks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedData)) ?? [] }
+    private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
     private var walkingHistory: [WalkingHistoryEntry] {
         if demoMode { return WalkingHistoryBuilder.sample() }
         let feedback = (try? JSONDecoder().decode([WalkFeedback].self, from: feedbackData)) ?? []
@@ -563,6 +579,7 @@ struct MyPathView: View {
                         else {
                             Button("Set a weekly goal", systemImage: "plus.circle") { goalEnabled = true }.pathCard()
                         }
+                        if let target = profile.weeklyActiveEnergyTargetKcal { weeklyEnergyGoal(target: target) }
                         WeeklySuggestionsView(preferences: preferences)
                         weeklyRecap
                         Button { pathSection = "History" } label: {
@@ -667,6 +684,29 @@ struct MyPathView: View {
             DisclosureGroup("What counts?", isExpanded: $showGoalExplanation) {
                 Text("All PausePath sessions recorded this calendar week count, including sessions ended early. Apple Health, the summary period and history filters do not change this goal.").font(.caption).foregroundStyle(.secondary)
             }.font(.caption)
+        }.pathCard()
+    }
+    private func weeklyEnergyGoal(target: Int) -> some View {
+        let week = Calendar.current.dateInterval(of: .weekOfYear, for: Date())!
+        let readings = health.days.filter { $0.date >= week.start && $0.date < week.end }.compactMap(\.calories)
+        let total = readings.reduce(0, +)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Active-calorie goal", systemImage: "flame.fill").font(.headline)
+                Spacer()
+                Text("\(target) kcal / week").font(.subheadline.weight(.semibold))
+            }
+            if readings.isEmpty {
+                Text("No Apple Health active-energy reading available this week.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                ProgressView(value: min(total, Double(target)), total: Double(target))
+                    .tint(PausePathPalette.teal)
+                Text("\(Int(total)) of \(target) active kcal recorded")
+                    .font(.subheadline)
+            }
+            Text("Apple Health daily totals · all activity, not a route estimate")
+                .font(.caption).foregroundStyle(.secondary)
         }.pathCard()
     }
     private var goalEditButton: some View {

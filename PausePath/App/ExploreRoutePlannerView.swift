@@ -173,8 +173,11 @@ struct ExploreRoutePlannerView: View {
                         Text("Closed and restricted benches are excluded. Unknown availability stays marked.").font(.caption).foregroundStyle(.secondary)
                         Button("Update choices") { requestRoutes(for: UUID()) }.disabled(discovery.isLoading || destination == nil)
                     } label: {
-                        Label("Rest stops · up to \(Int(requestedRestGap)) m apart", systemImage: "chair.lounge.fill")
-                            .font(.subheadline.weight(.semibold))
+                        HStack(spacing: 8) {
+                            BenchSymbol().fill(PausePathPalette.teal).frame(width: 18, height: 18)
+                            Text("Rest stops · up to \(Int(requestedRestGap)) m apart")
+                                .font(.subheadline.weight(.semibold))
+                        }
                     }.padding(14).background(PausePathPalette.teal.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
 
                     if !status.isEmpty { Text(status).font(.callout).foregroundStyle(.secondary) }

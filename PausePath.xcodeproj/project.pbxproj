@@ -5,6 +5,16 @@
 	"objectVersion" = "56";
 	"archiveVersion" = "1";
 	"objects" = {
+		"A56B67A4424C4C54A3073401" = {
+			"path" = "PausePath/Resources/PausePathWalkthrough.mp4";
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "file";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"A56B67A4424C4C54A3073402" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "A56B67A4424C4C54A3073401";
+		};
 		"0000000000000000000000CD" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "000000000000000000000069";
@@ -72,6 +82,7 @@
 			"sourceTree" = "<group>";
 			"children" = (
 				"000000000000000000000036",
+				"A56B67A4424C4C54A3073401",
 				"0000000000000000000002BE",
 				"0000000000000000000002C9",
 				"0000000000000000000002D1",
@@ -256,6 +267,7 @@
 			"files" = (
 				"000000000000000000000034",
 				"000000000000000000000035",
+				"A56B67A4424C4C54A3073402",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 		};
