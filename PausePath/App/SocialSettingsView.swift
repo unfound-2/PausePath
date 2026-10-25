@@ -365,61 +365,176 @@ struct SocialInboxView: View {
     @State private var store = SocialActivityStore.shared
     @State private var account = PausePathAccount.shared
     @State private var selectedGroup: WalkingCommunity?
+    @State private var requests: [SocialFriend] = []
+    @State private var requestError: String?
+    @State private var loading = false
+    @State private var refreshAgain = false
     @State private var message = ""
     @State private var busy = false
+    @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         List {
-            if !account.isSignedIn { Section { NavigationLink("Sign in with Apple") { AccountView() }; Text("Sign in to receive friend, walk and shared-goal updates.").font(.caption).foregroundStyle(.secondary) } }
-            Section { NavigationLink { FriendsSettingsView() } label: { Label("Friends & requests", systemImage: "person.2") } }
-            if !store.invitations.isEmpty {
-                Section("Walk invitations") {
-                    ForEach(store.invitations) { invite in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(invite.title).font(.headline)
-                            Text("@\(invite.sender) · \(invite.community_name)").font(.subheadline)
-                            if let date = SocialAPI.date(invite.starts_at) { Text(date.formatted()).font(.caption).foregroundStyle(.secondary) }
-                            Text("Accepting joins this community and RSVPs to the walk. Group members will see your username.").font(.caption).foregroundStyle(.secondary)
-                            HStack {
-                                Button("Join group & walk") { respond(invite,true) }
-                                Button("Decline") { respond(invite,false) }
-                            }.font(.subheadline).buttonStyle(.bordered).disabled(busy)
-                        }.padding(.vertical,5)
+            if !account.isSignedIn {
+                Section {
+                    ContentUnavailableView("Your updates live here", systemImage: "tray", description: Text("Sign in to receive requests, invitations, and group updates."))
+                    NavigationLink("Sign in with Apple") { AccountView() }
+                }
+            } else {
+                if loading && requests.isEmpty && store.notifications.isEmpty && store.invitations.isEmpty {
+                    Section { ProgressView("Checking your inbox…") }
+                }
+                incomingRequests
+                walkInvitations
+                updates
+                if !loading && requests.isEmpty && store.notifications.isEmpty && store.invitations.isEmpty && store.error == nil && requestError == nil {
+                    Section {
+                        ContentUnavailableView("You're all caught up", systemImage: "tray", description: Text("New requests, walk invites, and group updates appear here. Find people from Friends on the Community page."))
                     }
                 }
             }
-            if account.isSignedIn {
-                Section("Updates") {
-                    ForEach(store.notifications) { notification in
+            if let error = requestError ?? store.error {
+                Section { Label(error, systemImage: "wifi.exclamationmark"); Button("Retry") { Task { await refresh() } }.disabled(loading || busy) }
+            }
+            if !message.isEmpty { Section { Text(message).font(.callout).foregroundStyle(.secondary) } }
+        }.listStyle(.insetGrouped).pausePathSurface().navigationTitle("Inbox").navigationBarTitleDisplayMode(.inline)
+            .task(id: account.userID) { requests = []; requestError = nil; message = ""; selectedGroup = nil; await refresh() }
+            .refreshable { await refresh() }
+            .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await refresh() } } }
+            .onReceive(NotificationCenter.default.publisher(for: .pausePathSocialChanged)) { _ in Task { await refresh() } }
+            .sheet(item: $selectedGroup) { community in
+                NavigationStack {
+                    CommunityHubView(community: community)
+                        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { selectedGroup = nil } } }
+                }
+            }
+    }
+    @ViewBuilder private var incomingRequests: some View {
+        if !requests.isEmpty {
+            Section("Friend requests") {
+                ForEach(requests) { friend in
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("@" + friend.username, systemImage: "person.crop.circle").font(.headline).foregroundStyle(PausePathPalette.teal)
+                        Text("Wants to join your walking crew.").font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Button("Accept") { respondToFriend(friend, accept: true) }.tint(PausePathPalette.teal)
+                            Button("Decline") { respondToFriend(friend, accept: false) }
+                        }.buttonStyle(.bordered).disabled(busy)
+                    }.padding(.vertical, 8)
+                }
+            }
+        }
+    }
+    @ViewBuilder private var walkInvitations: some View {
+        if !store.invitations.isEmpty {
+            Section("Walk invitations") {
+                ForEach(store.invitations) { invite in
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label(invite.title, systemImage: "figure.walk").font(.headline).foregroundStyle(PausePathPalette.teal)
+                        Text("@\(invite.sender) · \(invite.community_name)").font(.subheadline)
+                        if let date = SocialAPI.date(invite.starts_at) { Text(date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
+                        Text("Accepting joins the group and RSVPs to this walk.").font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Button("Join group & walk") { respond(invite, true) }.tint(PausePathPalette.teal)
+                            Button("Decline") { respond(invite, false) }
+                        }.buttonStyle(.bordered).disabled(busy)
+                    }.padding(.vertical, 8)
+                }
+            }
+        }
+    }
+    @ViewBuilder private var updates: some View {
+        if !store.notifications.isEmpty {
+            Section {
+                ForEach(store.notifications) { notification in
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: notification.category == "walks" ? "figure.walk" : (notification.category == "goals" ? "flag" : "person.badge.plus"))
+                            .foregroundStyle(PausePathPalette.teal).frame(width: 34, height: 34)
+                            .background(PausePathPalette.teal.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(alignment: .top) {
-                                if notification.read_at == nil { Circle().fill(PausePathPalette.teal).frame(width: 7,height: 7).padding(.top,6).accessibilityLabel("Unread") }
-                                Text(notification.message).font(.subheadline)
+                                Text(notification.message).font(.subheadline.weight(notification.read_at == nil ? .semibold : .regular))
+                                if notification.read_at == nil { Circle().fill(PausePathPalette.teal).frame(width: 6, height: 6).padding(.top, 6).accessibilityLabel("Unread") }
                             }
-                            if let date = SocialAPI.date(notification.created_at) { Text(date.formatted()).font(.caption).foregroundStyle(.secondary) }
-                            if let group = notification.community_id { Button("Open community") { Task { await open(group, notification: notification.id) } }.disabled(busy) }
-                            else if notification.read_at == nil { Button("Mark read") { Task { try? await SocialAPI.post("inbox/read",["ids":[notification.id.uuidString]]); await store.refresh() } } }
-                        }.padding(.vertical,5)
-                    }
-                    if store.notifications.isEmpty && store.invitations.isEmpty { ContentUnavailableView("All caught up",systemImage: "tray",description: Text("Friend, walk and goal updates will appear here.")) }
+                            if let date = SocialAPI.date(notification.created_at) { Text(date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
+                            if let group = notification.community_id {
+                                Button("View group") { Task { await open(group, notification: notification.id) } }.font(.caption.weight(.semibold)).disabled(busy)
+                            } else if notification.read_at == nil {
+                                Button("Mark read") { Task { await markRead([notification.id]) } }.font(.caption).disabled(busy)
+                            }
+                        }
+                    }.padding(.vertical, 6)
+                }
+            } header: {
+                HStack {
+                    Text("Recent updates")
+                    Spacer()
+                    if store.unread > 0 { Button("Mark all read") { Task { await markRead(store.notifications.filter { $0.read_at == nil }.map(\.id)) } }.textCase(nil).disabled(busy) }
                 }
             }
-            if let error = store.error { Text(error).font(.callout) }
-            if !message.isEmpty { Text(message) }
-        }.pausePathSurface().navigationTitle("Community inbox").navigationBarTitleDisplayMode(.inline)
-            .task(id: account.userID) { await store.refresh() }.refreshable { await store.refresh() }
-            .sheet(item: $selectedGroup) { community in NavigationStack { CommunityHubView(community: community) } }
+        }
     }
-    private func respond(_ invite: SocialInvitation,_ accept: Bool) {
-        busy = true
-        Task { defer { busy = false }; do { try await SocialAPI.post("invitations/\(invite.id)",["accept":accept]); message = accept ? "Joined \(invite.community_name) and RSVPed to the walk." : "Invitation declined."; await store.refresh() } catch { message = error.localizedDescription } }
+    @MainActor private func refresh() async {
+        guard let owner = account.userID else { return }
+        if loading { refreshAgain = true; return }
+        loading = true
+        defer {
+            loading = false
+            if refreshAgain { refreshAgain = false; Task { await refresh() } }
+        }
+        requestError = nil
+        await store.refresh()
+        do {
+            let profile: ProfileResponse = try await SocialAPI.get("profile")
+            guard account.userID == owner, !Task.isCancelled else { return }
+            if profile.profile != nil {
+                let response: FriendsResponse = try await SocialAPI.get("friends")
+                guard account.userID == owner, !Task.isCancelled else { return }
+                requests = response.friends.filter { $0.status == "pending" && $0.incoming }
+            } else { requests = [] }
+        } catch { if owner == account.userID, !Task.isCancelled { requestError = "Friend requests couldn't refresh. Pull down to retry." } }
     }
-    private func open(_ group: UUID,notification: UUID) async {
-        busy = true; defer { busy = false }
+    private func respondToFriend(_ friend: SocialFriend, accept: Bool) {
+        guard !busy else { return }; busy = true
+        let owner = account.userID
+        Task {
+            defer { busy = false }
+            do {
+                try await SocialAPI.post("friends/\(friend.id)", ["action": accept ? "accept" : "decline"])
+                guard account.userID == owner else { return }
+                requests.removeAll { $0.id == friend.id }
+                message = accept ? "@\(friend.username) is now your friend." : "Request declined."
+                await refresh()
+            } catch { if account.userID == owner { message = error.localizedDescription } }
+        }
+    }
+    private func respond(_ invite: SocialInvitation, _ accept: Bool) {
+        guard !busy else { return }; busy = true
+        let owner = account.userID
+        Task {
+            defer { busy = false }
+            do {
+                try await SocialAPI.post("invitations/\(invite.id)", ["accept": accept])
+                guard account.userID == owner else { return }
+                message = accept ? "Joined \(invite.community_name) and RSVPed to the walk." : "Invitation declined."
+                await refresh()
+            } catch { if account.userID == owner { message = error.localizedDescription } }
+        }
+    }
+    @MainActor private func markRead(_ ids: [UUID]) async {
+        guard !busy, !ids.isEmpty else { return }; busy = true; defer { busy = false }
+        do { try await SocialAPI.post("inbox/read", ["ids": ids.map(\.uuidString)]); await store.refresh() }
+        catch { message = error.localizedDescription }
+    }
+    private func open(_ group: UUID, notification: UUID) async {
+        guard !busy else { return }; busy = true; defer { busy = false }
+        let owner = account.userID
         do {
             let groups = try await PausePathAPI.communities()
+            guard account.userID == owner else { return }
             guard let match = groups.first(where: { $0.id == group }) else { message = "This group is no longer available, or its invitation needs accepting first."; return }
-            try await SocialAPI.post("inbox/read",["ids":[notification.uuidString]])
+            try await SocialAPI.post("inbox/read", ["ids": [notification.uuidString]])
+            guard account.userID == owner else { return }
             selectedGroup = match; await store.refresh()
-        } catch { message = error.localizedDescription }
+        } catch { if account.userID == owner { message = error.localizedDescription } }
     }
 }
