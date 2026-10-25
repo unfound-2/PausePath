@@ -314,50 +314,291 @@ public enum WalkingHistoryBuilder {
     }
 }
 
-public struct WalkingTrendSummary: Sendable {
-    public let weeklyAverageMinutes: [Double]
-    public let fittedMinutes: [Double]
-    public let slopeMinutesPerDayPerWeek: Double
-    public let baselineAverage: Double
-    public let recentAverage: Double
-    public let percentChange: Double?
-    public let totalMinutes: Double
-    public let additionalMinutesOverBaseline: Double
+public enum WeeklyWalkingCoverage: String, Sendable {
+    case observed, noRecordedSession, invalidRecords
+}
 
-    public static func calculate(weeklyAverageMinutes values: [Double]) -> Self? {
-        guard values.count >= 2, values.allSatisfy({ $0.isFinite && $0 >= 0 }) else { return nil }
-        let n = Double(values.count)
-        let xMean = (n - 1) / 2
-        let yMean = values.reduce(0, +) / n
-        let denominator = (0..<values.count).reduce(0.0) { $0 + pow(Double($1) - xMean, 2) }
-        let slope = zip(values.indices, values).reduce(0.0) { $0 + (Double($1.0) - xMean) * ($1.1 - yMean) } / denominator
-        let fit = values.indices.map { yMean + slope * (Double($0) - xMean) }
-        let half = values.count / 2
-        let baseline = values.prefix(half).reduce(0, +) / Double(half)
-        let recent = values.suffix(half).reduce(0, +) / Double(half)
-        let total = values.reduce(0, +) * 7
-        return Self(weeklyAverageMinutes: values, fittedMinutes: fit, slopeMinutesPerDayPerWeek: slope,
-            baselineAverage: baseline, recentAverage: recent, percentChange: baseline > 0 ? (recent - baseline) / baseline * 100 : nil,
-            totalMinutes: total, additionalMinutesOverBaseline: total - baseline * Double(values.count) * 7)
+/// A missing week is an unknown observation, never an observed zero.
+public struct WeeklyWalkingObservation: Sendable {
+    public let weekStart: Date
+    public let weekEnd: Date
+    public let minutesPerDay: Double?
+    public let validForFit: Bool
+    public let weight: Double
+    public let coverage: WeeklyWalkingCoverage
+    public let recordCount: Int
+    public init(weekStart: Date, weekEnd: Date, minutesPerDay: Double?, validForFit: Bool,
+                weight: Double, coverage: WeeklyWalkingCoverage, recordCount: Int) {
+        self.weekStart = weekStart; self.weekEnd = weekEnd; self.minutesPerDay = minutesPerDay
+        self.validForFit = validForFit; self.weight = weight; self.coverage = coverage; self.recordCount = recordCount
+    }
+}
+
+public struct WalkingTrendPoint: Sendable {
+    public let weekCoordinate: Double
+    public let minutesPerDay: Double
+}
+
+public struct WalkingTrendSummary: Sendable {
+    public enum Status: Sendable { case ready, insufficient, invalid }
+    public enum LambdaMethod: Sendable { case generalizedCrossValidation, fixedSmallSample }
+    public let status: Status
+    public let observations: [WeeklyWalkingObservation]
+    public let observedPoints: [WalkingTrendPoint]
+    public let fittedPoints: [WalkingTrendPoint]
+    public let curve: [WalkingTrendPoint]
+    /// Spline derivative at each observed knot, in recorded minutes/day/week.
+    public let derivativePoints: [WalkingTrendPoint]
+    public let lambda: Double?
+    public let lambdaMethod: LambdaMethod?
+    public let weightedResidual: Double?
+    public let limitation: String?
+    /// Derivative at the latest observed week, in recorded minutes/day/week.
+    public let slopeMinutesPerDayPerWeek: Double?
+    public let baselineAverage: Double?
+    public let recentAverage: Double?
+    public let percentChange: Double?
+    public let totalObservedMinutes: Double
+    public let additionalMinutesOverBaseline: Double?
+
+    private init(status: Status, observations: [WeeklyWalkingObservation], observedPoints: [WalkingTrendPoint],
+                 fittedPoints: [WalkingTrendPoint] = [], curve: [WalkingTrendPoint] = [],
+                 derivativePoints: [WalkingTrendPoint] = [], lambda: Double? = nil,
+                 lambdaMethod: LambdaMethod? = nil, weightedResidual: Double? = nil, limitation: String? = nil,
+                 slope: Double? = nil, baseline: Double? = nil, recent: Double? = nil,
+                 percentChange: Double? = nil, total: Double = 0, additional: Double? = nil) {
+        self.status = status; self.observations = observations; self.observedPoints = observedPoints
+        self.fittedPoints = fittedPoints; self.curve = curve; self.derivativePoints = derivativePoints
+        self.lambda = lambda; self.lambdaMethod = lambdaMethod
+        self.weightedResidual = weightedResidual; self.limitation = limitation
+        self.slopeMinutesPerDayPerWeek = slope; self.baselineAverage = baseline; self.recentAverage = recent
+        self.percentChange = percentChange; self.totalObservedMinutes = total; self.additionalMinutesOverBaseline = additional
     }
 
-    public static func calculate(history: [WalkingHistoryEntry], reference: Date = .now, calendar: Calendar = .current) -> Self? {
-        guard !history.isEmpty, let thisWeek = calendar.dateInterval(of: .weekOfYear, for: reference)?.start else { return nil }
-        var recordedWeeks = 0
-        let values = (0..<8).map { week -> Double in
-            guard let start = calendar.date(byAdding: .weekOfYear, value: week - 8, to: thisWeek),
-                  let end = calendar.date(byAdding: .day, value: 7, to: start) else { return 0 }
-            let relevant = history.filter { $0.start < end && $0.end > start }
-            if !relevant.isEmpty { recordedWeeks += 1 }
-            let seconds = relevant.reduce(0.0) { total, entry in
-                let overlap = max(0, min(entry.end, end).timeIntervalSince(max(entry.start, start)))
-                let duration = max(1, entry.end.timeIntervalSince(entry.start))
-                return total + entry.activeSeconds * overlap / duration
-            }
-            return seconds / 60 / 7
+    /// Eight complete, consecutive synthetic weeks; this path never reads personal records.
+    public static func calculate(weeklyAverageMinutes values: [Double]) -> Self {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let anchor = Date(timeIntervalSince1970: 1_767_571_200) // 2026-01-05 UTC
+        let observations = values.enumerated().compactMap { index, value -> WeeklyWalkingObservation? in
+            guard let start = calendar.date(byAdding: .weekOfYear, value: index, to: anchor),
+                  let end = calendar.date(byAdding: .weekOfYear, value: 1, to: start) else { return nil }
+            return WeeklyWalkingObservation(weekStart: start, weekEnd: end, minutesPerDay: value,
+                                            validForFit: true, weight: 1, coverage: .observed, recordCount: 7)
         }
-        guard recordedWeeks >= 2 else { return nil }
-        return calculate(weeklyAverageMinutes: values)
+        return calculate(observations: observations, calendar: calendar)
+    }
+
+    public static func calculate(history: [WalkingHistoryEntry], reference: Date = .now, calendar: Calendar = .current) -> Self {
+        if history.contains(where: { $0.source == .sample }) && history.contains(where: { $0.source != .sample }) {
+            return Self(status: .invalid, observations: [], observedPoints: [],
+                        limitation: "Sample and personal records cannot be combined.")
+        }
+        guard let thisWeek = calendar.dateInterval(of: .weekOfYear, for: reference)?.start else {
+            return calculate(observations: [], calendar: calendar)
+        }
+        let observations = (0..<8).compactMap { week -> WeeklyWalkingObservation? in
+            guard let start = calendar.date(byAdding: .weekOfYear, value: week - 8, to: thisWeek),
+                  let end = calendar.date(byAdding: .weekOfYear, value: 1, to: start) else { return nil }
+            // The caller supplies either personal history or the separate synthetic fixture.
+            let relevant = history.filter { $0.start < end && $0.end > start }
+            let valid = relevant.filter { $0.activeSeconds.isFinite && $0.activeSeconds > 0 && $0.end > $0.start }
+            let seconds = valid.reduce(0.0) { total, entry in
+                let overlap = max(0, min(entry.end, end).timeIntervalSince(max(entry.start, start)))
+                return total + entry.activeSeconds * overlap / entry.end.timeIntervalSince(entry.start)
+            }
+            let days = calendar.dateComponents([.day], from: start, to: end).day ?? 7
+            let hasValue = !valid.isEmpty && seconds.isFinite && seconds > 0 && days > 0
+            return WeeklyWalkingObservation(weekStart: start, weekEnd: end,
+                minutesPerDay: hasValue ? seconds / 60 / Double(days) : nil,
+                validForFit: hasValue, weight: hasValue ? 1 : 0,
+                coverage: hasValue ? .observed : relevant.isEmpty ? .noRecordedSession : .invalidRecords,
+                recordCount: valid.count)
+        }
+        return calculate(observations: observations, calendar: calendar)
+    }
+
+    public static func calculate(observations: [WeeklyWalkingObservation], calendar: Calendar = .current) -> Self {
+        guard !observations.isEmpty, observations.count <= 16,
+              observations.allSatisfy({ $0.weekStart.timeIntervalSinceReferenceDate.isFinite &&
+                  $0.weekEnd.timeIntervalSinceReferenceDate.isFinite && $0.weekStart < $0.weekEnd &&
+                  calendar.dateComponents([.day], from: $0.weekStart, to: $0.weekEnd).day == 7 &&
+                  $0.weight.isFinite && $0.weight >= 0 && $0.recordCount >= 0 &&
+                  ($0.minutesPerDay == nil || ($0.minutesPerDay!.isFinite && $0.minutesPerDay! >= 0)) &&
+                  (!$0.validForFit || ($0.coverage == .observed && $0.minutesPerDay != nil && $0.weight > 0 && $0.recordCount > 0)) }),
+              zip(observations, observations.dropFirst()).allSatisfy({ $0.weekEnd <= $1.weekStart }) else {
+            return Self(status: .invalid, observations: observations, observedPoints: [], limitation: "Invalid weekly records.")
+        }
+        let first = observations[0].weekStart
+        let points = observations.compactMap { observation -> (WalkingTrendPoint, Double)? in
+            guard observation.validForFit, observation.coverage == .observed,
+                  let value = observation.minutesPerDay, observation.weight > 0,
+                  observation.recordCount > 0 else { return nil }
+            let days = calendar.dateComponents([.day], from: first, to: observation.weekStart).day ?? -1
+            guard days >= 0 else { return nil }
+            return (WalkingTrendPoint(weekCoordinate: Double(days) / 7, minutesPerDay: value), observation.weight)
+        }
+        let observed = points.map(\.0)
+        let total = observations.compactMap { item -> Double? in
+            guard item.validForFit, item.coverage == .observed, item.weight > 0,
+                  item.recordCount > 0, let value = item.minutesPerDay else { return nil }
+            let days = calendar.dateComponents([.day], from: item.weekStart, to: item.weekEnd).day ?? 0
+            return value * Double(days)
+        }.reduce(0, +)
+        guard total.isFinite else {
+            return Self(status: .invalid, observations: observations, observedPoints: observed,
+                        limitation: "The recorded minutes are outside the supported range.")
+        }
+        // Fixed four-calendar-week windows: do not substitute earlier valid weeks for missing ones.
+        let baseline = windowAverage(observations.prefix(4))
+        let recent = observations.count == 8 ? windowAverage(observations.suffix(4)) : nil
+        let comparisonReady = observations.count == 8 && observations.allSatisfy {
+            $0.validForFit && $0.coverage == .observed && $0.weight > 0 && $0.recordCount > 0 && $0.minutesPerDay != nil
+        }
+        let additional = comparisonReady && baseline != nil ? total - baseline! * 56 : nil
+        let change = baseline.flatMap { base in base > 0 ? recent.map { ($0 - base) / base * 100 } : nil }
+        guard points.count >= 4 else {
+            return Self(status: .insufficient, observations: observations, observedPoints: observed,
+                        limitation: "At least four weeks with recorded sessions are needed.", baseline: baseline,
+                        recent: recent, percentChange: change, total: total, additional: additional)
+        }
+        let x = observed.map(\.weekCoordinate), y = observed.map(\.minutesPerDay), w = points.map(\.1)
+        guard zip(x, x.dropFirst()).allSatisfy({ $1 - $0 > 0.000001 }),
+              let fit = CubicWalkingSpline.fit(x: x, y: y, weights: w) else {
+            return Self(status: .invalid, observations: observations, observedPoints: observed,
+                        limitation: "The recorded weeks could not be fitted.", baseline: baseline,
+                        recent: recent, percentChange: change, total: total, additional: additional)
+        }
+        return Self(status: .ready, observations: observations, observedPoints: observed,
+                    fittedPoints: zip(x, fit.fitted).map { WalkingTrendPoint(weekCoordinate: $0, minutesPerDay: $1) },
+                    curve: fit.samples,
+                    derivativePoints: zip(x, fit.derivatives).map { WalkingTrendPoint(weekCoordinate: $0, minutesPerDay: $1) },
+                    lambda: fit.lambda, lambdaMethod: fit.method,
+                    weightedResidual: fit.residual, limitation: fit.method == .fixedSmallSample
+                        ? "Only four or five observed weeks; smoothing uses a fixed small-sample setting." : nil,
+                    slope: fit.slopeAtLast, baseline: baseline, recent: recent,
+                    percentChange: change, total: total, additional: additional)
+    }
+
+    private static func windowAverage<S: Sequence>(_ weeks: S) -> Double? where S.Element == WeeklyWalkingObservation {
+        let values = Array(weeks)
+        guard values.count == 4, values.allSatisfy({ $0.validForFit && $0.coverage == .observed &&
+            $0.weight > 0 && $0.recordCount > 0 && $0.minutesPerDay != nil }) else { return nil }
+        return values.compactMap(\.minutesPerDay).reduce(0, +) / 4
+    }
+}
+
+/// Reinsch's natural cubic smoothing spline. For knots x and fitted knot values f,
+/// integral (f'')² = fᵀ Q R⁻¹ Qᵀ f. Solve (R + λ Qᵀ W⁻¹ Q)u = Qᵀy, then
+/// f = y − λ W⁻¹Qu. Dense pivoted elimination is bounded to 16 weeks here.
+/// GCV tries 21 fixed log-spaced λ values and computes tr(I−S) from A⁻¹B;
+/// complexity is O(21 n⁴) with these tiny bounded matrices.
+private enum CubicWalkingSpline {
+    struct Fit {
+        let fitted: [Double]
+        let samples: [WalkingTrendPoint]
+        let derivatives: [Double]
+        let slopeAtLast: Double
+        let lambda: Double
+        let method: WalkingTrendSummary.LambdaMethod
+        let residual: Double
+    }
+    static func fit(x: [Double], y: [Double], weights w: [Double]) -> Fit? {
+        let n = x.count, m = n - 2
+        guard n >= 4, n <= 16, y.count == n, w.count == n,
+              x.allSatisfy(\.isFinite), y.allSatisfy(\.isFinite),
+              w.allSatisfy({ $0.isFinite && $0 > 0 }),
+              zip(x, x.dropFirst()).allSatisfy({ $1 - $0 > 0.000001 }) else { return nil }
+        let h = zip(x, x.dropFirst()).map { $1 - $0 }
+        var q = Array(repeating: Array(repeating: 0.0, count: m), count: n)
+        var r = Array(repeating: Array(repeating: 0.0, count: m), count: m)
+        for j in 0..<m {
+            q[j][j] = 1 / h[j]
+            q[j + 1][j] = -1 / h[j] - 1 / h[j + 1]
+            q[j + 2][j] = 1 / h[j + 1]
+            r[j][j] = (h[j] + h[j + 1]) / 3
+            if j + 1 < m { r[j][j + 1] = h[j + 1] / 6; r[j + 1][j] = h[j + 1] / 6 }
+        }
+        let b = (0..<m).map { i in (0..<m).map { j in (0..<n).reduce(0.0) { $0 + q[$1][i] * q[$1][j] / w[$1] } } }
+        let qty = (0..<m).map { j in (0..<n).reduce(0.0) { $0 + q[$1][j] * y[$1] } }
+        let candidates: [Double] = n < 6 ? [1] : (-8...12).map { pow(10, Double($0) / 2) }
+        var winner: (lambda: Double, fitted: [Double], residual: Double, gcv: Double)?
+        for lambda in candidates {
+            let a = (0..<m).map { i in (0..<m).map { j in r[i][j] + lambda * b[i][j] } }
+            guard let u = solve(a, qty) else { continue }
+            let fitted = (0..<n).map { i in y[i] - lambda / w[i] * (0..<m).reduce(0.0) { $0 + q[i][$1] * u[$1] } }
+            let residual = (0..<n).reduce(0.0) { $0 + w[$1] * pow(y[$1] - fitted[$1], 2) }
+            guard fitted.allSatisfy(\.isFinite), residual.isFinite else { continue }
+            var trace = 0.0
+            if n >= 6 {
+                for column in 0..<m {
+                    let rhs = (0..<m).map { b[$0][column] }
+                    guard let solved = solve(a, rhs) else { trace = .nan; break }
+                    trace += solved[column]
+                }
+            }
+            let denominator = lambda * trace
+            let gcv = n < 6 ? residual : (denominator > 1e-10 ? Double(n) * residual / (denominator * denominator) : .infinity)
+            guard gcv.isFinite else { continue }
+            if winner == nil || gcv < winner!.gcv - 1e-12 { winner = (lambda, fitted, residual, gcv) }
+        }
+        guard let best = winner else { return nil }
+        // Natural cubic interpolation through the smoothed knots gives a C² curve.
+        var second = Array(repeating: 0.0, count: n)
+        if m > 0 {
+            let system = (0..<m).map { i in (0..<m).map { j -> Double in
+                if i == j { return 2 * (h[i] + h[i + 1]) }
+                if abs(i - j) == 1 { return h[max(i, j)] }
+                return 0
+            } }
+            let rhs = (0..<m).map { i in 6 * ((best.fitted[i + 2] - best.fitted[i + 1]) / h[i + 1] -
+                                                  (best.fitted[i + 1] - best.fitted[i]) / h[i]) }
+            guard let interior = solve(system, rhs) else { return nil }
+            for i in 0..<m { second[i + 1] = interior[i] }
+        }
+        var samples: [WalkingTrendPoint] = []
+        var derivatives: [Double] = []
+        var lastSlope = 0.0
+        for i in 0..<(n - 1) {
+            let width = h[i]
+            let linear = (best.fitted[i + 1] - best.fitted[i]) / width - width * (2 * second[i] + second[i + 1]) / 6
+            let cubic = (second[i + 1] - second[i]) / (6 * width)
+            derivatives.append(linear)
+            for part in 0..<8 {
+                let dx = width * Double(part) / 8
+                let value = best.fitted[i] + linear * dx + second[i] * dx * dx / 2 + cubic * dx * dx * dx
+                samples.append(WalkingTrendPoint(weekCoordinate: x[i] + dx, minutesPerDay: value))
+            }
+            if i == n - 2 { lastSlope = linear + second[i] * width + 3 * cubic * width * width }
+        }
+        derivatives.append(lastSlope)
+        samples.append(WalkingTrendPoint(weekCoordinate: x[n - 1], minutesPerDay: best.fitted[n - 1]))
+        guard derivatives.allSatisfy(\.isFinite), samples.allSatisfy({ $0.minutesPerDay.isFinite }) else { return nil }
+        return Fit(fitted: best.fitted, samples: samples, derivatives: derivatives, slopeAtLast: lastSlope,
+                   lambda: best.lambda, method: n < 6 ? .fixedSmallSample : .generalizedCrossValidation,
+                   residual: best.residual)
+    }
+    private static func solve(_ matrix: [[Double]], _ rhs: [Double]) -> [Double]? {
+        let n = rhs.count
+        guard matrix.count == n, matrix.allSatisfy({ $0.count == n }), rhs.allSatisfy(\.isFinite) else { return nil }
+        var a = matrix, b = rhs
+        for col in 0..<n {
+            guard let pivot = (col..<n).max(by: { abs(a[$0][col]) < abs(a[$1][col]) }),
+                  abs(a[pivot][col]) > 1e-12, a[pivot][col].isFinite else { return nil }
+            a.swapAt(col, pivot); b.swapAt(col, pivot)
+            for row in (col + 1)..<n {
+                let factor = a[row][col] / a[col][col]
+                for j in col..<n { a[row][j] -= factor * a[col][j] }
+                b[row] -= factor * b[col]
+            }
+        }
+        var solution = Array(repeating: 0.0, count: n)
+        for row in (0..<n).reversed() {
+            let tail = (row + 1..<n).reduce(0.0) { $0 + a[row][$1] * solution[$1] }
+            solution[row] = (b[row] - tail) / a[row][row]
+            guard solution[row].isFinite else { return nil }
+        }
+        return solution
     }
 }
 
@@ -368,58 +609,155 @@ public struct RouteFeatureSnapshot: Sendable {
     public let maximumGradePercent: Double?
     public let surface: String?
     public let crossings: String?
+    public let crossingCount: Int?
+    public let confirmedRestPoints: Int?
+    /// nil is unknown; false means a required stop is known unavailable.
+    public let requiredFacilitiesAvailable: Bool?
     public let longestRestGapMeters: Double?
     public let restStatus: RestGapAssessment.Status
     public let facilityKinds: Set<FacilityKind>
     public init(id: String, distanceMeters: Double, estimatedSeconds: Double, maximumGradePercent: Double? = nil,
-                surface: String? = nil, crossings: String? = nil, longestRestGapMeters: Double? = nil,
-                restStatus: RestGapAssessment.Status, facilityKinds: Set<FacilityKind>) {
+                surface: String? = nil, crossings: String? = nil, crossingCount: Int? = nil,
+                confirmedRestPoints: Int? = nil, requiredFacilitiesAvailable: Bool? = nil,
+                longestRestGapMeters: Double? = nil, restStatus: RestGapAssessment.Status,
+                facilityKinds: Set<FacilityKind>) {
         self.id = id; self.distanceMeters = distanceMeters; self.estimatedSeconds = estimatedSeconds
         self.maximumGradePercent = maximumGradePercent; self.surface = surface; self.crossings = crossings
+        self.crossingCount = crossingCount; self.confirmedRestPoints = confirmedRestPoints
+        self.requiredFacilitiesAvailable = requiredFacilitiesAvailable
         self.longestRestGapMeters = longestRestGapMeters; self.restStatus = restStatus; self.facilityKinds = facilityKinds
     }
 }
 
+public struct RouteCostWeights: Sendable {
+    public let distance: Double, grade: Double, crossings: Double, restPoints: Double, uncertainty: Double
+    public static let standard = RouteCostWeights(distance: 0.35, grade: 0.15, crossings: 0.10,
+                                                   restPoints: 0.15, uncertainty: 0.25)
+    public init(distance: Double, grade: Double, crossings: Double, restPoints: Double, uncertainty: Double) {
+        self.distance = distance; self.grade = grade; self.crossings = crossings
+        self.restPoints = restPoints; self.uncertainty = uncertainty
+    }
+    public var isValid: Bool {
+        let values = [distance, grade, crossings, restPoints, uncertainty]
+        return values.allSatisfy { $0.isFinite && $0 >= 0 } && abs(values.reduce(0, +) - 1) <= 0.000001
+    }
+}
+
+public struct RouteCostComponents: Sendable {
+    public let distance: Double, grade: Double, crossings: Double, restPoints: Double, uncertainty: Double
+    public var total: Double { distance + grade + crossings + restPoints + uncertainty }
+}
+
 public struct RouteSuggestion: Sendable {
     public let routeID: String
+    /// Lower is better; this is a planning cost, not a safety score.
     public let score: Double
-    public let confidence: Double
+    public let dataCompleteness: Double
     public let provisional: Bool
     public let reason: String
     public let unknownDetails: [String]
+    public let components: RouteCostComponents
+    public let eligibility: String
+}
+
+public struct RouteExclusion: Sendable {
+    public let routeID: String
+    public let reasons: [String]
+}
+
+public struct RouteRankingResult: Sendable {
+    public let suggestions: [RouteSuggestion]
+    public let excluded: [RouteExclusion]
+    public let targetDistanceMeters: Double
+    public let invalidWeights: Bool
 }
 
 public enum PersonalRouteRanker {
     public static func rank(_ routes: [RouteFeatureSnapshot], preferences: RoutePreferences, history: [WalkingHistoryEntry]) -> [RouteSuggestion] {
-        let reference = history.filter { $0.completed && $0.feedback?.manageability != .difficult }
-            .prefix(12).compactMap(\.distanceMeters).filter { $0 > 0 }.sorted()
-        let target = reference.isEmpty ? preferences.distanceMeters : reference[reference.count / 2]
-        return routes.compactMap { route -> RouteSuggestion? in
-            guard route.distanceMeters.isFinite, route.distanceMeters > 0,
-                  abs(route.distanceMeters - preferences.distanceMeters) <= preferences.distanceMeters * 0.25,
-                  preferences.facilities.isSubset(of: route.facilityKinds), route.restStatus != .exceeds else { return nil }
-            if preferences.terrain != .any, let grade = route.maximumGradePercent, grade > preferences.terrain.maximumGrade { return nil }
+        evaluate(routes, preferences: preferences, history: history).suggestions
+    }
+
+    /// Hard constraints are checked before cost. Missing features receive their worst normalized
+    /// term as well as an uncertainty penalty; provisional routes follow fully known feasible ones.
+    public static func evaluate(_ routes: [RouteFeatureSnapshot], preferences: RoutePreferences,
+                                history: [WalkingHistoryEntry], weights: RouteCostWeights = .standard) -> RouteRankingResult {
+        let personalRecordsPresent = history.contains { $0.source != .sample }
+        let selectedHistory = personalRecordsPresent ? history.filter { $0.source != .sample } : history
+        let recent = selectedHistory.filter { $0.completed && $0.feedback?.manageability != .difficult &&
+            $0.distanceMeters != nil && $0.distanceMeters!.isFinite && $0.distanceMeters! > 0 }
+            .sorted { $0.end > $1.end }.prefix(12).compactMap(\.distanceMeters).sorted()
+        let target = recent.count >= 3 ? recent[recent.count / 2] : preferences.distanceMeters
+        guard weights.isValid, preferences.distanceMeters.isFinite, preferences.distanceMeters > 0,
+              preferences.maximumRestGapMeters.isFinite, preferences.maximumRestGapMeters > 0,
+              target.isFinite, target > 0 else {
+            return RouteRankingResult(suggestions: [], excluded: routes.map {
+                RouteExclusion(routeID: $0.id, reasons: ["Invalid ranking preferences or weights."])
+            }, targetDistanceMeters: preferences.distanceMeters, invalidWeights: !weights.isValid)
+        }
+        var suggestions: [RouteSuggestion] = []
+        var excluded: [RouteExclusion] = []
+        for route in routes {
+            var reasons: [String] = []
+            if !route.distanceMeters.isFinite || route.distanceMeters <= 0 ||
+                abs(route.distanceMeters - preferences.distanceMeters) > preferences.distanceMeters * 0.25 {
+                reasons.append("Outside your chosen distance range (±25%).")
+            }
+            if !preferences.facilities.isSubset(of: route.facilityKinds) { reasons.append("Missing a required stop category.") }
+            if route.requiredFacilitiesAvailable == false { reasons.append("A required stop is unavailable.") }
+            if let grade = route.maximumGradePercent {
+                if !grade.isFinite || grade < 0 { reasons.append("Invalid slope data.") }
+                else if preferences.terrain != .any && grade > preferences.terrain.maximumGrade {
+                    reasons.append("Steeper than your terrain limit.")
+                }
+            }
+            if let count = route.crossingCount, count < 0 { reasons.append("Invalid crossing data.") }
+            if let count = route.confirmedRestPoints, count < 0 { reasons.append("Invalid rest-stop data.") }
+            if route.restStatus == .exceeds || (route.longestRestGapMeters.map { $0.isFinite && $0 > preferences.maximumRestGapMeters + 0.5 } ?? false) {
+                reasons.append("Rest stops are farther apart than your limit.")
+            }
+            if route.restStatus == .unknown || route.longestRestGapMeters.map({ !$0.isFinite || $0 < 0 }) == true {
+                reasons.append("Rest-gap data is unusable.")
+            }
+            if !reasons.isEmpty { excluded.append(RouteExclusion(routeID: route.id, reasons: reasons)); continue }
             var unknown: [String] = []
             if route.maximumGradePercent == nil { unknown.append("slope") }
-            if route.surface == nil { unknown.append("surface") }
-            if route.crossings == nil { unknown.append("crossings") }
-            if route.restStatus != .meets { unknown.append("rest-stop reliability") }
-            let provisional = (preferences.terrain != .any && route.maximumGradePercent == nil) || route.restStatus != .meets
-            let distanceFit = max(0, 1 - abs(route.distanceMeters - target) / max(target, 1))
-            let restFit = route.longestRestGapMeters.map { max(0, 1 - $0 / max(preferences.maximumRestGapMeters, 1)) } ?? 0
-            let confidence = max(0.1, min(1, 0.25 + (reference.isEmpty ? 0 : min(0.25, Double(reference.count) * 0.04)) +
-                (route.maximumGradePercent == nil ? 0 : 0.15) + (route.restStatus == .meets ? 0.2 : 0) +
-                (route.surface == nil ? 0 : 0.075) + (route.crossings == nil ? 0 : 0.075)))
-            let score = distanceFit * 0.7 + restFit * 0.2 + confidence * 0.1
-            let distanceReason = reference.isEmpty ? "close to your chosen distance" : "close to distances in your completed walks"
-            let reason = "Suggested because it is \(distanceReason)" + (route.restStatus == .meets ? " and fits your mapped rest gap." : ".")
-            return RouteSuggestion(routeID: route.id, score: score, confidence: confidence, provisional: provisional,
-                                   reason: reason, unknownDetails: unknown)
-        }.sorted { left, right in
-            if left.provisional != right.provisional { return !left.provisional }
-            if left.score != right.score { return left.score > right.score }
-            return left.routeID < right.routeID
+            if route.surface?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false { unknown.append("surface") }
+            if route.crossingCount == nil { unknown.append("crossings") }
+            if !preferences.facilities.isEmpty && route.requiredFacilitiesAvailable == nil { unknown.append("required-stop availability") }
+            if route.restStatus != .meets || route.confirmedRestPoints == nil { unknown.append("rest-stop reliability") }
+            // Five equally weighted data fields, not a probability of safety.
+            let uncertainty = Double(unknown.count) / 5
+            let gradeScale = preferences.terrain == .any ? 6.0 : preferences.terrain.maximumGrade
+            let gradeRatio = route.maximumGradePercent.map { $0 / gradeScale } ?? 1
+            let crossingRatio = route.crossingCount.map { min(Double($0) / 4, 1) } ?? 1
+            let restRatio = route.confirmedRestPoints.map { 1 - min(Double($0) / 3, 1) } ?? 1
+            let components = RouteCostComponents(
+                distance: weights.distance * pow((route.distanceMeters - target) / target, 2),
+                grade: weights.grade * pow(gradeRatio, 2),
+                crossings: weights.crossings * crossingRatio,
+                restPoints: weights.restPoints * restRatio,
+                uncertainty: weights.uncertainty * uncertainty)
+            guard components.total.isFinite else {
+                excluded.append(RouteExclusion(routeID: route.id, reasons: ["Route cost could not be calculated."]))
+                continue
+            }
+            let distanceReason = recent.count >= 3 ? "close to distances in your completed walks" : "close to your chosen distance"
+            let restReason = route.restStatus == .meets && (route.confirmedRestPoints ?? 0) > 0
+                ? " with confirmed rest stops" : ""
+            suggestions.append(RouteSuggestion(routeID: route.id, score: components.total,
+                dataCompleteness: 1 - uncertainty, provisional: !unknown.isEmpty,
+                reason: "Suggested because it is \(distanceReason)\(restReason).",
+                unknownDetails: unknown, components: components,
+                eligibility: "Within your distance range, includes required stop categories, and does not exceed a known terrain or rest-gap limit."))
         }
+        suggestions.sort {
+            if $0.provisional != $1.provisional { return !$0.provisional }
+            if abs($0.score - $1.score) > 1e-12 { return $0.score < $1.score }
+            return $0.routeID < $1.routeID
+        }
+        excluded.sort { $0.routeID < $1.routeID }
+        return RouteRankingResult(suggestions: suggestions, excluded: excluded,
+                                  targetDistanceMeters: target, invalidWeights: false)
     }
 }
 

@@ -836,31 +836,52 @@ struct MyPathView: View {
                 Text("Recorded PausePath walks + available Apple Health walking workouts. Overlapping sessions count once; missing records do not mean no walking.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if let summary {
+            if !summary.observedPoints.isEmpty {
                 Chart {
-                    ForEach(0..<summary.weeklyAverageMinutes.count, id: \.self) { index in
-                        LineMark(x: .value("Week", index + 1), y: .value("Observed min/day", summary.weeklyAverageMinutes[index]))
-                            .foregroundStyle(by: .value("Series", "Recorded")).symbol(.circle)
-                        LineMark(x: .value("Week", index + 1), y: .value("Trend min/day", summary.fittedMinutes[index]))
-                            .foregroundStyle(by: .value("Series", "Smoothed trend"))
-                            .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 4]))
+                    ForEach(Array(summary.observedPoints.enumerated()), id: \.offset) { _, point in
+                        PointMark(x: .value("Week", point.weekCoordinate + 1),
+                                  y: .value("Recorded min/day", point.minutesPerDay))
+                            .foregroundStyle(by: .value("Series", "Recorded weeks"))
+                            .symbolSize(60)
                     }
-                }.chartForegroundStyleScale(["Recorded": PausePathPalette.teal, "Smoothed trend": PausePathPalette.lime])
+                    if summary.status == .ready {
+                        ForEach(Array(summary.curve.enumerated()), id: \.offset) { _, point in
+                            LineMark(x: .value("Week", point.weekCoordinate + 1),
+                                     y: .value("Fitted min/day", point.minutesPerDay))
+                                .foregroundStyle(by: .value("Series", "Fitted trend"))
+                                .lineStyle(StrokeStyle(lineWidth: 2.5))
+                        }
+                    }
+                }.chartForegroundStyleScale(["Recorded weeks": PausePathPalette.teal, "Fitted trend": PausePathPalette.lime])
                     .chartYAxisLabel("min/day").frame(height: 190)
-                    .accessibilityLabel("Walking minutes per day by week, with a fitted trend")
-                Text(String(format: "Observed trend: %+.1f min/day each week", summary.slopeMinutesPerDayPerWeek))
+                    .accessibilityLabel("Recorded walking-workout minutes per day in observed weeks, with a fitted trend when enough weeks are available")
+            }
+            if let slope = summary.slopeMinutesPerDayPerWeek {
+                Text(String(format: "Recent direction: %+.1f recorded min/day/week", slope))
                     .font(.subheadline.weight(.semibold))
-                if let change = summary.percentChange {
-                    Text(String(format: "Recent four weeks vs first four: %+.1f%%", change)).font(.subheadline)
-                }
-                Text(String(format: "%.0f total minutes · %+.0f minutes versus holding the first-four-week average", summary.totalMinutes, summary.additionalMinutesOverBaseline))
-                    .font(.caption).foregroundStyle(.secondary)
-                Text("This describes an observed change, not an effect caused by PausePath or a measure of medical readiness.")
-                    .font(.caption).foregroundStyle(.secondary)
             } else {
-                Text("Record walks in at least two weeks or connect Apple Health to see a walking trend. For a sample, turn on Demo in Profile.")
+                Text("Not enough recorded history yet. A trend needs at least four observed weeks; unrecorded weeks stay unknown.")
                     .font(.callout).foregroundStyle(.secondary)
             }
+            if let baseline = summary.baselineAverage, let recent = summary.recentAverage {
+                Text(String(format: "First 4 observed weeks: %.1f · last 4: %.1f min/day", baseline, recent))
+                    .font(.subheadline)
+                if let change = summary.percentChange {
+                    Text(String(format: "Recent vs baseline: %+.1f%%", change)).font(.subheadline)
+                }
+            }
+            Text(String(format: "%.0f total recorded minutes across observed weeks", summary.totalObservedMinutes))
+                .font(.caption).foregroundStyle(.secondary)
+            if let additional = summary.additionalMinutesOverBaseline {
+                Text(String(format: "%+.0f minutes versus holding the first-four-week average for 56 days", additional))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            DisclosureGroup("About this trend") {
+                Text("Eight completed calendar weeks are shown. Dots are recorded sessions; the line estimates the trend between observed weeks. Weeks without a record are unknown, not zero. The direction is the fitted change at the latest observed week. Four observed weeks are needed to draw a line; comparisons need all eight.\(summary.limitation.map { " \($0)" } ?? "")")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.font(.caption.weight(.semibold))
+            Text("This describes records over time, not an effect caused by PausePath or a measure of medical readiness.")
+                .font(.caption).foregroundStyle(.secondary)
         }.pathCard()
     }
     private func trendRow(days: Int, title: String) -> some View {

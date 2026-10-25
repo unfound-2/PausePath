@@ -90,14 +90,35 @@ struct ExploreRoutePlannerView: View {
         return WalkingHistoryBuilder.combine(tracked: tracked, health: workouts, feedback: feedback)
     }
 
-    private var rankedSuggestions: [RouteSuggestion] {
+    private var rankingResult: RouteRankingResult {
         let features = discovery.routeOptions.map { option in
             let rest = option.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops)
+            var confirmedBenches = 0
+            var availableKinds = Set<FacilityKind>()
+            var confirmedKinds = Set<FacilityKind>()
+            var distance = 0.0
+            for (index, stop) in option.stops.enumerated() {
+                if index < option.legs.count { distance += option.legs[index].distance }
+                let arrival = routePreferences.departure.addingTimeInterval(distance / max(0.3, routePreferences.speedMetersPerSecond) + Double(index) * 300)
+                let poi = stop.shared
+                let usable = poi?.restrictedAccess != true && poi?.unavailable != true &&
+                    poi?.reportedUnavailable != true && poi?.openAtArrival(arrival) != false
+                if usable { availableKinds.insert(stop.kind) }
+                if usable && poi?.openAtArrival(arrival) == true && poi?.accessDescription == "public" {
+                    confirmedKinds.insert(stop.kind)
+                    if stop.kind == .bench { confirmedBenches += 1 }
+                }
+            }
+            let required = routePreferences.facilities
+            let availability: Bool? = required.isEmpty ? true :
+                !required.isSubset(of: availableKinds) ? false : required.isSubset(of: confirmedKinds) ? true : nil
             return RouteFeatureSnapshot(id: option.id.uuidString, distanceMeters: option.distance, estimatedSeconds: option.duration,
-                longestRestGapMeters: rest.longestGap, restStatus: rest.status, facilityKinds: Set(option.stops.map(\.kind)))
+                confirmedRestPoints: confirmedBenches, requiredFacilitiesAvailable: availability,
+                longestRestGapMeters: rest.longestGap, restStatus: rest.status, facilityKinds: availableKinds)
         }
-        return PersonalRouteRanker.rank(features, preferences: routePreferences, history: walkingHistory)
+        return PersonalRouteRanker.evaluate(features, preferences: routePreferences, history: walkingHistory)
     }
+    private var rankedSuggestions: [RouteSuggestion] { rankingResult.suggestions }
 
     private var visibleOptions: [WalkingRouteOption] {
         let selectedPreferences = routePreferences
@@ -305,8 +326,27 @@ struct ExploreRoutePlannerView: View {
                     Text("Unknown: \(recommendation.unknownDetails.joined(separator: ", ")).")
                         .font(.caption)
                 }
-                Text("Planning detail confidence: \(recommendation.confidence >= 0.7 ? "higher" : recommendation.confidence >= 0.45 ? "moderate" : "limited") · not a safety rating")
+                Text("Route data completeness: \(Int((recommendation.dataCompleteness * 100).rounded()))% · not a safety rating")
                     .font(.caption)
+                DisclosureGroup("Why this route?") {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(recommendation.eligibility)
+                        Text(String(format: "Planning cost %.3f · lower is better", recommendation.score))
+                        Text(String(format: "Distance %.3f · slope %.3f · crossings %.3f · rest stops %.3f · unknown data %.3f",
+                                    recommendation.components.distance, recommendation.components.grade,
+                                    recommendation.components.crossings, recommendation.components.restPoints,
+                                    recommendation.components.uncertainty))
+                        ForEach(rankedSuggestions.dropFirst(), id: \.routeID) { other in
+                            Text("\(discovery.routeOptions.first(where: { $0.id.uuidString == other.routeID })?.title ?? "Other route"): cost \(other.score.formatted(.number.precision(.fractionLength(3)))) · main cost: \(leadingCost(for: other))\(other.provisional ? " · details unverified" : "")")
+                        }
+                        ForEach(rankingResult.excluded, id: \.routeID) { item in
+                            Text("\(discovery.routeOptions.first(where: { $0.id.uuidString == item.routeID })?.title ?? "Other route"): excluded — \(item.reasons.joined(separator: " "))")
+                        }
+                    }
+                    .font(.caption)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .font(.caption.weight(.semibold))
                 HStack {
                     Button("Preview route") { discovery.selectRouteOption(option.id) }
                         .buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
@@ -321,7 +361,17 @@ struct ExploreRoutePlannerView: View {
         } else if rankedSuggestions.isEmpty {
             Label("No route meets the requested distance, stops and verified rest-gap limits. Change your choices or review other routes below.", systemImage: "line.3.horizontal.decrease.circle")
                 .font(.callout).foregroundStyle(.secondary)
+            if let reason = rankingResult.excluded.first?.reasons.first {
+                Text("For example: \(reason)").font(.caption).foregroundStyle(.secondary)
+            }
         }
+    }
+
+    private func leadingCost(for route: RouteSuggestion) -> String {
+        let terms = [("distance", route.components.distance), ("slope", route.components.grade),
+                     ("crossings", route.components.crossings), ("rest stops", route.components.restPoints),
+                     ("unknown data", route.components.uncertainty)]
+        return terms.max { $0.1 < $1.1 }?.0 ?? "none"
     }
 
     private var difficultyMenu: some View {
