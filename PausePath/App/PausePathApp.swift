@@ -238,7 +238,7 @@ private struct WelcomeSetupView: View {
     @State private var notificationEnabled = false
     @State private var notificationStatus = "Daily recaps are always available in My Path."
 
-    private let stepCount = 11
+    private let stepCount = 12
 
     private enum WalkingFrequency: Int, CaseIterable {
         case unsure = -1, none = 0, once = 1, twice = 2, three = 3, fourOrMore = 4
@@ -319,7 +319,8 @@ private struct WelcomeSetupView: View {
         switch step {
         case 0...3: "Your starting point"
         case 4...6: "Your plan"
-        default: "See PausePath in action"
+        case 10: "See PausePath in action"
+        default: "Your walking baseline"
         }
     }
 
@@ -465,7 +466,8 @@ private struct WelcomeSetupView: View {
         case 7: "See a walk come together."
         case 8: "Tap a stop on the map."
         case 9: "What should we call you?"
-        default: "Connect only what you want."
+        case 10: "Connect only what you want."
+        default: "A baseline first. Real progress over time."
         }
     }
 
@@ -498,7 +500,8 @@ private struct WelcomeSetupView: View {
             case 7: walkthroughStep
             case 8: sampleStopStep
             case 9: nameStep
-            default: connectionStep
+            case 10: connectionStep
+            default: activityBaselineStep
             }
         }
         .id(step)
@@ -529,6 +532,7 @@ private struct WelcomeSetupView: View {
         case 5: "Active energy is an optional personal goal. Only available Apple Health readings can show progress; route plans cannot predict calories burned. Apple Health daily totals may include activity beyond walks. Neither goal is a medical target."
         case 7, 8: "These are demonstrations, not live routes. Real places, accessibility, hours, and community checks depend on available map data. Unknown information stays marked unknown."
         case 9: "This name stays on your device until you choose to use community features. A searchable username requires a separate opt-in."
+        case 11: "This is a starting point, not a promise of improvement. PausePath will compare recorded walking workouts over time. Missing Health records stay unknown. The exponential curve in the research model describes a scenario; it does not prove the app caused a change."
         default: "All connections are optional. Health data stays on your device. Location is requested only when you choose it; you can search other areas without it."
         }
     }
@@ -1113,6 +1117,89 @@ private struct WelcomeSetupView: View {
         }
     }
 
+    private var activityBaselineStep: some View {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -28, to: .now) ?? .distantPast
+        let recentWalks = health.activities.filter { $0.kind == "Walking" && $0.date >= cutoff }
+        let minutes = recentWalks.reduce(0.0) { $0 + max(0, $1.seconds) } / 60
+        let sample = ActivityGrowthModel.illustrativeSample
+
+        return VStack(spacing: 12) {
+            setupCard(title: "A sample user’s path", subtitle: "Illustrative model · 8 weeks", icon: "chart.xyaxis.line") {
+                ActivityGrowthChart(model: sample)
+                    .frame(height: 112)
+                    .padding(.vertical, 4)
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("BEFORE").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                    Text(sample.baselineMinutesPerDay, format: .number.precision(.fractionLength(0)))
+                        .font(.system(size: 22, weight: .bold, design: .rounded)).monospacedDigit()
+                    }
+                    Spacer()
+                    Image(systemName: "arrow.right").font(.subheadline.bold()).foregroundStyle(PausePathPalette.teal)
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("WEEK 8 · MODELED").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                        Text(sample.predictedMinutesPerDay(atWeek: sample.horizonWeeks), format: .number.precision(.fractionLength(1)))
+                            .font(.system(size: 22, weight: .bold, design: .rounded)).monospacedDigit()
+                    }
+                }
+                Text("min/day · modeled 8-week average: \(sample.averageMinutesPerDay(), format: .number.precision(.fractionLength(1))) min/day")
+                    .font(.caption).foregroundStyle(.secondary)
+                Label("Fictional example—not an average result or a promise.", systemImage: "sparkles")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
+                    .padding(.top, 3)
+                DisclosureGroup("How the curve is calculated") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("m(t) = b + A(1 − e⁻ᵏᵗ)").font(.system(.body, design: .serif).weight(.semibold))
+                        Text("For this example: b = 12 min/day, A = 10 min/day, k = 0.25/week, t = 8 weeks.")
+                        Text("Average₀–₈ = 1/8 ∫₀⁸ m(t) dt = b + A[1 − (1 − e⁻⁸ᵏ)/(8k)]")
+                    }
+                    .font(.caption).foregroundStyle(.secondary).padding(.top, 5)
+                }
+                .font(.caption.weight(.semibold))
+            }
+
+            setupCard(title: "Your starting point", subtitle: "Apple Health walking workouts · last 28 days", icon: "figure.walk") {
+                if health.hasConnected && !recentWalks.isEmpty {
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Text(minutes.formatted(.number.precision(.fractionLength(0))))
+                            .font(.system(size: 48, weight: .bold, design: .rounded))
+                            .monospacedDigit().contentTransition(.numericText())
+                        Text("recorded min · \(recentWalks.count) workouts")
+                            .font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityElement(children: .combine)
+                    Text("This is your recorded workout time, not a complete measure of every walk.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if health.hasConnected {
+                    Label("No walking workouts recorded", systemImage: "minus.circle")
+                        .font(.headline)
+                    Text("That does not mean you did not walk. Health data may be incomplete or unavailable.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Label("No Health baseline available", systemImage: "minus.circle")
+                        .font(.headline)
+                    Text("You can continue without connecting Health. Missing records are not treated as zero.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button {
+                        healthRequested = true
+                        Task { await health.connect() }
+                    } label: {
+                        Label(health.isLoading ? "Connecting…" : "Connect Apple Health", systemImage: "heart.text.square")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(health.isLoading)
+                }
+            }
+
+            Text("Keep walking with PausePath, then check Insights for your recorded trend. Your real progress may look different from the sample.")
+                .font(.caption).foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: health.activities.count)
+    }
+
     private var footer: some View {
         Button {
             saveProfile(); savePreferences()
@@ -1141,7 +1228,8 @@ private struct WelcomeSetupView: View {
         case 2: "See my starting point"
         case 5: "See my four-week plan"
         case 7: "Try the stops"
-        case 10: "Start exploring"
+        case 10: "See my baseline"
+        case 11: "Start exploring"
         default: "Continue"
         }
     }
@@ -1213,6 +1301,56 @@ private struct WelcomeSetupView: View {
     }
     private var locationNeedsSettings: Bool {
         locationDiscovery.authorizationStatus == .denied || locationDiscovery.authorizationStatus == .restricted
+    }
+}
+
+struct ActivityGrowthChart: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var reveal: CGFloat = 0
+    let model: ActivityGrowthModel
+
+    var body: some View {
+        GeometryReader { geometry in
+            let size = geometry.size
+            let values = (0...32).map { index in
+                model.predictedMinutesPerDay(atWeek: model.horizonWeeks * Double(index) / 32)
+            }
+            let low = model.baselineMinutesPerDay
+            let high = max(low + 1, values.last ?? low + 1)
+            let points = values.enumerated().map { index, value in
+                CGPoint(x: size.width * CGFloat(index) / CGFloat(max(values.count - 1, 1)),
+                        y: size.height - 12 - (size.height - 26) * CGFloat((value - low) / (high - low)))
+            }
+            ZStack(alignment: .bottomLeading) {
+                Path { path in
+                    path.move(to: CGPoint(x: 0, y: size.height - 12))
+                    path.addLine(to: CGPoint(x: size.width, y: size.height - 12))
+                }.stroke(PausePathPalette.teal.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                Path { path in
+                    guard let first = points.first else { return }
+                    path.move(to: first)
+                    points.dropFirst().forEach { path.addLine(to: $0) }
+                }
+                .trim(from: 0, to: reveal)
+                .stroke(PausePathPalette.teal, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                if let first = points.first, let last = points.last {
+                    Circle().fill(PausePathPalette.teal).frame(width: 9, height: 9).position(first)
+                    Circle().fill(PausePathPalette.lime).overlay(Circle().stroke(PausePathPalette.teal, lineWidth: 2))
+                        .frame(width: 13, height: 13).position(last)
+                }
+                HStack {
+                    Text("WEEK 0"); Spacer(); Text("WEEK 8")
+                }
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .padding(.bottom, 0)
+            }
+        }
+        .accessibilityLabel("Illustrative exponential model: walking time gradually rises from 12 minutes per day at week zero to about 20.6 at week eight")
+        .onAppear {
+            if reduceMotion { reveal = 1 }
+            else { withAnimation(.easeOut(duration: 1.1)) { reveal = 1 } }
+        }
     }
 }
 

@@ -177,7 +177,7 @@ struct ProfileSettingsView: View {
                         Toggle(isOn: $demoMode) {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Sample walking insights")
-                                Text("Use labeled synthetic activity for the Insights graph and route suggestions. Your own records stay separate.")
+                                Text("Also show a labeled sample model in Insights and route suggestions. Your own walking trend stays separate.")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }.padding(16)
@@ -505,14 +505,11 @@ struct MyPathView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let health: HealthActivityStore
     @AppStorage("pausepath.trackedWalks") private var trackedData = Data()
-    @AppStorage("pausepath.personalProfile") private var profileData = Data()
     @AppStorage("pausepath.walkFeedback") private var feedbackData = Data()
     @AppStorage("pausepath.demoMode") private var demoMode = false
     @State private var source = "PausePath"
     @State private var pathSection = "Overview"
     @State private var editingGoal = false
-    @State private var showGoalExplanation = false
-    @State private var showRecapDetails = false
     @State private var showHealthExplanation = false
     @State private var period = 7
     @State private var kind = "All"
@@ -521,20 +518,20 @@ struct MyPathView: View {
     @AppStorage("pausepath.personalGoal.metric") private var goalMetric = "distance"
     @AppStorage("pausepath.personalGoal.target") private var goalTarget = 5.0
     @AppStorage("pausepath.personalGoal.enabled") private var goalEnabled = true
-    @AppStorage("pausepath.earnedBadges.v1") private var earnedBadgeData = Data()
     @Environment(\.scenePhase) private var pathScenePhase
     @State private var exportDocument = PathExportDocument(text: "")
     @State private var exporting = false
     @State private var exportMessage = ""
     private var walks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedData)) ?? [] }
-    private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
-    private var walkingHistory: [WalkingHistoryEntry] {
-        if demoMode { return WalkingHistoryBuilder.sample() }
+    private var personalWalkingHistory: [WalkingHistoryEntry] {
         let feedback = (try? JSONDecoder().decode([WalkFeedback].self, from: feedbackData)) ?? []
         let hidden = (try? JSONDecoder().decode(Set<String>.self, from: hiddenHealthData)) ?? []
         let workouts = health.activities.filter { $0.kind == "Walking" && !hidden.contains($0.id) }
             .map { HealthWalkingRecord(id: $0.id, start: $0.date, seconds: $0.seconds, distanceMeters: $0.meters) }
         return WalkingHistoryBuilder.combine(tracked: walks, health: workouts, feedback: feedback)
+    }
+    private var walkingHistory: [WalkingHistoryEntry] {
+        demoMode ? WalkingHistoryBuilder.sample() : personalWalkingHistory
     }
     private var milestones: PathMilestones { PathMilestones(walks: walks) }
     private var totalPathBadgeCount: Int { milestones.badges.count + 1 }
@@ -546,6 +543,38 @@ struct MyPathView: View {
     private var recent: [PathActivity] {
         let start = Calendar.current.date(byAdding: .day, value: -(period - 1), to: Calendar.current.startOfDay(for: Date()))!
         return activities.filter { $0.date >= start && $0.date <= Date() }
+    }
+    private var recentPaths: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(source == "PausePath" ? "Recent paths" : "Recent activity").font(.headline)
+                Spacer()
+                sourceMenu
+            }
+            let items = Array(activities.prefix(3))
+            if items.isEmpty {
+                ContentUnavailableView("No activity yet", systemImage: "figure.walk", description: Text("Record a path in Explore or choose Apple Health as your source."))
+                    .frame(minHeight: 140)
+            } else {
+                ForEach(items) { activity in
+                    NavigationLink { PathJourneyDetail(activity: activity, health: health) } label: {
+                        activityRow(activity)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.plain)
+                    if activity.id != items.last?.id { Divider() }
+                }
+            }
+            Button { pathSection = "History" } label: {
+                Label("See all", systemImage: "arrow.right")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .buttonStyle(.plain)
+            .tint(PausePathPalette.teal)
+        }
+        .padding(16)
+        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 22))
     }
     private var daily: [HealthDay] {
         let start = Calendar.current.date(byAdding: .day, value: -(period - 1), to: Calendar.current.startOfDay(for: Date()))!
@@ -559,38 +588,20 @@ struct MyPathView: View {
                     .frame(minHeight: 60)
                 ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    if !(demoMode && pathSection == "Insights") { sourceControls }
+                    if pathSection != "Overview" && !(demoMode && pathSection == "Insights") { sourceControls }
                     if pathSection == "Overview" {
-                        summary
-                    if let latest = recent.first {
-                        NavigationLink { PathJourneyDetail(activity: latest, health: health) } label: {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Label("Your latest journey", systemImage: "map").font(.headline)
-                                if let segments = latest.tracked?.journeySegments, !segments.isEmpty {
-                                    JourneyMap(segments: segments.map { $0.map(\.mapCoordinate) }).frame(height: 180)
-                                        .clipShape(RoundedRectangle(cornerRadius: 18)).allowsHitTesting(false)
-                                }
-                                activityRow(latest)
-                                Text("Open route & full summary →").font(.caption.weight(.semibold))
-                            }.pathCard()
-                        }.buttonStyle(.plain)
-                    }
+                        recentPaths
                         if goalEnabled { personalGoal }
                         else {
                             Button("Set a weekly goal", systemImage: "plus.circle") { goalEnabled = true }.pathCard()
                         }
-                        if let target = profile.weeklyActiveEnergyTargetKcal { weeklyEnergyGoal(target: target) }
                         WeeklySuggestionsView(preferences: preferences)
-                        weeklyRecap
-                        Button { pathSection = "History" } label: {
-                            Label("See your full history", systemImage: "arrow.right").frame(maxWidth: .infinity, minHeight: 44)
-                        }.buttonStyle(.bordered).tint(PausePathPalette.teal)
                     } else if pathSection == "History" {
                         history
                     } else {
                         if demoMode {
                             walkingMinutesTrend
-                            Text("Sample mode shows an illustration of the walking trend. Turn it off in Profile to return to your own Insights.")
+                            Text("The sample and your recorded trend are shown separately. The sample never replaces your data.")
                                 .font(.callout).foregroundStyle(.secondary).pathCard()
                         } else {
                             if source == "Apple Health" { healthTotals }
@@ -623,19 +634,18 @@ struct MyPathView: View {
         }
     }
     private var sourceControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ViewThatFits(in: .horizontal) {
-                HStack { Label("Activity source", systemImage: "square.stack").font(.caption); Spacer(); sourceMenu }
-                VStack(alignment: .leading, spacing: 8) { Text("Activity source").font(.caption).foregroundStyle(.secondary); sourceMenu }
-            }
+        HStack(spacing: 12) {
+            sourceMenu
+            Spacer()
             if pathSection != "History" {
-                Picker("Summary period", selection: $period) {
+                Picker("Period", selection: $period) {
                     Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90)
-                }.pickerStyle(.menu)
+                }.pickerStyle(.menu).tint(PausePathPalette.teal)
             }
-            Text("History and distance summaries use one source at a time. The walking-minutes trend combines walking sessions and removes likely duplicates.")
-                .font(.caption2).foregroundStyle(.secondary)
-        }.padding(14).background(PausePathPalette.teal.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
+        }
+        .font(.subheadline.weight(.medium))
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(PausePathPalette.teal.opacity(0.05), in: Capsule())
     }
     private var sourceMenu: some View {
         Picker("Activity source", selection: $source) {
@@ -660,53 +670,28 @@ struct MyPathView: View {
     private var personalGoal: some View {
         let week = Calendar.current.dateInterval(of: .weekOfYear, for: Date())!
         let value = PersonalGoalProgress.total(metric: goalMetric, walks: walks, start: week.start, end: min(Date(), week.end))
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Your weekly goal", systemImage: "flag.fill").font(.headline)
+                Label("Weekly goal", systemImage: "flag.fill").font(.headline)
                 Spacer()
-                Button(role: .destructive) { goalEnabled = false; editingGoal = false } label: {
-                    Image(systemName: "trash").frame(minWidth: 44, minHeight: 44)
-                }.buttonStyle(.borderless).accessibilityLabel("Remove weekly goal")
+                goalEditButton
             }
-            ViewThatFits(in: .horizontal) {
-                HStack { Text(String(format: "%.0f", goalTarget) + " " + goalUnit).font(.title2.bold()); Spacer(); goalEditButton }
-                VStack(alignment: .leading, spacing: 8) { Text(String(format: "%.0f", goalTarget) + " " + goalUnit).font(.title2.bold()); goalEditButton }
+            ProgressView(value: min(value, goalTarget), total: goalTarget).tint(PausePathPalette.teal)
+            HStack {
+                Text("\(value, specifier: "%.1f") / \(goalTarget, specifier: "%.0f") \(goalUnit)")
+                    .font(.subheadline.weight(.medium).monospacedDigit())
+                Spacer()
+                if value >= goalTarget { Label("Done", systemImage: "checkmark.circle.fill").font(.caption.weight(.semibold)).foregroundStyle(.green) }
+                else { Text("PausePath only").font(.caption).foregroundStyle(.secondary) }
             }
             if editingGoal {
                 goalPicker
                 Stepper(value: $goalTarget, in: goalRange, step: 1.0) {
                     Text("Goal: " + String(format: "%.0f", goalTarget) + " " + goalUnit)
                 }
+                Button("Remove weekly goal", role: .destructive) { goalEnabled = false; editingGoal = false }
+                    .font(.caption)
             }
-            ProgressView(value: min(value, goalTarget), total: goalTarget).tint(PausePathPalette.teal)
-            Text("\(value, specifier: "%.1f") of \(goalTarget, specifier: "%.0f") · \(value >= goalTarget ? "Goal reached!" : "Every session counts")").font(.subheadline)
-            Text("This week · PausePath recordings only").font(.caption.weight(.medium)).foregroundStyle(.secondary)
-            DisclosureGroup("What counts?", isExpanded: $showGoalExplanation) {
-                Text("All PausePath sessions recorded this calendar week count, including sessions ended early. Apple Health, the summary period and history filters do not change this goal.").font(.caption).foregroundStyle(.secondary)
-            }.font(.caption)
-        }.pathCard()
-    }
-    private func weeklyEnergyGoal(target: Int) -> some View {
-        let week = Calendar.current.dateInterval(of: .weekOfYear, for: Date())!
-        let readings = health.days.filter { $0.date >= week.start && $0.date < week.end }.compactMap(\.calories)
-        let total = readings.reduce(0, +)
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Active-calorie goal", systemImage: "flame.fill").font(.headline)
-                Spacer()
-                Text("\(target) kcal / week").font(.subheadline.weight(.semibold))
-            }
-            if readings.isEmpty {
-                Text("No Apple Health active-energy reading available this week.")
-                    .font(.subheadline).foregroundStyle(.secondary)
-            } else {
-                ProgressView(value: min(total, Double(target)), total: Double(target))
-                    .tint(PausePathPalette.teal)
-                Text("\(Int(total)) of \(target) active kcal recorded")
-                    .font(.subheadline)
-            }
-            Text("Apple Health daily totals · all activity, not a route estimate")
-                .font(.caption).foregroundStyle(.secondary)
         }.pathCard()
     }
     private var goalEditButton: some View {
@@ -744,54 +729,6 @@ struct MyPathView: View {
             }
         }
     }
-    private var weeklyRecap: some View {
-        let week = Calendar.current.dateInterval(of: .weekOfYear, for: Date())!
-        let previous = Calendar.current.date(byAdding: .weekOfYear, value: -1, to: week.start)!
-        let sessions = walks.filter { $0.date >= previous && $0.date < week.start }
-        let earlier = Calendar.current.date(byAdding: .weekOfYear, value: -1, to: previous)!
-        let oldDistance = walks.filter { $0.date >= earlier && $0.date < previous }.reduce(0) { $0 + $1.distanceMeters }
-        let distance = sessions.reduce(0) { $0 + $1.distanceMeters }
-        let earned = (try? JSONDecoder().decode([String: Date].self, from: earnedBadgeData)) ?? [:]
-        let badgeNames = milestones.badges.filter { badge in earned[badge.id].map { $0 >= previous && $0 < week.start } ?? false }.map(\.name)
-        let recap = "Last week: \(sessions.count) PausePath sessions, \(String(format: "%.2f", distance / 1000)) km, and \(Int(sessions.reduce(0) { $0 + $1.activeSeconds } / 60)) active minutes. " + (oldDistance > 0 ? String(format: "%+.0f%% distance versus the week before.", (distance - oldDistance) / oldDistance * 100) : "No earlier distance available for comparison.")
-        return VStack(alignment: .leading, spacing: 12) {
-            Label("Last week · PausePath", systemImage: "sparkles").font(.headline)
-            Text("\(sessions.count) sessions · \(distance / 1000, specifier: "%.2f") km · \(Int(sessions.reduce(0) { $0 + $1.activeSeconds } / 60)) min")
-            DisclosureGroup("Recap details", isExpanded: $showRecapDetails) {
-                Text(recap).font(.caption)
-                Text("PausePath recordings only. Independent of the source and summary period above.").font(.caption).foregroundStyle(.secondary)
-                if !badgeNames.isEmpty { Text("Badges earned: " + badgeNames.joined(separator: ", ")).font(.caption) }
-            }.font(.subheadline)
-            ShareLink(item: recap) { Label("Share recap", systemImage: "square.and.arrow.up") }
-        }.pathCard()
-    }
-    private var intro: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Every journey tells a story.").font(.system(.title, design: .rounded).bold())
-            Text("The places you went. The time you made. The progress that belongs to you.")
-                .font(.subheadline).foregroundStyle(.secondary)
-        }.foregroundStyle(PausePathPalette.teal)
-    }
-    private var summary: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("YOUR LAST \(period) DAYS").font(.caption.weight(.bold)).tracking(1.5)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 280 : 140))], alignment: .leading, spacing: 20) {
-                PathMetric(title: "Distance", value: recent.contains(where: \.hasDistance) ? String(format: "%.2f km", recent.reduce(0) { $0 + $1.meters } / 1000) : "Not recorded", icon: "point.topleft.down.to.point.bottomright.curvepath")
-                PathMetric(title: "Active time", value: "\(Int(recent.reduce(0) { $0 + $1.seconds } / 60)) min", icon: "clock")
-                PathMetric(title: "Sessions", value: "\(recent.count)", icon: "figure.walk")
-                PathMetric(title: "Active days", value: "\(Set(recent.map { Calendar.current.startOfDay(for: $0.date) }).count)", icon: "calendar")
-                if source == "PausePath" {
-                    PathMetric(title: "Recorded steps", value: optionalTotal(recent.compactMap(\.steps)), icon: "shoeprints.fill")
-                    PathMetric(title: "Completed journeys", value: "\(recent.filter { $0.tracked?.completed == true }.count)", icon: "flag.checkered")
-                }
-            }
-            if recent.contains(where: { !$0.hasDistance }) { Text("Distance excludes sessions without a recorded distance.").font(.caption) }
-            Text(recent.isEmpty ? "No activity recorded in this period." :
-                    "\(recent.count) sessions. Tap a journey for details.")
-                .font(.subheadline)
-        }.padding(22).foregroundStyle(PausePathPalette.ink)
-            .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 26))
-    }
     private var healthTotals: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Daily movement").font(.headline)
@@ -826,14 +763,57 @@ struct MyPathView: View {
         }.pathCard()
     }
     private var walkingMinutesTrend: some View {
-        let summary = WalkingTrendSummary.calculate(history: walkingHistory)
+        if demoMode {
+            VStack(spacing: 14) {
+                sampleGrowthSummary
+                walkingTrendCard(history: walkingHistory, isSample: true)
+                walkingTrendCard(history: personalWalkingHistory, isSample: false)
+            }
+        } else {
+            walkingTrendCard(history: personalWalkingHistory, isSample: false)
+        }
+    }
+
+    private var sampleGrowthSummary: some View {
+        let model = ActivityGrowthModel.illustrativeSample
+        let endpoint = model.predictedMinutesPerDay(atWeek: model.horizonWeeks)
+        return VStack(alignment: .leading, spacing: 10) {
+            Label("Sample user · modeled scenario", systemImage: "sparkles")
+                .font(.subheadline.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("12").font(.system(size: 22, weight: .bold, design: .rounded)).monospacedDigit()
+                Image(systemName: "arrow.right").font(.caption.bold()).foregroundStyle(.secondary)
+                Text(endpoint, format: .number.precision(.fractionLength(1)))
+                    .font(.system(size: 22, weight: .bold, design: .rounded)).monospacedDigit()
+                Text("min/day at week 8").font(.caption).foregroundStyle(.secondary)
+            }
+            Text("8-week modeled average: \(model.averageMinutesPerDay(), format: .number.precision(.fractionLength(1))) min/day · illustrative only, not a real user outcome")
+                .font(.caption).foregroundStyle(.secondary)
+            DisclosureGroup("See the model") {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("m(t) = b + A(1 − e⁻ᵏᵗ)")
+                        .font(.system(.body, design: .serif).weight(.semibold))
+                    Text("Sample inputs: b = 12 min/day, A = 10 min/day, k = 0.25/week, t = 8 weeks.")
+                    Text("Average₀–₈ = 1/8 ∫₀⁸ m(t) dt = b + A[1 − (1 − e⁻⁸ᵏ)/(8k)]")
+                    Text("The curve describes a fictional scenario; it does not show PausePath causing improvement.")
+                }
+                .font(.caption).foregroundStyle(.secondary).padding(.top, 6)
+            }
+            .font(.caption.weight(.semibold))
+        }
+        .padding(15)
+        .background(PausePathPalette.lime.opacity(0.16), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func walkingTrendCard(history: [WalkingHistoryEntry], isSample: Bool) -> some View {
+        let summary = WalkingTrendSummary.calculate(history: history)
         return VStack(alignment: .leading, spacing: 14) {
-            Label("Walking minutes over time", systemImage: "chart.xyaxis.line").font(.headline)
-            if demoMode {
-                Label("Sample profile · synthetic data, not your activity", systemImage: "sparkles")
+            Label(isSample ? "Sample trend" : "Your recorded trend", systemImage: "chart.xyaxis.line").font(.headline)
+            if isSample {
+                Text("Synthetic weekly records generated from the sample model.")
                     .font(.caption.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
             } else {
-                Text("Recorded PausePath walks + available Apple Health walking workouts. Overlapping sessions count once; missing records do not mean no walking.")
+                Text("PausePath walks + available Apple Health walking workouts. Overlaps count once; missing records don’t mean no walking.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if !summary.observedPoints.isEmpty {
@@ -870,8 +850,13 @@ struct MyPathView: View {
                     Text(String(format: "Recent vs baseline: %+.1f%%", change)).font(.subheadline)
                 }
             }
-            Text(String(format: "%.0f total recorded minutes across observed weeks", summary.totalObservedMinutes))
-                .font(.caption).foregroundStyle(.secondary)
+            if summary.totalObservedMinutes > 0 {
+                Text(String(format: "%.0f total recorded minutes across observed weeks", summary.totalObservedMinutes))
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if !isSample {
+                Text("No walking workouts recorded in this 8-week window; that does not mean no walking.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if let additional = summary.additionalMinutesOverBaseline {
                 Text(String(format: "%+.0f minutes versus holding the first-four-week average for 56 days", additional))
                     .font(.caption).foregroundStyle(.secondary)
@@ -880,7 +865,7 @@ struct MyPathView: View {
                 Text("Eight completed calendar weeks are shown. Dots are recorded sessions; the line estimates the trend between observed weeks. Weeks without a record are unknown, not zero. The direction is the fitted change at the latest observed week. Four observed weeks are needed to draw a line; comparisons need all eight.\(summary.limitation.map { " \($0)" } ?? "")")
                     .font(.caption).foregroundStyle(.secondary)
             }.font(.caption.weight(.semibold))
-            Text("This describes records over time, not an effect caused by PausePath or a measure of medical readiness.")
+            Text(isSample ? "Sample values are not measured results." : "This describes records over time, not an effect caused by PausePath or a measure of medical readiness.")
                 .font(.caption).foregroundStyle(.secondary)
         }.pathCard()
     }
@@ -987,7 +972,6 @@ struct MyPathView: View {
                 Text(activity.date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
                 Text("\(activity.hasDistance ? String(format: "%.2f km", activity.meters / 1000) : "Distance not recorded") · \(Int(activity.seconds / 60)) min").font(.subheadline)
                 if let walk = activity.tracked {
-                    if milestones.recordIDs.contains(walk.id) { Label("Distance PR", systemImage: "trophy.fill").font(.caption).foregroundStyle(PausePathPalette.teal) }
                     if !walk.completed { Text("Ended early").font(.caption).foregroundStyle(.secondary) }
                 }
             }

@@ -461,7 +461,6 @@ struct WeeklySuggestionsView: View {
     @AppStorage("pausepath.monthlyChallengePoints") private var monthlyPoints = 0
     @AppStorage("pausepath.challengePointsMonth") private var pointsMonthKey = ""
     @State private var weeklyChallenges: [WeeklyPersonalChallenge] = []
-    @State private var showWeeklyChallenges = false
     @AppStorage("pausepath.weeklyChallengeRewards") private var rewardLedgerData = Data()
     @AppStorage("pausepath.trackedWalks") private var trackedWalkData = Data()
     @AppStorage("pausepath.personalProfile") private var profileData = Data()
@@ -469,42 +468,51 @@ struct WeeklySuggestionsView: View {
     private var walks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedWalkData)) ?? [] }
     private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
     var body: some View {
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("Small steps this week", systemImage: "sparkles").font(.headline)
-                    DisclosureGroup("Weekly suggestions", isExpanded: $showWeeklyChallenges) {
-                    ForEach(weeklyChallenges) { challenge in
-                        let progress = weeklyProgress(for: challenge)
-                        let complete = progress >= challenge.target
-                        VStack(alignment: .leading, spacing: 7) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(challenge.title).font(.headline)
-                                Button(role: .destructive) {
-                                    weeklyChallenges.removeAll { $0.id == challenge.id }; storeWeeklyChallenges()
-                                } label: { Image(systemName: "xmark.circle").frame(minWidth: 44, minHeight: 44) }
-                                    .buttonStyle(.borderless).accessibilityLabel("Remove suggestion: \(challenge.title)")
-                                Spacer(minLength: 8)
-                                Text(challengeProgressLabel(challenge, progress: progress))
-                                    .font(.caption.monospacedDigit().weight(.semibold))
-                                    .foregroundStyle(complete ? Color.accentColor : Color.secondary)
-                            }
-                            SegmentedChallengeProgress(value: progress, total: challenge.target)
-                                .frame(height: 9)
-                                .accessibilityLabel("\(challengeProgressLabel(challenge, progress: progress)) complete")
-                            if complete { Label("Completed • 10 points", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green) }
-                        }.padding(14)
-                            .background(complete ? PausePathPalette.lime.opacity(0.22) : PausePathPalette.teal.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
-                    }.listRowSeparator(.hidden)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Weekly suggestions", systemImage: "sparkles").font(.headline)
+                Spacer()
+                Label("\(monthlyPoints) pts this month", systemImage: "star.fill")
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
+            }
+            ForEach(weeklyChallenges) { challenge in
+                let progress = weeklyProgress(for: challenge)
+                let complete = progress >= challenge.target
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Text(challenge.title).font(.subheadline.weight(.semibold))
+                        Spacer(minLength: 4)
+                        Text(challengeProgressLabel(challenge, progress: progress))
+                            .font(.caption.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(complete ? Color.green : Color.secondary)
+                    }
+                    SegmentedChallengeProgress(value: progress, total: challenge.target)
+                        .frame(height: 8)
+                        .accessibilityLabel("\(challengeProgressLabel(challenge, progress: progress)) complete")
                     HStack {
-                        Label("\(monthlyPoints) points this month", systemImage: "star.fill")
-                            .font(.subheadline.weight(.semibold))
-                        Spacer()
-                        Button("Refresh (\(max(0, 2 - weeklyRefreshesUsed)) left)") { refreshWeeklyChallenges() }
-                            .font(.caption.weight(.semibold))
-                            .disabled(weeklyRefreshesUsed >= 2)
+                        if complete {
+                            Label("Earned 10 points", systemImage: "checkmark.circle.fill")
+                                .font(.caption.weight(.semibold)).foregroundStyle(.green)
+                        } else {
+                            Label("10 points", systemImage: "star")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
-                    if weeklyChallenges.isEmpty { Text("No weekly suggestions. Use Refresh to choose new ones.").font(.caption).foregroundStyle(.secondary) }
-                    }
-                }.padding(16).background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 22))
+                }
+                .padding(.vertical, 8)
+                if challenge.id != weeklyChallenges.last?.id { Divider() }
+            }
+            HStack {
+                if weeklyChallenges.isEmpty {
+                    Text("No suggestions available.").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Refresh · \(max(0, 2 - weeklyRefreshesUsed)) left", systemImage: "arrow.clockwise") { refreshWeeklyChallenges() }
+                    .font(.caption.weight(.semibold))
+                    .disabled(weeklyRefreshesUsed >= 2)
+            }
+        }
+        .padding(16).background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 22))
             .onAppear { loadWeeklyChallenges() }
             .onChange(of: scenePhase) { _, phase in if phase == .active { loadWeeklyChallenges() } }
             .onChange(of: trackedWalkData) { _, _ in loadWeeklyChallenges() }
@@ -524,8 +532,13 @@ struct WeeklySuggestionsView: View {
         if pointsMonthKey != currentMonthKey { pointsMonthKey = currentMonthKey; monthlyPoints = 0 }
         if refreshWeekKey != currentWeekKey { refreshWeekKey = currentWeekKey; weeklyRefreshesUsed = 0 }
         if challengeWeekKey == currentWeekKey,
-           let decoded = try? JSONDecoder().decode([WeeklyPersonalChallenge].self, from: weeklyChallengeData), decoded.count <= 2 {
+           var decoded = try? JSONDecoder().decode([WeeklyPersonalChallenge].self, from: weeklyChallengeData), decoded.count <= 2 {
+            for index in decoded.indices where decoded[index].kind == "distance_km" &&
+                ["Walk a distance that fits your route preferences", "Walk your preferred distance"].contains(decoded[index].title) {
+                decoded[index].kind = "single_distance_km"
+            }
             weeklyChallenges = decoded
+            storeWeeklyChallenges()
         } else {
             weeklyChallenges = makeWeeklyDeck()
             challengeWeekKey = currentWeekKey
@@ -538,13 +551,13 @@ struct WeeklySuggestionsView: View {
     private func makeWeeklyDeck(excluding: Set<String> = []) -> [WeeklyPersonalChallenge] {
         let suggestedDistance = suggestedDistanceTarget
         let ideas: [(String, String, Double)] = [
-            ("Complete a PausePath walk when it suits you", "walks", 1),
-            ("Try a different route this week", "new_routes", 1),
-            ("Walk a distance that fits your route preferences", "distance_km", suggestedDistance),
+            ("Finish one walk", "walks", 1),
+            ("Walk a new route", "new_routes", 1),
+            ("Walk your preferred distance", "single_distance_km", suggestedDistance),
             ("Complete two walks", "walks", 2),
-            ("Explore two routes you have not completed before", "new_routes", 2),
-            ("Walk 2 km in total across completed walks", "distance_km", 2),
-            ("Complete three walks whenever they fit your week", "walks", 3)
+            ("Walk two new routes", "new_routes", 2),
+            ("Walk 2 km total", "distance_km", 2),
+            ("Finish three walks", "walks", 3)
         ]
         let available = ideas.filter { !excluding.contains($0.0) }.shuffled()
         return available.prefix(2).map { WeeklyPersonalChallenge(title: $0.0, kind: $0.1, target: $0.2) }
@@ -554,7 +567,7 @@ struct WeeklySuggestionsView: View {
         return profile.goal.prefersGentlerRoutes ? min(preferredDistance, 0.5) : preferredDistance
     }
     private func personalizeUnstartedChallenges() {
-        for index in weeklyChallenges.indices where weeklyChallenges[index].title == "Walk a distance that fits your route preferences" && !weeklyChallenges[index].pointsAwarded {
+        for index in weeklyChallenges.indices where ["Walk a distance that fits your route preferences", "Walk your preferred distance"].contains(weeklyChallenges[index].title) && !weeklyChallenges[index].pointsAwarded {
             guard weeklyProgress(for: weeklyChallenges[index]) == 0 else { continue }
             weeklyChallenges[index].target = suggestedDistanceTarget
         }
@@ -578,8 +591,11 @@ struct WeeklySuggestionsView: View {
     }
 
     private func challengeProgressLabel(_ challenge: WeeklyPersonalChallenge, progress: Double) -> String {
-        if challenge.kind == "distance_km" { return String(format: "%.1f / %.1f km", progress, challenge.target) }
-        return "\(min(Int(progress), Int(challenge.target))) / \(Int(challenge.target))"
+        let displayed = min(progress, challenge.target)
+        if challenge.kind == "distance_km" || challenge.kind == "single_distance_km" {
+            return String(format: "%.1f / %.1f km", displayed, challenge.target)
+        }
+        return "\(Int(displayed)) / \(Int(challenge.target))"
     }
     private func updateWeeklyProgress() {
         guard challengeWeekKey == currentWeekKey else { loadWeeklyChallenges(); return }
@@ -597,9 +613,6 @@ struct WeeklySuggestionsView: View {
         }
         rewardLedgerData = (try? JSONEncoder().encode(ledger)) ?? rewardLedgerData
         storeWeeklyChallenges()
-    }
-    private func unit(_ metric: String) -> String {
-        switch metric { case "distance_km": "km"; case "minutes": "minutes"; case "new_routes": "routes"; default: "walks" }
     }
  }
 

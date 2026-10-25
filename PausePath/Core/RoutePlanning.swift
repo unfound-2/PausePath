@@ -268,6 +268,48 @@ public struct HealthWalkingRecord: Sendable {
     }
 }
 
+/// Exponential activity-growth scenario used only for clearly labeled synthetic examples.
+/// It is not an efficacy estimate and must not be fitted to pre-app data as an outcome.
+public struct ActivityGrowthModel: Sendable {
+    public let baselineMinutesPerDay: Double
+    public let amplitudeMinutesPerDay: Double
+    public let growthRatePerWeek: Double
+    public let horizonWeeks: Double
+
+    public init(baselineMinutesPerDay: Double, amplitudeMinutesPerDay: Double,
+                growthRatePerWeek: Double, horizonWeeks: Double) {
+        self.baselineMinutesPerDay = max(0, baselineMinutesPerDay.isFinite ? baselineMinutesPerDay : 0)
+        self.amplitudeMinutesPerDay = max(0, amplitudeMinutesPerDay.isFinite ? amplitudeMinutesPerDay : 0)
+        self.growthRatePerWeek = growthRatePerWeek.isFinite ? max(0.000_001, growthRatePerWeek) : 0.000_001
+        self.horizonWeeks = horizonWeeks.isFinite ? max(0, horizonWeeks) : 0
+    }
+
+    /// One fictional example for onboarding and the separately labeled Insights demo.
+    public static let illustrativeSample = ActivityGrowthModel(
+        baselineMinutesPerDay: 12, amplitudeMinutesPerDay: 10,
+        growthRatePerWeek: 0.25, horizonWeeks: 8
+    )
+
+    public func predictedMinutesPerDay(atWeek week: Double) -> Double {
+        let t = max(0, week.isFinite ? week : 0)
+        return baselineMinutesPerDay + amplitudeMinutesPerDay * (1 - exp(-growthRatePerWeek * t))
+    }
+
+    /// Integral mean of m(t) over weeks 0...T, in predicted minutes per day.
+    public func averageMinutesPerDay(overWeeks weeks: Double? = nil) -> Double {
+        let duration = max(0, (weeks ?? horizonWeeks).isFinite ? (weeks ?? horizonWeeks) : 0)
+        guard duration > 0 else { return baselineMinutesPerDay }
+        let kt = growthRatePerWeek * duration
+        let response = kt < 1e-6 ? 0 : 1 - (-expm1(-kt) / kt)
+        return baselineMinutesPerDay + amplitudeMinutesPerDay * response
+    }
+
+    public var endpointIncreasePercent: Double? {
+        guard baselineMinutesPerDay > 0 else { return nil }
+        return (predictedMinutesPerDay(atWeek: horizonWeeks) - baselineMinutesPerDay) / baselineMinutesPerDay * 100
+    }
+}
+
 public enum WalkingHistoryBuilder {
     public static func combine(tracked: [TrackedWalk], health: [HealthWalkingRecord], feedback: [WalkFeedback] = []) -> [WalkingHistoryEntry] {
         let feedbackByID = Dictionary(feedback.compactMap { item in item.activityID.map { ($0, item) } }, uniquingKeysWith: { newer, _ in newer })
@@ -305,7 +347,7 @@ public enum WalkingHistoryBuilder {
             guard let start = calendar.date(byAdding: .weekOfYear, value: week - 8, to: thisWeek) else { return [] }
             return (0..<7).compactMap { day in
                 guard let date = calendar.date(byAdding: .day, value: day, to: start) else { return nil }
-                let minutes = Double(12 + week)
+                let minutes = ActivityGrowthModel.illustrativeSample.predictedMinutesPerDay(atWeek: Double(week))
                 return WalkingHistoryEntry(id: "sample-\(week)-\(day)", source: .sample,
                     start: date.addingTimeInterval(12 * 3600), end: date.addingTimeInterval(12 * 3600 + minutes * 60),
                     distanceMeters: minutes * 70, completed: true)
@@ -774,6 +816,7 @@ public enum ChallengeProgressCalculator {
         switch metric {
         case "walks": return Double(eligible.count)
         case "distance_km": return eligible.reduce(0) { $0 + valid($1.distanceMeters) / 1000 }
+        case "single_distance_km": return eligible.map { valid($0.distanceMeters) / 1000 }.max() ?? 0
         case "minutes": return eligible.reduce(0) { $0 + valid($1.activeSeconds) / 60 }
         case "new_routes":
             let previous = Set(completed.filter { $0.date < start }.compactMap(\.routeIdentity))

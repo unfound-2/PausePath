@@ -14,6 +14,14 @@ final class ChallengeProgressTests: XCTestCase {
         XCTAssertEqual(ChallengeProgressCalculator.total(metric: "distance_km", walks: walks, from: start, until: end), 1)
         XCTAssertEqual(ChallengeProgressCalculator.total(metric: "minutes", walks: walks, from: start, until: end), 10)
     }
+    func testPreferredDistanceProgressUsesTheLongestSingleWalk() {
+        let walks = [walk(1100), walk(1200)]
+        XCTAssertEqual(ChallengeProgressCalculator.total(metric: "single_distance_km", walks: walks, from: start, until: end), 0.5)
+
+        var longerWalk = walk(1300)
+        longerWalk.distanceMeters = 1_200
+        XCTAssertEqual(ChallengeProgressCalculator.total(metric: "single_distance_km", walks: walks + [longerWalk], from: start, until: end), 1.2)
+    }
     func testNewRoutesExcludePreviousRoutesDuplicatesAndMissingIdentities() {
         let walks = [walk(900, route: "old"), walk(1000, route: "old"),
                      walk(1100, route: "new"), walk(1200, route: "new"), walk(1300),
