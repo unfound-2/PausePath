@@ -551,8 +551,11 @@ private enum CubicWalkingSpline {
                 if abs(i - j) == 1 { return h[max(i, j)] }
                 return 0
             } }
-            let rhs = (0..<m).map { i in 6 * ((best.fitted[i + 2] - best.fitted[i + 1]) / h[i + 1] -
-                                                  (best.fitted[i + 1] - best.fitted[i]) / h[i]) }
+            let rhs: [Double] = (0..<m).map { i -> Double in
+                let nextSlope = (best.fitted[i + 2] - best.fitted[i + 1]) / h[i + 1]
+                let previousSlope = (best.fitted[i + 1] - best.fitted[i]) / h[i]
+                return 6.0 * (nextSlope - previousSlope)
+            }
             guard let interior = solve(system, rhs) else { return nil }
             for i in 0..<m { second[i + 1] = interior[i] }
         }
