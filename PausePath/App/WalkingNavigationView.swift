@@ -9,7 +9,8 @@ struct WalkingNavigationView: View {
     @State private var acknowledged = false
     @State private var savedRoute = false
     @State private var saveMessage = ""
-    @State private var activityKind = "Walking"
+    @State private var showWeather = false
+    @State private var showWalkSettings = false
     @State private var recordingOwner = PausePathAccount.shared.userID
     @State private var takingBreak = false
     @State private var suggestedStops: [SharedPOI] = []
@@ -75,69 +76,32 @@ struct WalkingNavigationView: View {
                         Button("Whole route", systemImage: "map") { camera = .automatic }
                     }
                     if navigator.state == .ready {
-                        Picker("Activity", selection: $activityKind) {
-                            ForEach(["Walking", "Running", "Hiking"], id: \.self) { Text($0).tag($0) }
-                        }.pickerStyle(.segmented)
-                        Text("Directions and time estimates use walking pace. Your recorded time reflects your actual activity.").font(.caption).foregroundStyle(.secondary)
-
-                        Text("\(plan.distance / 1000, specifier: "%.1f") km • about \(Int(plan.duration / 60)) min").font(.title2.bold())
-                        Button(savedRoute ? "Saved in Profile → Saved routes" : "Save this route", systemImage: savedRoute ? "heart.fill" : "heart") {
-                            if var record = SavedRouteStore.saveWalk(plan) { record.isFavorite = true; SavedRouteStore.update(record); savedRoute = true }
-                            else { saveMessage = "Your route library is full. Remove a saved route in Profile and try again." }
-                        }.disabled(savedRoute).buttonStyle(.bordered)
-                        if !saveMessage.isEmpty { Text(saveMessage).font(.caption).foregroundStyle(.secondary) }
-                        RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: plan.distance, durationSeconds: plan.duration))
-                        Text(plan.requirements).font(.subheadline)
-                        RestGapStatusCard(assessment: plan.restAssessment, limit: plan.preferences.maximumRestGapMeters)
-                        Text("This route follows Apple walking directions. Rest gaps use the mapped stops shown above. Terrain and unverified facility details remain unknown; real-world conditions can change.").font(.callout)
-                        if weatherGuidanceEnabled {
-                            WeatherGuidanceCard(store: weatherGuidance)
-                        } else {
-                            Button("Check weather for this route", systemImage: "cloud.sun.fill") {
-                                weatherGuidanceEnabled = true
-                            }.buttonStyle(.bordered)
-                            Text("Checking sends up to three approximate route locations to Open-Meteo. Forecasts are cached in memory for 15 minutes. Open-Meteo may retain request logs for up to 90 days.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Toggle("Show weather updates during this walk", isOn: $weatherWalkUpdatesEnabled)
-                            .disabled(!weatherGuidanceEnabled)
-                        Text("Updates appear in PausePath while navigation is active and the app is open.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Toggle("Use this route with those details unverified", isOn: $acknowledged)
-                        Toggle("Keep navigating with the phone locked", isOn: $backgroundWalks)
-                        Toggle("Show a Live Activity on the Lock Screen", isOn: $liveActivities)
-                        Text("Starting a walk allows location updates while locked when enabled. Pause or End stops tracking. The Live Activity can show route instructions and the next stop on your Lock Screen; you can turn it off here.").font(.caption).foregroundStyle(.secondary)
-                        Button("Start navigation", systemImage: "figure.walk") {
-                            navigator.backgroundEnabled = backgroundWalks; navigator.liveActivityEnabled = liveActivities
-                            navigator.start(); camera = .userLocation(followsHeading: true, fallback: .automatic)
-                        }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink).disabled(!acknowledged)
+                        routeReadyControls
                     } else {
                         navigationStatus
-                        if weatherGuidanceEnabled {
-                            WeatherGuidanceCard(store: weatherGuidance)
-                            if let update = weatherGuidance.updateMessage {
-                                Label(update, systemImage: "cloud.sun.fill")
-                                    .font(.callout)
-                                    .padding()
-                                    .background(.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-                            }
-                        }
                     }
-                    NextPauseCard(navigator: navigator)
-                    if let message = navigator.liveActivityMessage { Text(message).font(.caption).foregroundStyle(.secondary) }
+                    HStack(spacing: 12) {
+                        Button("Weather", systemImage: "cloud.sun") { showWeather = true }
+                        Spacer()
+                        Button("Walk settings", systemImage: "slider.horizontal.3") { showWalkSettings = true }
+                    }.font(.subheadline).frame(minHeight: 44)
+                    if navigator.state != .ready { NextPauseCard(navigator: navigator) }
+                    DisclosureGroup("More stops") {
                     RouteBreaksView(walk: plan, currentLocation: navigator.freshLocation() ? navigator.location?.coordinate : nil,
                         onDetour: { takingBreak = true; navigator.pause() }, onReturn: { takingBreak = false },
                         onStopsChanged: { suggestedStops = $0 })
                         .id(plan.id)
+                    }
                     if let milestoneMessage {
                         Label(milestoneMessage, systemImage: "trophy.fill").font(.headline)
                             .padding().frame(maxWidth: .infinity, alignment: .leading)
                             .foregroundStyle(PausePathPalette.ink)
                             .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 18))
                     }
-                    Text(navigator.status).font(.callout).foregroundStyle(.secondary)
-                    Toggle("Spoken directions", isOn: Binding(get: { navigator.voiceEnabled }, set: { navigator.setVoice($0) }))
-                    DisclosureGroup("All walking directions") {
+                    if !navigator.freshLocation() && navigator.state != .ready {
+                        Text(navigator.status).font(.caption).foregroundStyle(.secondary)
+                    }
+                    DisclosureGroup("All directions") {
                         ForEach(Array(plan.legs.enumerated()), id: \.offset) { index, leg in
                             Text("Leg \(index + 1)").font(.headline)
                             ForEach(Array(leg.steps.enumerated()), id: \.offset) { _, step in
@@ -153,7 +117,7 @@ struct WalkingNavigationView: View {
                     }
                 }.padding()
             }.pausePathSurface()
-        .navigationTitle("Your walking route").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(navigator.state == .ready ? "Route preview" : "Your walk").navigationBarTitleDisplayMode(.inline)
                 .toolbar { Button(navigator.state == .ready || navigator.state == .arrived ? "Close" : "End walk") {
                     if navigator.state == .ready || navigator.state == .arrived { navigator.stop(); dismiss() }
                     else { showEndConfirmation = true }
@@ -161,18 +125,20 @@ struct WalkingNavigationView: View {
                 .confirmationDialog("End this walk?", isPresented: $showEndConfirmation, titleVisibility: .visible) {
                     Button("End walk", role: .destructive) { finishWalk(completed: false) }
                 }
-                .confirmationDialog("Replace the remaining walk with directions back to your original start? Distance will change; rest stops and terrain remain unverified.", isPresented: $showReturnConfirmation, titleVisibility: .visible) {
+                .confirmationDialog("Return to your starting point? This replaces the remaining route.", isPresented: $showReturnConfirmation, titleVisibility: .visible) {
                     Button("Return to start") { navigator.returnToStart() }
                 }
         }
         .interactiveDismissDisabled(navigator.state != .ready)
+        .sheet(isPresented: $showWeather) { weatherSheet }
+        .sheet(isPresented: $showWalkSettings) { walkSettingsSheet }
         .onAppear { if navigator.plan == nil { navigator.prepare(walk) } }
-        .task(id: "\(plan.id)-\(weatherGuidanceEnabled)") {
-            guard weatherGuidanceEnabled else { weatherGuidance.clear(); return }
+        .task(id: "\(plan.id)-\(weatherGuidanceEnabled)-\(showWeather)") {
+            guard weatherGuidanceEnabled, showWeather else { return }
             await weatherGuidance.load(for: plan)
         }
-        .task(id: weatherGuidanceEnabled && weatherWalkUpdatesEnabled && navigator.state == .walking && scenePhase == .active) {
-            guard weatherGuidanceEnabled, weatherWalkUpdatesEnabled, navigator.state == .walking, scenePhase == .active else { return }
+        .task(id: showWeather && weatherGuidanceEnabled && weatherWalkUpdatesEnabled && navigator.state == .walking && scenePhase == .active) {
+            guard showWeather, weatherGuidanceEnabled, weatherWalkUpdatesEnabled, navigator.state == .walking, scenePhase == .active else { return }
             if let coordinate = navigator.location?.coordinate {
                 await weatherGuidance.checkForMeaningfulChange(at: coordinate)
             }
@@ -238,13 +204,80 @@ struct WalkingNavigationView: View {
         }
     }
     private func closeCheckIn() { checkInWalk = nil; walkCompletionMessage = ""; navigator.stop(); dismiss() }
+    private var routeReadyControls: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("\(plan.distance / 1000, specifier: "%.1f") km · \(max(1, Int(plan.duration / 60))) min").font(.title2.bold())
+                Spacer()
+                Button(savedRoute ? "Saved" : "Save", systemImage: savedRoute ? "heart.fill" : "heart") {
+                    if var record = SavedRouteStore.saveWalk(plan) { record.isFavorite = true; SavedRouteStore.update(record); savedRoute = true }
+                    else { saveMessage = "Route library full. Remove a saved route in Profile." }
+                }.disabled(savedRoute).buttonStyle(.bordered)
+            }
+            if !saveMessage.isEmpty { Text(saveMessage).font(.caption).foregroundStyle(.secondary) }
+            Label("Stop access and terrain may be unverified", systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
+            if plan.restAssessment.status == .exceeds {
+                Label("Rest gap exceeds your preference", systemImage: "exclamationmark.circle").font(.subheadline)
+            }
+            Toggle("I'll check route conditions", isOn: $acknowledged).font(.subheadline).tint(PausePathPalette.teal)
+            Button("Start walk", systemImage: "figure.walk") {
+                navigator.backgroundEnabled = backgroundWalks; navigator.liveActivityEnabled = liveActivities
+                navigator.start(); camera = .userLocation(followsHeading: true, fallback: .automatic)
+            }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
+                .controlSize(.large).disabled(!acknowledged)
+            DisclosureGroup("Route details") {
+                RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: plan.distance, durationSeconds: plan.duration))
+                RestGapStatusCard(assessment: plan.restAssessment, limit: plan.preferences.maximumRestGapMeters)
+                Text(plan.requirements).font(.caption).foregroundStyle(.secondary)
+            }.font(.subheadline)
+        }
+    }
+    private var weatherSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if weatherGuidanceEnabled {
+                        WeatherGuidanceCard(store: weatherGuidance)
+                        if let update = weatherGuidance.updateMessage { Text(update).font(.callout) }
+                    } else {
+                        Button("Check route weather", systemImage: "cloud.sun") { weatherGuidanceEnabled = true }.buttonStyle(.borderedProminent)
+                    }
+                    Toggle("Refresh during this walk", isOn: $weatherWalkUpdatesEnabled).disabled(!weatherGuidanceEnabled)
+                    DisclosureGroup("About weather") {
+                        Text("Forecasts use approximate route locations sent to Open-Meteo. Conditions can change. Weather preferences are in Account settings.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }.padding(20)
+            }.pausePathSurface().navigationTitle("Weather").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showWeather = false } } }
+        }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+    }
+    private var walkSettingsSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Toggle("Spoken directions", isOn: Binding(get: { navigator.voiceEnabled }, set: { navigator.setVoice($0) }))
+                    Toggle("Navigate while phone is locked", isOn: $backgroundWalks).disabled(navigator.state != .ready && navigator.state != .paused)
+                    Toggle("Lock Screen activity", isOn: $liveActivities).disabled(navigator.state != .ready && navigator.state != .paused)
+                    if navigator.state != .ready && navigator.state != .paused { Text("Pause to change Lock Screen settings.").font(.caption).foregroundStyle(.secondary) }
+                }
+                Section {
+                    Text("Start enables location tracking, including while locked if selected. Pause or End stops tracking. Lock Screen activity may show route instructions and the next stop.").font(.caption).foregroundStyle(.secondary)
+                }
+                if let message = navigator.liveActivityMessage { Section { Text(message).font(.caption) } }
+            }.pausePathSurface().navigationTitle("Walk settings").navigationBarTitleDisplayMode(.inline)
+                .onChange(of: backgroundWalks) { _, value in navigator.backgroundEnabled = value }
+                .onChange(of: liveActivities) { _, value in navigator.liveActivityEnabled = value }
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showWalkSettings = false } } }
+        }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+    }
+
     private var navigationStatus: some View {
         VStack(alignment: .leading, spacing: 10) {
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
                 let fresh = navigator.freshLocation(at: timeline.date)
                 Text(navigator.state == .paused ? "Walk paused" : (!fresh && navigator.state != .arrived ? "Waiting for accurate GPS" : navigator.currentInstruction)).font(.title2.bold())
                 if fresh, navigator.state == .walking, !navigator.progress.offRoute, navigator.progress.hasStarted, let step = navigator.stepDetails {
-                    Text("Follow this step for about \(Int(step.meters)) m")
+                    Text("In \(Int(step.meters)) m").foregroundStyle(.secondary)
                 }
             }
             ProgressView(value: min(navigator.progress.completedMeters, navigator.progress.totalMeters), total: max(1, navigator.progress.totalMeters))
@@ -255,11 +288,14 @@ struct WalkingNavigationView: View {
                     Text(elapsedText(navigator.elapsedActiveSeconds)).monospacedDigit().fontWeight(.semibold)
                 }.font(.subheadline)
             }
-            Text("\(navigator.progress.completedMeters / 1000, specifier: "%.2f") km completed • \(navigator.remainingMeters / 1000, specifier: "%.2f") km remaining • about \(Int(navigator.remainingMeters / max(0.3, plan.preferences.speedMetersPerSecond) / 60)) min")
-                .font(.subheadline)
-            Text("Leg \(min(navigator.progress.legIndex + 1, plan.legs.count)) of \(plan.legs.count) • time excludes breaks").font(.caption)
-            Text("Remaining walk").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            RestGapStatusCard(assessment: navigator.remainingRestAssessment, limit: plan.preferences.maximumRestGapMeters)
+            Text("\(navigator.remainingMeters / 1000, specifier: "%.1f") km left · \(max(1, Int(navigator.remainingMeters / max(0.3, plan.preferences.speedMetersPerSecond) / 60))) min")
+                .font(.subheadline.weight(.semibold))
+            if navigator.remainingRestAssessment.status == .exceeds {
+                Label("Next rest gap exceeds your preference", systemImage: "exclamationmark.circle").font(.caption)
+            }
+            DisclosureGroup("Route details") {
+                RestGapStatusCard(assessment: navigator.remainingRestAssessment, limit: plan.preferences.maximumRestGapMeters)
+            }.font(.subheadline)
             if navigator.state != .arrived {
                 HStack {
                     Button(navigator.state == .paused ? "Resume" : "Pause") { if navigator.state == .paused { navigator.start() } else { navigator.pause() } }
@@ -268,7 +304,6 @@ struct WalkingNavigationView: View {
                 }
                 if navigator.progress.offRoute {
                     Button("Recalculate remaining walk") { navigator.recalculate(returnToStart: false) }.disabled(navigator.isRecalculating || navigator.state != .walking)
-                    Text("Recalculation changes distance. Review the updated rest gap below.").font(.caption)
                 }
                 if navigator.isRecalculating { ProgressView("Finding a new walking path…") }
             }
@@ -282,7 +317,7 @@ struct WalkingNavigationView: View {
         let distance = navigator.recordedDistanceMeters
         let activity = TrackedWalk(routeName: plan.name, distanceMeters: distance,
             activeSeconds: navigator.elapsedActiveSeconds, completed: completed, routeIdentity: plan.routeIdentity,
-            steps: navigator.recordedSteps, startedAt: navigator.journeyStartedAt, journeySegments: navigator.journeySegments, activityKind: activityKind, ownerID: recordingOwner)
+            steps: navigator.recordedSteps, startedAt: navigator.journeyStartedAt, journeySegments: navigator.journeySegments, activityKind: "Walking", ownerID: recordingOwner)
         let previousBest = PathMilestones(walks: tracked).longest
         tracked.insert(activity, at: 0)
         let defaults = UserDefaults.standard

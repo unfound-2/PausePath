@@ -17,11 +17,13 @@ struct NextPauseCard: View {
                 let poi = navigator.stopStatuses[next.place.id] ?? next.place.shared
                 let arrival = Date().addingTimeInterval(next.meters / max(0.3, plan.preferences.speedMetersPerSecond) + Double(max(0, next.index - navigator.progress.legIndex)) * 300)
                 Text(next.place.item.name ?? "Mapped bench").font(.title3.bold())
-                Text("\(Int(next.meters.rounded())) m along the planned route · about \(max(1, Int(ceil(next.meters / max(0.3, plan.preferences.speedMetersPerSecond) / 60)))) min").font(.subheadline)
+                Text("\(Int(next.meters.rounded())) m · \(max(1, Int(ceil(next.meters / max(0.3, plan.preferences.speedMetersPerSecond) / 60)))) min").font(.subheadline)
                 Text(poi?.availabilityDescription(at: arrival) ?? "Opening hours at arrival unknown").font(.caption.weight(.semibold))
-                Text(poi?.attributes?.summary ?? "Access, backrest and shade unknown").font(.caption).foregroundStyle(.secondary)
-                Text("Last community verification: \(poi?.verificationDescription ?? "Unknown")").font(.caption).foregroundStyle(.secondary)
-                if !navigator.freshLocation() { Text("Distance uses your last accepted route position. Waiting for fresh GPS.").font(.caption).foregroundStyle(.secondary) }
+                DisclosureGroup("Stop details") {
+                    Text(poi?.attributes?.summary ?? "Access, backrest and shade unknown").font(.caption).foregroundStyle(.secondary)
+                    Text("Last verified: \(poi?.verificationDescription ?? "Unknown")").font(.caption).foregroundStyle(.secondary)
+                }.font(.subheadline)
+                if !navigator.freshLocation() { Text("Waiting for fresh GPS").font(.caption).foregroundStyle(.secondary) }
                 if poi?.unavailable == true || poi?.reportedUnavailable == true {
                     Label("Reported unavailable. Choose another pause before relying on it.", systemImage: "exclamationmark.triangle").font(.callout)
                 }
@@ -43,7 +45,6 @@ struct NextPauseCard: View {
                 }
             } else {
                 Text("No upcoming bench is included in this route.").font(.subheadline)
-                Text("The requested rest interval is not guaranteed. You can pause the walk or review another route.").font(.caption).foregroundStyle(.secondary)
             }
             if busy { ProgressView("Checking walking access…") }
             if !message.isEmpty { Text(message).font(.caption).foregroundStyle(.secondary) }

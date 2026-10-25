@@ -41,6 +41,7 @@ struct ExploreRoutePlannerView: View {
     @State private var status = "Choose an end destination to find walking routes."
     @State private var savedRouteCount = SavedRouteStore.load().count
     @State private var showHelp = false
+    @State private var showWeather = false
     @State private var showRestPreferences = false
     @State private var sortOrder: RouteSortOrder = .recommended
     @State private var lastBuiltRequestID: UUID?
@@ -187,7 +188,8 @@ struct ExploreRoutePlannerView: View {
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    planningControls
+                    if discovery.routeOptions.isEmpty { planningControls }
+                    else { DisclosureGroup("Change start or destination") { planningControls } }
                     DisclosureGroup(isExpanded: $showRestPreferences) {
                         Stepper("Rest gap: at most \(Int(requestedRestGap)) m", value: $requestedRestGap, in: 100...1000, step: 50)
                         Toggle("Include benches with unknown hours or access", isOn: $allowUnknownRestStops)
@@ -196,14 +198,17 @@ struct ExploreRoutePlannerView: View {
                     } label: {
                         HStack(spacing: 8) {
                             BenchSymbol().fill(PausePathPalette.teal).frame(width: 18, height: 18)
-                            Text("Rest stops · up to \(Int(requestedRestGap)) m apart")
+                            Text("Rest stops · \(Int(requestedRestGap)) m")
                                 .font(.subheadline.weight(.semibold))
                         }
                     }.padding(14).background(PausePathPalette.teal.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
 
-                    if !status.isEmpty { Text(status).font(.callout).foregroundStyle(.secondary) }
+                    if discovery.isLoading { ProgressView("Finding routes…") }
+                    else if !status.isEmpty {
+                        if discovery.routeOptions.isEmpty { Text(status).font(.callout).foregroundStyle(.secondary) }
+                        else { DisclosureGroup("Search notes") { Text(status).font(.caption).foregroundStyle(.secondary) } }
+                    }
                     if !discovery.routeOptions.isEmpty {
-                        recommendationCard
                         routeFilters
                         if !visibleOptions.isEmpty && (difficultyFilter != .all || !mandatoryKinds.isEmpty) {
                             Button("Clear route filters") {
@@ -219,13 +224,13 @@ struct ExploreRoutePlannerView: View {
                         } else if !mandatoryKinds.isEmpty {
                             Text("Routes with required stops").font(.subheadline.weight(.semibold))
                             if requiredOptions.isEmpty {
-                                Text("No route includes all selected stop types. The other routes are listed below.")
+                                Text("Required stops unavailable. Other routes below.")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             ForEach(requiredOptions) { routeRow($0) }
                             if !otherOptions.isEmpty {
                                 Text("Other routes").font(.subheadline.weight(.semibold))
-                                Text("These routes do not include every required stop type.").font(.caption).foregroundStyle(.secondary)
+                                Text("Some required stops are missing.").font(.caption).foregroundStyle(.secondary)
                                 ForEach(otherOptions) { routeRow($0) }
                             }
                         } else {
@@ -263,6 +268,18 @@ struct ExploreRoutePlannerView: View {
             .onChange(of: destination?.name) {
                 if destination != nil { requestRoutes(for: UUID()) }
             }
+            .sheet(isPresented: $showWeather) {
+                NavigationStack {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            if weatherGuidanceEnabled { WeatherGuidanceCard(store: routeWeather) }
+                            else { Button("Check weather") { weatherGuidanceEnabled = true }.buttonStyle(.borderedProminent) }
+                            Text("Forecast for the selected route. Weather preferences are in Account settings.").font(.caption).foregroundStyle(.secondary)
+                        }.padding(20)
+                    }.pausePathSurface().navigationTitle("Weather").navigationBarTitleDisplayMode(.inline)
+                        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showWeather = false } } }
+                }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+            }
             .sheet(isPresented: $showHelp) {
                 NavigationStack {
                     List {
@@ -289,8 +306,8 @@ struct ExploreRoutePlannerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(PausePathPalette.background)
         .onDisappear { routeTask?.cancel() }
-        .task(id: "\(discovery.selectedRouteOptionID?.uuidString ?? "none")-\(weatherGuidanceEnabled)") {
-            guard weatherGuidanceEnabled,
+        .task(id: "\(discovery.selectedRouteOptionID?.uuidString ?? "none")-\(weatherGuidanceEnabled)-\(showWeather)") {
+            guard showWeather, weatherGuidanceEnabled,
                   let option = discovery.routeOptions.first(where: { $0.id == discovery.selectedRouteOptionID }) else {
                 routeWeather.clear()
                 return
@@ -307,71 +324,6 @@ struct ExploreRoutePlannerView: View {
                 VStack(alignment: .leading, spacing: 8) { difficultyMenu; sortMenu }
             }
         }
-    }
-
-    @ViewBuilder private var recommendationCard: some View {
-        if let recommendation = rankedSuggestions.first,
-           dismissedSuggestionID != recommendation.routeID,
-           let option = discovery.routeOptions.first(where: { $0.id.uuidString == recommendation.routeID }) {
-            VStack(alignment: .leading, spacing: 9) {
-                Label(demoMode ? "Sample profile route" : (recommendation.provisional ? "Possible route · verify details" : "Suggested for your walk"), systemImage: "sparkles")
-                    .font(.headline)
-                Text(option.title).font(.title3.weight(.semibold))
-                Text(recommendation.reason).font(.subheadline)
-                if recommendation.provisional {
-                    Label("Provisional: requested route details are not fully verified.", systemImage: "questionmark.circle")
-                        .font(.caption.weight(.semibold))
-                }
-                if !recommendation.unknownDetails.isEmpty {
-                    Text("Unknown: \(recommendation.unknownDetails.joined(separator: ", ")).")
-                        .font(.caption)
-                }
-                Text("Route data completeness: \(Int((recommendation.dataCompleteness * 100).rounded()))% · not a safety rating")
-                    .font(.caption)
-                DisclosureGroup("Why this route?") {
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text(recommendation.eligibility)
-                        Text(String(format: "Planning cost %.3f · lower is better", recommendation.score))
-                        Text(String(format: "Distance %.3f · slope %.3f · crossings %.3f · rest stops %.3f · unknown data %.3f",
-                                    recommendation.components.distance, recommendation.components.grade,
-                                    recommendation.components.crossings, recommendation.components.restPoints,
-                                    recommendation.components.uncertainty))
-                        ForEach(rankedSuggestions.dropFirst(), id: \.routeID) { other in
-                            Text("\(discovery.routeOptions.first(where: { $0.id.uuidString == other.routeID })?.title ?? "Other route"): cost \(other.score.formatted(.number.precision(.fractionLength(3)))) · main cost: \(leadingCost(for: other))\(other.provisional ? " · details unverified" : "")")
-                        }
-                        ForEach(rankingResult.excluded, id: \.routeID) { item in
-                            Text("\(discovery.routeOptions.first(where: { $0.id.uuidString == item.routeID })?.title ?? "Other route"): excluded — \(item.reasons.joined(separator: " "))")
-                        }
-                    }
-                    .font(.caption)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .font(.caption.weight(.semibold))
-                HStack {
-                    Button("Preview route") { discovery.selectRouteOption(option.id) }
-                        .buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
-                    Button("Adjust stops") { showRestPreferences = true }.buttonStyle(.bordered)
-                    Spacer(minLength: 0)
-                    Button("Dismiss") { dismissedSuggestionID = recommendation.routeID }.font(.caption)
-                }
-            }
-            .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-            .foregroundStyle(.white)
-            .background(PausePathPalette.teal, in: RoundedRectangle(cornerRadius: 20))
-        } else if rankedSuggestions.isEmpty {
-            Label("No route meets the requested distance, stops and verified rest-gap limits. Change your choices or review other routes below.", systemImage: "line.3.horizontal.decrease.circle")
-                .font(.callout).foregroundStyle(.secondary)
-            if let reason = rankingResult.excluded.first?.reasons.first {
-                Text("For example: \(reason)").font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func leadingCost(for route: RouteSuggestion) -> String {
-        let terms = [("distance", route.components.distance), ("slope", route.components.grade),
-                     ("crossings", route.components.crossings), ("rest stops", route.components.restPoints),
-                     ("unknown data", route.components.uncertainty)]
-        return terms.max { $0.1 < $1.1 }?.0 ?? "none"
     }
 
     private var difficultyMenu: some View {
@@ -417,9 +369,9 @@ struct ExploreRoutePlannerView: View {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(isSelected ? Color.accentColor : Color.gray)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(option.title).font(.headline).foregroundStyle(.primary)
+                        Text(option.stops.isEmpty ? "Direct route" : "Route with \(option.stops.count) stops").font(.headline).foregroundStyle(.primary)
                         if profileMatches(option) {
-                            Label("Fits distance & mapped rest gap", systemImage: "sparkles")
+                            Label("Matches your preferences", systemImage: "checkmark.circle")
                                 .font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
                         }
                     }
@@ -429,8 +381,6 @@ struct ExploreRoutePlannerView: View {
                     routeMetric("Distance", value: String(format: "%.1f km", option.distance / 1000))
                     routeMetric("Est. time", value: "\(max(1, Int(ceil(option.distance / max(0.3, routePreferences.speedMetersPerSecond) / 60)))) min")
                     routeMetric("Planned stops", value: "\(option.stops.count)")
-                    routeMetric("Longest bench gap", value: longestBenchGap(option))
-                    if isSelected { routeMetric("Terrain", value: "Unknown") }
                 }
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityAddTraits(isSelected ? [.isSelected] : [])
@@ -440,18 +390,26 @@ struct ExploreRoutePlannerView: View {
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             }
             if isSelected {
-            RestGapStatusCard(assessment: option.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops), limit: requestedRestGap)
-            Text("Slope, surface and crossing details are unknown for this route unless independently verified. Review real-world conditions before walking.")
-                .font(.caption).foregroundStyle(.secondary)
-            }
-            if !option.stops.isEmpty {
-                Text(option.stops.enumerated().map { "\($0.offset + 1). \($0.element.item.name ?? $0.element.kind.rawValue)" }.joined(separator: " → "))
-                    .font(.caption).foregroundStyle(PausePathPalette.teal)
-            }
-            if isSelected {
-            RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: option.distance, durationSeconds: option.duration), compact: true)
-            if weatherGuidanceEnabled { WeatherGuidanceCard(store: routeWeather) }
-            Button("Navigate this route", systemImage: "figure.walk") {
+                Label("Access & terrain unverified", systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
+                if option.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops).status == .exceeds {
+                    Label("Rest gap exceeds your preference", systemImage: "exclamationmark.circle").font(.caption)
+                }
+                HStack {
+                    Button("Weather", systemImage: "cloud.sun") { showWeather = true }.font(.subheadline)
+                    Spacer()
+                }.frame(minHeight: 44)
+                DisclosureGroup("Route details") {
+                    routeMetric("Longest bench gap", value: longestBenchGap(option))
+                    RestGapStatusCard(assessment: option.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops), limit: requestedRestGap)
+                    RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: option.distance, durationSeconds: option.duration), compact: true)
+                    if !option.stops.isEmpty {
+                        Text(option.stops.map { $0.item.name ?? $0.kind.rawValue }.joined(separator: " → ")).font(.caption)
+                    }
+                    if let suggestion = rankedSuggestions.first(where: { $0.routeID == option.id.uuidString }) {
+                        Text(suggestion.reason).font(.caption).foregroundStyle(.secondary)
+                    }
+                }.font(.subheadline)
+            Button("Preview walk", systemImage: "figure.walk") {
                 let walk = GeneratedWalk(name: "Walk to \(option.destinationName)", legs: option.legs, preferences: routePreferences, stops: option.stops, allowUnknownRestStops: allowUnknownRestStops)
                 onClose()
                 Task { @MainActor in
