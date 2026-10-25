@@ -8,6 +8,7 @@ import psycopg
 from psycopg.rows import dict_row
 from fastapi.testclient import TestClient
 from app import main
+from database_fixtures import create_community_schema
 
 @pytest.fixture
 def client(monkeypatch):
@@ -47,8 +48,7 @@ def database(monkeypatch):
         schema = 'challenge_test_' + uuid4().hex
         conn.execute(f'CREATE SCHEMA {schema}')
         conn.execute(f'SET LOCAL search_path TO {schema}, public')
-        migration = Path(__file__).resolve().parents[1] / 'migrations/20261017170000_community_challenges.sql'
-        conn.execute(migration.read_text())
+        create_community_schema(conn)
         @contextmanager
         def transaction():
             with conn.transaction():
