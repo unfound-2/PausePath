@@ -762,7 +762,7 @@ struct MyPathView: View {
                 .font(.caption).foregroundStyle(.secondary)
         }.pathCard()
     }
-    private var walkingMinutesTrend: some View {
+    @ViewBuilder private var walkingMinutesTrend: some View {
         if demoMode {
             VStack(spacing: 14) {
                 sampleGrowthSummary
