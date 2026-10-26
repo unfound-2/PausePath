@@ -120,6 +120,7 @@
 				"8A6D4DF6EBD4951DD7786674",
 				"C926F11FBDAA6EED693BECB8",
 				"315294D0EC4F596157AAF561",
+				"A5A0E472C4AF1B07252AA69E",
 			);
 		};
 		"6A5D13928443573078CD612A" = {
@@ -536,6 +537,7 @@
 				"805A675628DE44B82AE32B44",
 				"98F5FBE34F3153597C6185FF",
 				"7645A26DB174C7D8A299EE36",
+				"91DD2923C32DAF9D0C92FB4D",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 		};
@@ -779,6 +781,16 @@
 		"7645A26DB174C7D8A299EE36" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "315294D0EC4F596157AAF561";
+		};
+		"A5A0E472C4AF1B07252AA69E" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "PausePath/Services/WalkHistoryStore.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"91DD2923C32DAF9D0C92FB4D" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "A5A0E472C4AF1B07252AA69E";
 		};
 	};
 	"rootObject" = "000000000000000000000001";

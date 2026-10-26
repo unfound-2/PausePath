@@ -46,6 +46,13 @@ import UIKit
     private var activeIntervalStartedAt: Date?
     private var routeTask: Task<Void, Never>?
     private var token = UUID()
+    /// One id per journey, shared by its crash checkpoints and the final record.
+    private(set) var journeyID = UUID()
+    /// Account that owns this recording; set when the walk starts.
+    var recordingOwner: String?
+    private var lastCheckpoint = Date.distantPast
+    /// True once the journey is saved to history; later pauses must not re-checkpoint it.
+    private var journeyRecorded = false
     override init() {
         super.init(); manager.delegate = self; speech.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
@@ -62,6 +69,7 @@ import UIKit
         offRouteFixCount = 0; lastAutomaticReroute = nil; headingDegrees = nil
         journeySegments = []; journeyStartedAt = nil; beginsJourneySegment = true
         previousSteps = 0; intervalSteps = nil; recordedDistanceMeters = 0
+        journeyID = UUID(); lastCheckpoint = .distantPast; journeyRecorded = false
         state = .ready; status = "Go to the start marker, then start navigation."
     }
     var locationPermissionDenied: Bool {
@@ -175,6 +183,27 @@ import UIKit
         } else { offRouteFixCount = 0; status = "Following your walking route." }
         speakIfNeeded()
         updateActivity()
+        if state != .arrived, fix.timestamp.timeIntervalSince(lastCheckpoint) >= 30 { checkpoint(at: fix.timestamp) }
+    }
+    /// The walk as it would be saved now. Used for crash checkpoints and the final record.
+    func journeyRecord(completed: Bool) -> TrackedWalk? {
+        guard let plan, journeyStartedAt != nil else { return nil }
+        return TrackedWalk(id: journeyID, routeName: plan.name, distanceMeters: recordedDistanceMeters,
+            activeSeconds: elapsedActiveSeconds, completed: completed, routeIdentity: plan.routeIdentity,
+            steps: recordedSteps, startedAt: journeyStartedAt, journeySegments: journeySegments,
+            activityKind: "Walking", ownerID: recordingOwner)
+    }
+    /// Saves the final record and stops checkpointing this journey.
+    @discardableResult func recordJourney(completed: Bool) -> TrackedWalk? {
+        guard !journeyRecorded, let record = journeyRecord(completed: completed) else { return nil }
+        journeyRecorded = true
+        WalkHistoryStore.shared.record(record)
+        return record
+    }
+    private func checkpoint(at date: Date = .now) {
+        guard !journeyRecorded, let record = journeyRecord(completed: false) else { return }
+        lastCheckpoint = date
+        WalkHistoryStore.shared.checkpoint(record)
     }
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { beginsJourneySegment = true; status = "GPS is unavailable. Progress is paused until a fresh location arrives." }
     func locationManager(_ manager: CLLocationManager, didUpdateHeading heading: CLHeading) {
@@ -196,6 +225,7 @@ import UIKit
         UIApplication.shared.isIdleTimerDisabled = false
         if state != .arrived { state = .paused; status = "Walk paused. Resume when ready. Location tracking stops while paused." }
         updateActivity(force: true)
+        if state == .paused { checkpoint() }
     }
     private func startStepCounting(at date: Date) {
         guard !pedometerRunning, CMPedometer.isStepCountingAvailable() else { return }

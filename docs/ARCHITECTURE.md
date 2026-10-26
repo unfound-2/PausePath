@@ -14,7 +14,7 @@ Navigation → CoreLocation fixes → `WalkProgress` → per-leg geometry projec
 
 My progress → explicit Health authorization → `HealthActivityStore` → recorded workout summaries. Feedback can reference an activity UUID. All three optional route adjustments require a button press and update preferences; heart rate is display-only.
 
-Preferences, goal and feedback persist locally through UserDefaults. No medical state is modelled. Health samples are not persisted by PausePath. Linked activity IDs and user-entered notes remain in saved feedback until deletion. This is a prototype persistence mechanism; migrate sensitive feedback/session history to protected app storage before production. Reassess backup behavior and retention for the released product.
+Preferences, goal and feedback persist locally through UserDefaults. Recorded walks and their GPS traces live in `Application Support/PausePath/walk-history-v1.json` (`WalkHistoryStore`, readable after first unlock, migrated once from the old `pausepath.trackedWalks` UserDefaults key). An active walk is checkpointed every 30 seconds and on pause to `active-walk-v1.json`; if the app closes mid-walk, the next launch adds it to history as an unfinished walk. No medical state is modelled. Health samples are not persisted by PausePath. Linked activity IDs and user-entered notes remain in saved feedback until deletion. This is a prototype persistence mechanism; migrate sensitive feedback/session history to protected app storage before production. Reassess backup behavior and retention for the released product.
 
 ## Route assessment contract
 

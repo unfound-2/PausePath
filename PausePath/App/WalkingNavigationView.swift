@@ -31,7 +31,7 @@ struct WalkingNavigationView: View {
     @AppStorage("pausepath.walk.background") private var backgroundWalks = true
     @AppStorage("pausepath.walk.liveActivity") private var liveActivities = true
     @State private var milestoneMessage: String?
-    @AppStorage("pausepath.trackedWalks") private var trackedWalkData = Data()
+    private let walkStore = WalkHistoryStore.shared
     @AppStorage("pausepath.walkFeedback") private var feedbackData = Data()
     @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherGuidanceEnabled = true
     @AppStorage("pausepath.weather.openMeteo.walkUpdates.enabled") private var weatherWalkUpdatesEnabled = true
@@ -226,6 +226,7 @@ struct WalkingNavigationView: View {
     private func startWalk() {
         if navigator.plan == nil { navigator.prepare(walk) }
         navigator.backgroundEnabled = backgroundWalks
+        navigator.recordingOwner = recordingOwner
         navigator.liveActivityEnabled = liveActivities
         navigator.start()
         followsUser = true
@@ -774,13 +775,15 @@ struct WalkingNavigationView: View {
     private func finishWalk(completed: Bool) {
         guard !walkRecorded else { return }
         walkRecorded = true
-        var tracked = (try? JSONDecoder().decode([TrackedWalk].self, from: trackedWalkData)) ?? []
-        let distance = navigator.recordedDistanceMeters
-        let activity = TrackedWalk(routeName: plan.name, distanceMeters: distance,
-            activeSeconds: navigator.elapsedActiveSeconds, completed: completed, routeIdentity: plan.routeIdentity,
-            steps: navigator.recordedSteps, startedAt: navigator.journeyStartedAt, journeySegments: navigator.journeySegments, activityKind: "Walking", ownerID: recordingOwner)
-        let previousBest = PathMilestones(walks: tracked).longest
-        tracked.insert(activity, at: 0)
+        let previousWalks = walkStore.walks
+        navigator.recordingOwner = navigator.recordingOwner ?? recordingOwner
+        guard let activity = navigator.recordJourney(completed: completed) else {
+            // Ended before the first accurate GPS fix: there is nothing to record.
+            navigator.stop(); dismiss(); return
+        }
+        let distance = activity.distanceMeters
+        let previousBest = PathMilestones(walks: previousWalks).longest
+        let tracked = walkStore.walks
         let defaults = UserDefaults.standard
         var earned = defaults.data(forKey: "pausepath.earnedBadges.v1")
             .flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
@@ -792,7 +795,6 @@ struct WalkingNavigationView: View {
         } else if completed, let badge = newBadges.first {
             milestoneMessage = "Badge earned: " + badge.name + ". Find your collection in Profile."
         }
-        trackedWalkData = (try? JSONEncoder().encode(tracked)) ?? trackedWalkData
         NotificationCenter.default.post(name: .pausePathWalkRecorded, object: activity)
         Task {
             do { try await PausePathAPI.syncChallengeProgress(walks: tracked) }

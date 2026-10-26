@@ -54,6 +54,7 @@ struct ContentView: View {
     @State private var account = PausePathAccount.shared
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("pausepath.pendingInbox") private var pendingInbox = false
+    @State private var walkHistory = WalkHistoryStore.shared
     let health: HealthActivityStore
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -89,6 +90,13 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .pausePathOpenExplore)) { _ in selectedTab = 0 }
         .onReceive(NotificationCenter.default.publisher(for: .pausePathShowProgress)) { _ in selectedTab = 2 }
+        .alert("Walk recovered", isPresented: Binding(get: { walkHistory.recoveredWalk != nil },
+                                                      set: { if !$0 { walkHistory.acknowledgeRecovery() } })) {
+            Button("Open My Path") { walkHistory.acknowledgeRecovery(); selectedTab = 2 }
+            Button("OK", role: .cancel) { walkHistory.acknowledgeRecovery() }
+        } message: {
+            Text("PausePath closed during a walk. The part recorded before it closed is saved in My Path as an unfinished walk.")
+        }
         .onChange(of: preferences) { preferencesData = (try? JSONEncoder().encode(preferences)) ?? Data() }
     }
 }
@@ -97,7 +105,7 @@ struct ProfileSettingsView: View {
     @Binding var preferences: RoutePreferences
     let health: HealthActivityStore
     @AppStorage("pausepath.personalProfile") private var profileData = Data()
-    @AppStorage("pausepath.trackedWalks") private var trackedData = Data()
+    private let walkStore = WalkHistoryStore.shared
     @AppStorage("pausepath.profilePhoto") private var photoData = Data()
     @AppStorage("pausepath.earnedBadges.v1") private var earnedBadgeData = Data()
     @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherEnabled = true
@@ -114,7 +122,7 @@ struct ProfileSettingsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
     private var name: String { profile.username.flatMap { $0.isEmpty ? nil : $0 } ?? "Walker" }
-    private var trackedWalks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedData)) ?? [] }
+    private var trackedWalks: [TrackedWalk] { walkStore.walks }
     private var weeklyWalks: [TrackedWalk] {
         guard let interval = Calendar.current.dateInterval(of: .weekOfYear, for: Date()) else { return [] }
         return trackedWalks.filter { interval.contains($0.date) }
@@ -183,7 +191,7 @@ struct ProfileSettingsView: View {
                     }
                 }.padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 28)
                     .frame(maxWidth: 620).frame(maxWidth: .infinity)
-            }.pausePathSurface().navigationTitle("Profile")
+            }.pausePathAnimatedSurface().navigationTitle("Profile")
                 .navigationBarTitleDisplayMode(.inline)
                 .onAppear { saveEarnedBadges() }
                 .onChange(of: trackedWalks.map(\.id)) { saveEarnedBadges() }
@@ -767,7 +775,7 @@ struct MyPathView: View {
     let preferences: RoutePreferences
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let health: HealthActivityStore
-    @AppStorage("pausepath.trackedWalks") private var trackedData = Data()
+    private let walkStore = WalkHistoryStore.shared
     @AppStorage("pausepath.walkFeedback") private var feedbackData = Data()
     @AppStorage("pausepath.demoMode") private var demoMode = false
     @State private var source = "PausePath"
@@ -785,7 +793,7 @@ struct MyPathView: View {
     @State private var exportDocument = PathExportDocument(text: "")
     @State private var exporting = false
     @State private var exportMessage = ""
-    private var walks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedData)) ?? [] }
+    private var walks: [TrackedWalk] { walkStore.walks }
     private var personalWalkingHistory: [WalkingHistoryEntry] {
         let feedback = (try? JSONDecoder().decode([WalkFeedback].self, from: feedbackData)) ?? []
         let hidden = (try? JSONDecoder().decode(Set<String>.self, from: hiddenHealthData)) ?? []
@@ -924,7 +932,7 @@ struct MyPathView: View {
                     if source == "Apple Health", health.hasConnected { await health.connect() }
                 }
             }
-                .pausePathSurface()
+                .pausePathAnimatedSurface()
                 .navigationTitle("My Path")
                 .toolbar(.hidden, for: .navigationBar)
                 .task { await health.refreshIfConnected() }
@@ -1520,7 +1528,7 @@ private struct PathJourneyDetail: View {
     @State private var intervalCalories: Double?
     @State private var intervalHeartRate: Double?
     @State private var metricError: String?
-    @AppStorage("pausepath.trackedWalks") private var detailWalkData = Data()
+    private let detailHistory = WalkHistoryStore.shared
     @AppStorage("pausepath.hiddenHealthWorkouts") private var detailHiddenData = Data()
     @Environment(\.dismiss) private var detailDismiss
     @State private var confirmDelete = false
@@ -1604,9 +1612,8 @@ private struct PathJourneyDetail: View {
                         var hidden = (try? JSONDecoder().decode(Set<String>.self, from: detailHiddenData)) ?? []
                         hidden.insert(activity.id); detailHiddenData = (try? JSONEncoder().encode(hidden)) ?? detailHiddenData
                     } else {
-                        var walks = (try? JSONDecoder().decode([TrackedWalk].self, from: detailWalkData)) ?? []
-                        walks.removeAll { $0.id.uuidString == activity.id }
-                        detailWalkData = (try? JSONEncoder().encode(walks)) ?? detailWalkData
+                        if let id = UUID(uuidString: activity.id) { detailHistory.delete(id: id) }
+                        let walks = detailHistory.walks
                         NotificationCenter.default.post(name: .pausePathWalkRecorded, object: nil)
                         Task { try? await PausePathAPI.syncChallengeProgress(walks: walks) }
                     }

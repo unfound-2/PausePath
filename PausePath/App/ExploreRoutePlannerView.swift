@@ -53,7 +53,7 @@ struct ExploreRoutePlannerView: View {
     @State private var routeTask: Task<Void, Never>?
     @State private var routeWeather = WeatherGuidanceStore()
     @State private var dismissedSuggestionID: String?
-    @AppStorage("pausepath.trackedWalks") private var trackedData = Data()
+    private let walkStore = WalkHistoryStore.shared
     @AppStorage("pausepath.walkFeedback") private var feedbackData = Data()
     @AppStorage("pausepath.hiddenHealthWorkouts") private var hiddenHealthData = Data()
     @AppStorage("pausepath.demoMode") private var demoMode = false
@@ -86,7 +86,7 @@ struct ExploreRoutePlannerView: View {
 
     private var walkingHistory: [WalkingHistoryEntry] {
         if demoMode { return WalkingHistoryBuilder.sample() }
-        let tracked = (try? JSONDecoder().decode([TrackedWalk].self, from: trackedData)) ?? []
+        let tracked = walkStore.walks
         let feedback = (try? JSONDecoder().decode([WalkFeedback].self, from: feedbackData)) ?? []
         let hidden = (try? JSONDecoder().decode(Set<String>.self, from: hiddenHealthData)) ?? []
         let workouts = health.activities.filter { $0.kind == "Walking" && !hidden.contains($0.id) }
