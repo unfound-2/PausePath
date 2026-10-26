@@ -1879,34 +1879,38 @@ struct PathSectionPicker: View {
     var usesMaterialBackground = true
     var body: some View {
         Group {
-        if dynamicTypeSize.isAccessibilitySize {
-            Picker("Section", selection: $selection) {
-                ForEach(titles, id: \.self) { Text($0).tag($0) }
-            }.pickerStyle(.menu).tint(PausePathPalette.teal)
-                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 8)
-        } else {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(titles, id: \.self) { title in
-                    Button { selection = title } label: {
-                        Text(title).font(.subheadline.weight(.semibold))
-                            .padding(.horizontal, 18).frame(minHeight: 44)
-                            .foregroundStyle(selection == title ? PausePathPalette.ink : PausePathPalette.teal)
-                            .background(selection == title ? PausePathPalette.lime : Color.clear, in: Capsule())
-                    }.buttonStyle(.plain)
-                        .accessibilityAddTraits(selection == title ? [.isSelected] : [])
+            if dynamicTypeSize.isAccessibilitySize {
+                Picker("Section", selection: $selection) {
+                    ForEach(titles, id: \.self) { Text($0).tag($0) }
                 }
-            }.padding(6)
-                .background(PausePathPalette.teal.opacity(0.06), in: Capsule())
+                .pickerStyle(.menu).tint(PausePathPalette.teal)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16).padding(.vertical, 8)
+            } else {
+                HStack(spacing: 4) {
+                    ForEach(titles, id: \.self) { title in
+                        Button { selection = title } label: {
+                            Text(title).font(.subheadline.weight(.semibold))
+                                .lineLimit(1).minimumScaleFactor(0.8)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .foregroundStyle(selection == title ? PausePathPalette.ink : PausePathPalette.teal)
+                                .background(selection == title ? PausePathPalette.lime : Color.clear,
+                                            in: RoundedRectangle(cornerRadius: 15))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(selection == title ? [.isSelected] : [])
+                    }
+                }
+                .padding(5)
+                .background(PausePathPalette.teal.opacity(0.09), in: RoundedRectangle(cornerRadius: 20))
+                .padding(.horizontal, 20).padding(.vertical, 8)
+                .animation(.easeInOut(duration: 0.2), value: selection)
+            }
         }
-        }
-        }.background {
+        .background {
             if usesMaterialBackground { Rectangle().fill(.regularMaterial) }
             else { Rectangle().fill(PausePathPalette.background) }
         }
-        // In a vertical stack, a horizontal ScrollView can otherwise accept surplus
-        // height and appear as a large empty panel above the page content.
         .fixedSize(horizontal: false, vertical: true)
     }
 }

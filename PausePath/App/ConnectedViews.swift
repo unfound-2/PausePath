@@ -147,6 +147,7 @@ struct CommunityChallengesView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
+                    communityHeader
                     groupsSection
                     if let membershipConfirmation {
                         HStack(spacing: 10) {
@@ -195,8 +196,7 @@ struct CommunityChallengesView: View {
                 .padding(.bottom, 32)
             }
             .pausePathSurface()
-            .navigationTitle("Community")
-            .toolbar { addGroupToolbar }
+            .toolbar(.hidden, for: .navigationBar)
             .task {
                 if UserDefaults.standard.string(forKey: "pausepath.shareProgressOwner") != account.userID { shareProgress = false }
                 if !pendingInviteCode.isEmpty { communityComposerRoute = CommunityComposerRoute(joining: true, inviteCode: pendingInviteCode) }
@@ -257,13 +257,18 @@ struct CommunityChallengesView: View {
         }
     }
 
-    @ToolbarContentBuilder private var addGroupToolbar: some ToolbarContent {
-        if #available(iOS 26.0, *) {
-            ToolbarItem(placement: .topBarTrailing) { addGroupMenu }
-                .sharedBackgroundVisibility(.hidden)
-        } else {
-            ToolbarItem(placement: .topBarTrailing) { addGroupMenu }
+    private var communityHeader: some View {
+        HStack(alignment: .center, spacing: 16) {
+            Text("Community")
+                .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                .foregroundStyle(PausePathPalette.teal)
+                .minimumScaleFactor(0.8)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            addGroupMenu
         }
+        .frame(minHeight: 52)
+        .accessibilityElement(children: .contain)
     }
 
     private var addGroupMenu: some View {
@@ -276,10 +281,10 @@ struct CommunityChallengesView: View {
             }
         } label: {
             Image(systemName: "plus")
-                .font(.headline.weight(.bold))
-                .foregroundStyle(PausePathPalette.teal)
-                .frame(width: 44, height: 44)
-                .background { Circle().fill(PausePathPalette.lime).frame(width: 36, height: 36) }
+                .font(.title3.weight(.bold))
+                .foregroundStyle(PausePathPalette.ink)
+                .frame(width: 48, height: 48)
+                .background(PausePathPalette.lime, in: Circle())
         }
         .accessibilityLabel("Add a group")
         .accessibilityHint("Create a group or join with an invite code")
