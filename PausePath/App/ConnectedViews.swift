@@ -208,8 +208,11 @@ struct CommunityChallengesView: View {
                         Image(systemName: "plus")
                             .font(.headline.weight(.bold))
                             .foregroundStyle(PausePathPalette.teal)
-                            .frame(minWidth: 44, minHeight: 44)
-                            .background(PausePathPalette.lime, in: Circle())
+                            .frame(width: 44, height: 44)
+                            .background {
+                                Circle().fill(PausePathPalette.lime)
+                                    .frame(width: 36, height: 36)
+                            }
                     }
                     .accessibilityLabel("Add a group")
                     .accessibilityHint("Create a group or join with an invite code")
@@ -389,29 +392,35 @@ struct CommunityChallengesView: View {
         ZStack {
             RoundedRectangle(cornerRadius: 19).fill(PausePathPalette.teal.gradient)
             GeometryReader { geometry in
-                Path { path in
-                    path.move(to: CGPoint(x: 10, y: geometry.size.height * 0.77))
-                    path.addCurve(to: CGPoint(x: geometry.size.width - 8, y: geometry.size.height * 0.32),
-                                  control1: CGPoint(x: geometry.size.width * 0.32, y: geometry.size.height * 0.89),
-                                  control2: CGPoint(x: geometry.size.width * 0.56, y: geometry.size.height * 0.13))
+                let width = geometry.size.width
+                let height = geometry.size.height
+                let trail = Path { path in
+                    path.move(to: CGPoint(x: width * 0.38, y: height * 0.61))
+                    path.addCurve(to: CGPoint(x: width - 51, y: height * 0.5),
+                                  control1: CGPoint(x: width * 0.56, y: height * 0.56),
+                                  control2: CGPoint(x: width * 0.64, y: height * 0.34))
                 }
-                .stroke(PausePathPalette.lime.opacity(0.75), style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                trail.stroke(PausePathPalette.background.opacity(0.22),
+                             style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                trail.stroke(PausePathPalette.lime,
+                             style: StrokeStyle(lineWidth: 4, lineCap: .round))
             }
-            .padding(12)
             HStack(spacing: -10) {
                 ForEach(0..<3) { index in
                     Image(systemName: index == 1 ? "figure.walk" : "person.fill")
                         .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(index == 1 ? PausePathPalette.ink : PausePathPalette.teal)
-                        .frame(width: 48, height: 48)
+                        .frame(width: 44, height: 44)
                         .background(index == 1 ? PausePathPalette.lime : PausePathPalette.background, in: Circle())
                         .overlay(Circle().strokeBorder(PausePathPalette.teal, lineWidth: 2))
                 }
                 Spacer()
-                Image(systemName: "figure.walk.motion")
-                    .font(.system(size: 28, weight: .medium))
-                    .foregroundStyle(PausePathPalette.lime)
-                    .padding(.trailing, 10)
+                Image(systemName: "flag.checkered")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(PausePathPalette.teal)
+                    .frame(width: 42, height: 42)
+                    .background(PausePathPalette.lime, in: Circle())
+                    .overlay(Circle().strokeBorder(PausePathPalette.background.opacity(0.85), lineWidth: 2))
             }
             .padding(.horizontal, 20)
         }
