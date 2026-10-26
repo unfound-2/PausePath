@@ -63,6 +63,7 @@ struct DiscoverView: View {
     @State private var pinnedStops: [DiscoveredPlace] = []
     @State private var didPositionMap = false
     @State private var navigationWalk: GeneratedWalk?
+    @State private var pendingNavigationWalk: GeneratedWalk?
     @State private var searched = false
     @State private var showReport = false
     @State private var reportPlace: DiscoveredPlace?
@@ -195,7 +196,6 @@ struct DiscoverView: View {
             .overlay(alignment: .bottom) {
                 if !showRoutePlanner { bottomControls(availableHeight: geometry.size.height) }
             }
-            .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: showRoutePlanner)
             .toolbarBackground(.hidden, for: .tabBar)
             .task {
                 if !didPositionMap {
@@ -243,14 +243,19 @@ struct DiscoverView: View {
             .onChange(of: showRoutePlanner) { if showRoutePlanner { cancelAreaRefresh() } }
             .onChange(of: navigationWalk?.id) { if navigationWalk != nil { cancelAreaRefresh() } }
             .onChange(of: discovery.selectedRouteOptionID) { fitRouteInMap() }
-            .sheet(isPresented: $showRoutePlanner) {
+            .sheet(isPresented: $showRoutePlanner, onDismiss: {
+                guard let walk = pendingNavigationWalk else { return }
+                pendingNavigationWalk = nil
+                navigationWalk = walk
+            }) {
                 ExploreRoutePlannerView(discovery: discovery, preferences: preferences, profile: profile, health: health, initialDestination: selectedPlace,
                     destinationQuery: $routeDestinationQuery, destination: $routeDestination,
                     mandatoryKinds: $mandatoryRouteStops, difficultyFilter: $routeDifficultyFilter,
                     routeRequestID: $routeRequestID, usesCurrentLocation: usesCurrentRouteStart,
                     customOrigin: routeStartCoordinate, customOriginName: routeStartTitle,
                     planningControls: AnyView(planningControls), chosenStops: pinnedStops,
-                    onNavigate: { navigationWalk = $0 }, onClose: { showRoutePlanner = false })
+                    onNavigate: { pendingNavigationWalk = $0; showRoutePlanner = false },
+                    onClose: { showRoutePlanner = false })
                     .presentationDetents([.fraction(0.5), .large])
                     .presentationContentInteraction(.resizes)
                     .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.5)))

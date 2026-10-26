@@ -60,24 +60,30 @@ struct WalkingNavigationView: View {
         .interactiveDismissDisabled(navigator.state != .ready)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if navigator.state == .ready {
-                Button(action: startWalk) {
-                    Label("Start navigation", systemImage: "location.fill")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity, minHeight: 54)
+                VStack(spacing: 0) {
+                    Rectangle().fill(PausePathPalette.teal.opacity(0.16)).frame(height: 1)
+                    Button(action: startWalk) {
+                        Label("Start navigation", systemImage: "location.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, minHeight: 54)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(PausePathPalette.ink)
+                    .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 18))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(PausePathPalette.ink)
-                .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 18))
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
-                .padding(.bottom, 8)
-                .background(.regularMaterial)
+                .background(PausePathPalette.background)
             }
         }
         .sheet(isPresented: $showWeather) { weatherSheet }
         .sheet(isPresented: $showWalkSettings) { walkSettingsSheet }
         .sheet(isPresented: $showRouteDetails) { activeRouteDetails }
-        .onAppear { if navigator.plan == nil { navigator.prepare(walk) } }
+        .onAppear {
+            if navigator.plan == nil { navigator.prepare(walk) }
+            if navigator.state == .ready { fitPreviewRoute() }
+        }
         .task(id: "\(plan.id)-\(weatherGuidanceEnabled)-\(showWeather)") {
             guard weatherGuidanceEnabled, showWeather else { return }
             await weatherGuidance.load(for: plan)
@@ -96,7 +102,7 @@ struct WalkingNavigationView: View {
         }
         .onDisappear { if !takingBreak && scenePhase == .active { navigator.stop() } }
         .onChange(of: navigator.plan?.id) {
-            if navigator.state == .ready { camera = .automatic } else { updateNavigationCamera() }
+            if navigator.state == .ready { fitPreviewRoute() } else { updateNavigationCamera() }
             suggestedStops = []
         }
         .onChange(of: navigator.displayCoordinate) { _, _ in updateNavigationCamera() }
@@ -171,22 +177,27 @@ struct WalkingNavigationView: View {
                         } else { camera = .automatic }
                     }
                     Spacer()
-                    Button("Whole route", systemImage: "map") { camera = .automatic }
+                    Button("Whole route", systemImage: "map") { fitPreviewRoute() }
                 }
                 previewTimeline
                 previewDetails
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     Button("Weather", systemImage: "cloud.sun") { showWeather = true }
-                    Spacer()
+                        .frame(maxWidth: .infinity, minHeight: 44)
                     Button("Walk settings", systemImage: "slider.horizontal.3") { showWalkSettings = true }
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .font(.subheadline).frame(minHeight: 44)
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 8)
+                .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 18))
                 DisclosureGroup("More stops") {
                     RouteBreaksView(walk: plan, currentLocation: navigator.freshLocation() ? navigator.location?.coordinate : nil,
                         onDetour: { takingBreak = true; navigator.pause() }, onReturn: { takingBreak = false },
                         onStopsChanged: { suggestedStops = $0 })
                         .id(plan.id)
                 }
+                .padding(16)
+                .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 18))
                 DisclosureGroup("All directions") {
                     ForEach(Array(plan.legs.enumerated()), id: \.offset) { index, leg in
                         Text("Leg \(index + 1)").font(.headline)
@@ -201,8 +212,13 @@ struct WalkingNavigationView: View {
                         }
                     }
                 }
+                .padding(16)
+                .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 18))
             }
             .padding()
+            // The navigation action is pinned above this scroll view. Reserve enough
+            // space for the final disclosure row to scroll fully above that action.
+            .padding(.bottom, 112)
         }
         .pausePathSurface()
     }
@@ -215,6 +231,10 @@ struct WalkingNavigationView: View {
         followsUser = true
         lastCameraCoordinate = nil
         camera = .userLocation(followsHeading: true, fallback: .automatic)
+    }
+    private func fitPreviewRoute() {
+        let rect = plan.legs.reduce(MKMapRect.null) { $0.union($1.polyline.boundingMapRect) }
+        camera = rect.isNull ? .automatic : .rect(rect)
     }
     private func updateNavigationCamera() {
         guard followsUser, navigator.state != .ready, let coordinate = navigator.displayCoordinate else { return }
@@ -534,11 +554,11 @@ struct WalkingNavigationView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("YOUR WALKING ROUTE")
+                    Text("ROUTE PREVIEW")
                         .font(.caption2.weight(.heavy)).tracking(1.2)
                         .foregroundStyle(PausePathPalette.teal)
                     Text(plan.name)
-                        .font(.title2.bold()).foregroundStyle(PausePathPalette.ink)
+                        .font(.title2.bold()).foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
@@ -596,7 +616,7 @@ struct WalkingNavigationView: View {
             }
                 .font(.caption2.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
                 .lineLimit(2)
-            Text(value).font(.subheadline.weight(.bold)).foregroundStyle(PausePathPalette.ink)
+            Text(value).font(.subheadline.weight(.bold)).foregroundStyle(.primary)
                 .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, minHeight: 57, alignment: .leading)
@@ -654,7 +674,7 @@ struct WalkingNavigationView: View {
                 if !isLast { Rectangle().fill(PausePathPalette.teal.opacity(0.18)).frame(width: 2, height: 38) }
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(PausePathPalette.ink)
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
                 Text(detail).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let note {

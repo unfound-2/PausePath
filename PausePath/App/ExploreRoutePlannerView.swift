@@ -411,11 +411,7 @@ struct ExploreRoutePlannerView: View {
                 }.font(.subheadline)
             Button("Preview walk", systemImage: "figure.walk") {
                 let walk = GeneratedWalk(name: "Walk to \(option.destinationName)", legs: option.legs, preferences: routePreferences, stops: option.stops, allowUnknownRestStops: allowUnknownRestStops)
-                onClose()
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(250))
-                    onNavigate(walk)
-                }
+                onNavigate(walk)
             }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink).controlSize(.large)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
