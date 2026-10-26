@@ -157,7 +157,7 @@ struct CommunityChallengesView: View {
                             }.accessibilityLabel("Dismiss confirmation")
                         }
                         .foregroundStyle(PausePathPalette.teal)
-                        .padding(.leading, 16)
+                        .padding(12)
                         .background(PausePathPalette.lime.opacity(0.17), in: RoundedRectangle(cornerRadius: 18))
                     }
                     if account.isSignedIn && !communities.isEmpty {
@@ -195,29 +195,7 @@ struct CommunityChallengesView: View {
             }
             .pausePathSurface()
             .navigationTitle("Community")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button("Create group", systemImage: "plus.circle") {
-                            communityComposerRoute = CommunityComposerRoute(joining: false, inviteCode: "")
-                        }
-                        Button("Join by code", systemImage: "person.badge.plus") {
-                            communityComposerRoute = CommunityComposerRoute(joining: true, inviteCode: "")
-                        }
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.headline.weight(.bold))
-                            .foregroundStyle(PausePathPalette.teal)
-                            .frame(width: 44, height: 44)
-                            .background {
-                                Circle().fill(PausePathPalette.lime)
-                                    .frame(width: 36, height: 36)
-                            }
-                    }
-                    .accessibilityLabel("Add a group")
-                    .accessibilityHint("Create a group or join with an invite code")
-                }
-            }
+            .toolbar { addGroupToolbar }
             .task {
                 if UserDefaults.standard.string(forKey: "pausepath.shareProgressOwner") != account.userID { shareProgress = false }
                 if !pendingInviteCode.isEmpty { communityComposerRoute = CommunityComposerRoute(joining: true, inviteCode: pendingInviteCode) }
@@ -278,13 +256,41 @@ struct CommunityChallengesView: View {
         }
     }
 
+    @ToolbarContentBuilder private var addGroupToolbar: some ToolbarContent {
+        if #available(iOS 26.0, *) {
+            ToolbarItem(placement: .topBarTrailing) { addGroupMenu }
+                .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .topBarTrailing) { addGroupMenu }
+        }
+    }
+
+    private var addGroupMenu: some View {
+        Menu {
+            Button("Create group", systemImage: "plus.circle") {
+                communityComposerRoute = CommunityComposerRoute(joining: false, inviteCode: "")
+            }
+            Button("Join by code", systemImage: "person.badge.plus") {
+                communityComposerRoute = CommunityComposerRoute(joining: true, inviteCode: "")
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(PausePathPalette.teal)
+                .frame(width: 44, height: 44)
+                .background { Circle().fill(PausePathPalette.lime).frame(width: 36, height: 36) }
+        }
+        .accessibilityLabel("Add a group")
+        .accessibilityHint("Create a group or join with an invite code")
+    }
+
     private var groupsSection: some View {
         VStack(alignment: .leading, spacing: 13) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Your groups").font(.title2.bold()).foregroundStyle(PausePathPalette.teal)
                 Spacer()
                 if busy { ProgressView().controlSize(.small) }
-                else if let lastCommunityRefresh {
+                else if !communities.isEmpty, let lastCommunityRefresh {
                     Text("Updated \(lastCommunityRefresh, style: .relative)")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -430,7 +436,7 @@ struct CommunityChallengesView: View {
 
     private var communityPossibilities: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text("What can a group do?")
+            Text("Together, you can")
                 .font(.headline).foregroundStyle(PausePathPalette.teal)
             if typeSize.isAccessibilitySize {
                 VStack(spacing: 8) { communityPossibilityItems }
@@ -443,7 +449,7 @@ struct CommunityChallengesView: View {
     @ViewBuilder private var communityPossibilityItems: some View {
         possibility("Plan walks", icon: "map")
         possibility("Share goals", icon: "flag")
-        possibility("Cheer each other", icon: "hands.clap")
+        possibility("Cheer friends", icon: "hands.clap")
     }
 
     private func possibility(_ title: String, icon: String) -> some View {
@@ -487,7 +493,7 @@ struct CommunityChallengesView: View {
                         Text(community.name)
                             .font(.system(.title3, design: .rounded).bold())
                             .foregroundStyle(.white).lineLimit(2)
-                        Text("\(community.member_count) members")
+                        Text("\(community.member_count) \(community.member_count == 1 ? "member" : "members")")
                             .font(.caption).foregroundStyle(.white.opacity(0.72))
                     }
                 }
