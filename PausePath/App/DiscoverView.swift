@@ -54,7 +54,7 @@ struct DiscoverView: View {
     @State private var showRoutePlanner = false
     @State private var sheetLevel = 0
     @GestureState private var sheetDrag: CGFloat = 0
-    @ScaledMetric(relativeTo: .body) private var compactSheetHeight: CGFloat = 100
+    @ScaledMetric(relativeTo: .body) private var compactSheetHeight: CGFloat = 76
     @State private var browseQuery = ""
     @State private var browseMatches: [MKMapItem] = []
     @State private var browseTask: Task<Void, Never>?
@@ -102,7 +102,7 @@ struct DiscoverView: View {
         let lonStep = max(region.span.longitudeDelta / 7, 0.00001)
         let displayed = visiblePlaces
         let grouped = Dictionary(grouping: displayed) { place in
-            if displayed.count < 70 || place.id == selectedID { return place.id.uuidString }
+            if displayed.count < 18 || place.id == selectedID { return place.id.uuidString }
             let c = place.item.placemark.coordinate
             return "\(place.kind.rawValue)-\(Int(floor(c.latitude / latStep)))-\(Int(floor(c.longitude / lonStep)))"
         }
@@ -145,20 +145,23 @@ struct DiscoverView: View {
                                     span: MKCoordinateSpan(latitudeDelta: region.span.latitudeDelta / 2, longitudeDelta: region.span.longitudeDelta / 2)))
                             }
                         } label: {
-                            VStack(spacing: -3) {
-                                if cluster.places.count > 1 {
-                                    Text("\(cluster.places.count)").font(.caption.bold()).foregroundStyle(.white)
-                                        .padding(5).background(place.kind.mapColor, in: Capsule())
-                                }
+                            ZStack(alignment: .topTrailing) {
                                 Image(systemName: place.kind.symbol)
-                                    .font(.system(size: selectedID == place.id ? 20 : 16, weight: .semibold))
+                                    .font(.system(size: selectedID == place.id ? 18 : 14, weight: .semibold))
                                     .foregroundStyle(.white)
-                                    .frame(width: selectedID == place.id ? 48 : 38, height: selectedID == place.id ? 48 : 38)
+                                    .frame(width: selectedID == place.id ? 42 : 32, height: selectedID == place.id ? 42 : 32)
                                     .background(place.kind.mapColor, in: Circle())
-                                    .overlay(Circle().stroke(.white, lineWidth: 3))
-                                Image(systemName: "arrowtriangle.down.fill").font(.system(size: 12)).foregroundStyle(place.kind.mapColor)
-                            }.shadow(color: .black.opacity(0.2), radius: 4, y: 2)
-                                .frame(minWidth: 44, minHeight: 52)
+                                    .overlay(Circle().strokeBorder(selectedID == place.id ? PausePathPalette.lime : .white, lineWidth: selectedID == place.id ? 4 : 2))
+                                if cluster.places.count > 1 {
+                                    Text("\(cluster.places.count)")
+                                        .font(.caption2.bold()).foregroundStyle(PausePathPalette.ink)
+                                        .frame(minWidth: 20, minHeight: 20)
+                                        .background(PausePathPalette.lime, in: Circle())
+                                        .offset(x: 8, y: -8)
+                                }
+                            }
+                            .shadow(color: .black.opacity(selectedID == place.id ? 0.3 : 0.16), radius: selectedID == place.id ? 7 : 3, y: 2)
+                            .frame(minWidth: 44, minHeight: 44)
                         }.buttonStyle(.plain)
                             .disabled(showRoutePlanner)
                             .accessibilityLabel(cluster.places.count > 1 ? "\(cluster.places.count) \(place.kind.rawValue) stops. Zoom in to explore." : "\(place.item.name ?? "Possible stop"), \(place.kind.rawValue)")
@@ -193,6 +196,20 @@ struct DiscoverView: View {
             }
             .overlay(alignment: .bottom) {
                 if !showRoutePlanner { bottomControls(availableHeight: geometry.size.height) }
+            }
+            .overlay(alignment: .bottomLeading) {
+                if !showRoutePlanner && sheetLevel == 0 && !searchFocused {
+                    areaStatusOverlay
+                        .padding(.leading, 18)
+                        .padding(.bottom, compactSheetHeight + 24)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if !showRoutePlanner && sheetLevel == 0 && !searchFocused {
+                    mapQuickActions
+                        .padding(.trailing, 18)
+                        .padding(.bottom, compactSheetHeight + 24)
+                }
             }
             .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: showRoutePlanner)
             .toolbarBackground(.hidden, for: .tabBar)
@@ -679,75 +696,50 @@ struct DiscoverView: View {
         return discovery.areaLoadState == "ready" ? "No mapped stops" : "Stops unavailable"
     }
 
+    private var areaStatusOverlay: some View {
+        Menu {
+            Button("Refresh this area", systemImage: "arrow.clockwise") { Task { await refresh() } }
+                .disabled(discovery.isLoading)
+            if discovery.showingSavedArea { Text("Saved stop details may have changed") }
+        } label: {
+            HStack(spacing: 6) {
+                if areaIsUpdating { ProgressView().controlSize(.mini) }
+                Text(compactAreaMessage).lineLimit(1)
+                Image(systemName: "arrow.clockwise").font(.caption2.weight(.semibold))
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(PausePathPalette.teal)
+            .padding(.horizontal, 10)
+            .frame(minHeight: 36)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(PausePathPalette.teal.opacity(0.1)))
+        }
+        .accessibilityLabel("Map status: \(areaMessage)")
+        .accessibilityHint("Open options to refresh this area")
+    }
+
+    private var mapQuickActions: some View {
+        VStack(spacing: 0) {
+            Button { searchFocused = false; requestLocationAccess() } label: {
+                Image(systemName: "location.fill").frame(width: 44, height: 44)
+            }.accessibilityLabel("Center map on my location")
+            Divider().padding(.horizontal, 9)
+            Button { reportPlace = nil; showReport = true } label: {
+                Image(systemName: "exclamationmark").frame(width: 44, height: 44)
+            }.accessibilityLabel("Suggest a stop at map center")
+        }
+        .foregroundStyle(PausePathPalette.teal)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(PausePathPalette.teal.opacity(0.1)))
+    }
+
     private func bottomControls(availableHeight: CGFloat) -> some View {
         let heights: [CGFloat] = [compactSheetHeight, max(compactSheetHeight, availableHeight * 0.43), max(compactSheetHeight, availableHeight * 0.73)]
         let height = min(max(heights[sheetLevel] - sheetDrag, compactSheetHeight), availableHeight * 0.78)
-        return VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                Menu {
-                    Button("Refresh this area", systemImage: "arrow.clockwise") { Task { await refresh() } }
-                        .disabled(discovery.isLoading)
-                    if discovery.showingSavedArea {
-                        Text("Saved stop details may have changed")
-                    }
-                } label: {
-                    HStack(spacing: 7) {
-                        if areaIsUpdating { ProgressView().controlSize(.mini) }
-                        Text(compactAreaMessage).font(.caption.weight(.semibold)).lineLimit(1)
-                        Image(systemName: "chevron.down").font(.caption2.weight(.bold))
-                    }
-                    .padding(.horizontal, 12)
-                    .frame(minHeight: 44)
-                    .background(.regularMaterial, in: Capsule())
-                }
-                .accessibilityLabel("Map status: \(areaMessage)")
-                .accessibilityHint("Open options to refresh this area")
-                Spacer(minLength: 0)
-                Button { searchFocused = false; requestLocationAccess() } label: { Image(systemName: "location.fill").frame(width: 44, height: 44) }
-                    .accessibilityLabel("Center map on my location").background(.regularMaterial, in: Circle())
-                Button { reportPlace = nil; showReport = true } label: { Image(systemName: "exclamationmark").frame(width: 44, height: 44) }
-                    .accessibilityLabel("Suggest a stop at map center").background(.regularMaterial, in: Circle())
-            }.foregroundStyle(PausePathPalette.teal)
+        return VStack(spacing: 0) {
             VStack(spacing: 0) {
-                VStack(spacing: 5) {
-                    Capsule().fill(.secondary.opacity(0.4)).frame(width: 36, height: 5).padding(.top, 10)
-                    HStack {
-                        Button { animate { sheetLevel = (sheetLevel + 1) % 3 } } label: {
-                            HStack(spacing: 10) {
-                                if let place = selectedPlace ?? visiblePlaces.first {
-                                    Image(systemName: place.kind.symbol)
-                                        .font(.subheadline.weight(.bold))
-                                        .foregroundStyle(.white)
-                                        .frame(width: 36, height: 36)
-                                        .background(place.kind.mapColor, in: Circle())
-                                        .accessibilityHidden(true)
-                                }
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(selectedPlace?.item.name ?? visiblePlaces.first?.item.name ?? "Explore this area")
-                                        .font(.subheadline.weight(.bold))
-                                        .lineLimit(1)
-                                    Text(selectedPlace == nil
-                                         ? "\(visiblePlaces.count) mapped stops · swipe up"
-                                         : "\(selectedPlace?.kind.chipTitle ?? "Stop") · swipe up for details")
-                                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("\(selectedPlace?.item.name ?? visiblePlaces.first?.item.name ?? "Explore this area"), \(visiblePlaces.count) mapped stops")
-                        .accessibilityHint("Expand or collapse the nearby stops panel")
-                            .accessibilityAdjustableAction { direction in
-                                animate { sheetLevel = min(2, max(0, sheetLevel + (direction == .increment ? 1 : -1))) }
-                            }
-                        Button { openPlanner() } label: {
-                            Label("Plan a walk", systemImage: "figure.walk").font(.subheadline.bold())
-                                .padding(.horizontal, 12).frame(minHeight: 44)
-                        }.buttonStyle(.plain).foregroundStyle(PausePathPalette.ink)
-                            .background(PausePathPalette.lime, in: Capsule())
-                    }.padding(.horizontal, 16)
-                }.contentShape(Rectangle())
+                sheetHeader
+                    .contentShape(Rectangle())
                     .simultaneousGesture(DragGesture(minimumDistance: 12)
                         .updating($sheetDrag) { value, state, _ in state = value.translation.height }
                         .onEnded { value in
@@ -758,7 +750,7 @@ struct DiscoverView: View {
                     Divider().padding(.horizontal, 16)
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 14) {
-                            if let place = selectedPlace { selectedCard(place) }
+                            if sheetLevel == 2, let place = selectedPlace { selectedCard(place) }
                             else {
                                 if !pinnedStops.isEmpty {
                                     Text("\(pinnedStops.count) stops added to your route").font(.subheadline.weight(.semibold))
@@ -774,7 +766,7 @@ struct DiscoverView: View {
                                         HStack(spacing: 12) {
                                             Image(systemName: place.kind.symbol).foregroundStyle(.white).frame(width: 42, height: 42).background(place.kind.mapColor, in: Circle())
                                             VStack(alignment: .leading, spacing: 4) {
-                                                Text(place.item.name ?? place.kind.rawValue).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                                                Text(place.item.name ?? place.kind.rawValue).font(.subheadline.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
                                                 Text(distanceLabel(place)).font(.caption).foregroundStyle(.secondary)
                                             }
                                             Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
@@ -786,11 +778,61 @@ struct DiscoverView: View {
                     }.scrollDismissesKeyboard(.interactively)
                 }
                 Spacer(minLength: 0)
-            }.frame(height: searchFocused ? compactSheetHeight : height)
-                .background(PausePathPalette.background, in: RoundedRectangle(cornerRadius: 26))
-                .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(PausePathPalette.teal.opacity(0.12)))
-                .shadow(color: .black.opacity(0.12), radius: 16, y: 4)
+            }
+            .frame(height: searchFocused ? compactSheetHeight : height)
+            .background(PausePathPalette.background, in: RoundedRectangle(cornerRadius: 26))
+            .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(PausePathPalette.teal.opacity(0.12)))
+            .shadow(color: .black.opacity(0.12), radius: 16, y: 4)
         }.padding(.horizontal, 12).padding(.bottom, 8)
+    }
+
+    private var sheetHeader: some View {
+        VStack(spacing: 3) {
+            Capsule().fill(PausePathPalette.teal.opacity(0.25)).frame(width: 32, height: 4).padding(.top, 8)
+            HStack(spacing: 10) {
+                if sheetLevel == 0, let place = selectedPlace {
+                    Button { animate { sheetLevel = 2 } } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: place.kind.symbol)
+                                .font(.caption.weight(.bold)).foregroundStyle(.white)
+                                .frame(width: 32, height: 32).background(place.kind.mapColor, in: Circle())
+                            Text(place.item.name ?? place.kind.chipTitle)
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(PausePathPalette.teal).lineLimit(1)
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.up").foregroundStyle(PausePathPalette.teal)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                    }.buttonStyle(.plain).accessibilityHint("Open stop details")
+                } else if sheetLevel == 0 {
+                    Button { openPlanner() } label: {
+                        Label("Plan a walk", systemImage: "figure.walk")
+                            .font(.subheadline.bold()).foregroundStyle(PausePathPalette.ink)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(PausePathPalette.lime, in: Capsule())
+                    }.buttonStyle(.plain)
+                    Button { animate { sheetLevel = 1 } } label: {
+                        Image(systemName: "list.bullet").frame(width: 44, height: 44)
+                    }.buttonStyle(.plain).foregroundStyle(PausePathPalette.teal)
+                        .accessibilityLabel("Show nearby stops")
+                } else {
+                    Button { animate { sheetLevel = sheetLevel == 1 ? 2 : 1 } } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(sheetLevel == 2 && selectedPlace != nil ? "Stop details" : "Nearby stops")
+                                .font(.subheadline.weight(.bold)).foregroundStyle(PausePathPalette.teal)
+                            Text("\(visiblePlaces.count) mapped in this area")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.buttonStyle(.plain).accessibilityHint("Change panel size")
+                    Button { openPlanner() } label: {
+                        Label("Plan", systemImage: "figure.walk").font(.caption.weight(.semibold))
+                            .frame(minHeight: 44)
+                    }.buttonStyle(.plain).foregroundStyle(PausePathPalette.teal)
+                }
+            }.padding(.horizontal, 16).padding(.bottom, 8)
+        }
+        .accessibilityAdjustableAction { direction in
+            animate { sheetLevel = min(2, max(0, sheetLevel + (direction == .increment ? 1 : -1))) }
+        }
     }
 
     private func openPlanner() {
@@ -868,7 +910,7 @@ struct DiscoverView: View {
         searchFocused = false
         cancelAreaRefresh()
         discovery.cancelPending()
-        animate { sheetLevel = 1; selectedID = place.id; discovery.route = nil; discovery.itinerary = []; discovery.routeOptions = []; discovery.selectedRouteOptionID = nil }
+        animate { sheetLevel = 2; selectedID = place.id; discovery.route = nil; discovery.itinerary = []; discovery.routeOptions = []; discovery.selectedRouteOptionID = nil }
     }
     private func cancelAreaRefresh() {
         areaRefreshTask?.cancel()
