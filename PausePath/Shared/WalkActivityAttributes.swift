@@ -10,6 +10,7 @@ struct WalkActivityAttributes: ActivityAttributes {
         var paused: Bool
         var locating: Bool
         var arrived: Bool
+        var distanceUnit: String? = nil
         var updatedAt: Date
     }
     let sessionID: UUID

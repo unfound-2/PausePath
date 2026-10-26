@@ -21,7 +21,7 @@ struct WalkLiveActivity: Widget {
                 Text(context.isStale ? "Updates are out of date. Open PausePath to check your walk." : context.state.instruction)
                     .font(.subheadline.weight(.semibold)).lineLimit(2)
                 HStack {
-                    Label(distance(context.state.remainingMeters) + " left", systemImage: "flag")
+                    Label(distance(context.state.remainingMeters, unit: context.state.distanceUnit) + " left", systemImage: "flag")
                     Spacer()
                     if !context.state.paused && !context.state.arrived {
                         Button(intent: PauseWalkIntent(sessionID: context.attributes.sessionID.uuidString)) { Label("Pause", systemImage: "pause.fill") }
@@ -31,7 +31,7 @@ struct WalkLiveActivity: Widget {
                     }
                 }.font(.caption)
                 if let name = context.state.nextPause, let meters = context.state.nextPauseMeters {
-                    Text("Next pause: " + name + " · " + distance(meters)).font(.caption).lineLimit(1)
+                    Text("Next pause: " + name + " · " + distance(meters, unit: context.state.distanceUnit)).font(.caption).lineLimit(1)
                 }
             }.padding(16).foregroundStyle(teal)
                 .activityBackgroundTint(mint).activitySystemActionForegroundColor(teal)
@@ -39,7 +39,7 @@ struct WalkLiveActivity: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) { Image(systemName: "figure.walk").foregroundStyle(lime) }
-                DynamicIslandExpandedRegion(.trailing) { Text(distance(context.state.remainingMeters)).font(.headline).foregroundStyle(lime) }
+                DynamicIslandExpandedRegion(.trailing) { Text(distance(context.state.remainingMeters, unit: context.state.distanceUnit)).font(.headline).foregroundStyle(lime) }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(context.isStale ? "Open PausePath for an update" : context.state.instruction).font(.subheadline).lineLimit(2)
@@ -54,14 +54,17 @@ struct WalkLiveActivity: Widget {
             } compactLeading: {
                 Image(systemName: context.state.paused ? "pause.fill" : "figure.walk").foregroundStyle(lime)
             } compactTrailing: {
-                Text(distance(context.state.remainingMeters)).font(.caption2).monospacedDigit().foregroundStyle(lime)
+                Text(distance(context.state.remainingMeters, unit: context.state.distanceUnit)).font(.caption2).monospacedDigit().foregroundStyle(lime)
             } minimal: {
                 Image(systemName: context.state.paused ? "pause.fill" : "figure.walk").foregroundStyle(lime)
             }.widgetURL(URL(string: "pausepath://walk/current"))
         }
     }
-    private func distance(_ meters: Int) -> String {
-        meters < 1000 ? "\(meters) m" : String(format: "%.1f km", Double(meters) / 1000)
+    private func distance(_ meters: Int, unit: String?) -> String {
+        if unit == "mi" {
+            return meters < 161 ? String(format: "%.0f ft", Double(meters) / 0.3048) : String(format: "%.1f mi", Double(meters) / 1609.344)
+        }
+        return meters < 1000 ? "\(meters) m" : String(format: "%.1f km", Double(meters) / 1000)
     }
 }
 private struct WalkEntry: TimelineEntry { let date: Date }

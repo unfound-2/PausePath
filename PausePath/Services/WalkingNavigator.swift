@@ -337,7 +337,7 @@ import UIKit
         return .init(instruction: String((state == .paused ? "Walk paused" : state == .locating ? "Waiting for accurate GPS" : currentInstruction).prefix(140)),
                      remainingMeters: Int(max(0, min(remainingMeters, 1000000))), nextPause: upcoming.map { String((unavailable ? "Reported unavailable — open app" : $0.place.item.name ?? "Mapped bench").prefix(80)) },
                      nextPauseMeters: upcoming.map { Int(max(0, min($0.meters, 1000000))) }, paused: state == .paused,
-                     locating: state == .locating, arrived: state == .arrived, updatedAt: .now)
+                     locating: state == .locating, arrived: state == .arrived, distanceUnit: UserDefaults.standard.string(forKey: DistanceDisplayUnit.storageKey) ?? DistanceDisplayUnit.kilometers.rawValue, updatedAt: .now)
     }
     func updateActivity(force: Bool = false) { liveActivity.update(activityState, force: force) }
     func replaceNextPause(with poi: SharedPOI) async {
