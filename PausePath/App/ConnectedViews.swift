@@ -992,10 +992,14 @@ struct WeeklySuggestionsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("Weekly suggestions", systemImage: "sparkles").font(.headline)
-                Spacer()
-                Label("\(monthlyPoints) pts this month", systemImage: "star.fill")
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
+                Label("Weekly suggestions", systemImage: "sparkles")
+                    .font(.headline).lineLimit(1).minimumScaleFactor(0.85)
+                Spacer(minLength: 8)
+                Text("\(monthlyPoints) pts")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PausePathPalette.teal)
+                    .fixedSize()
+                    .accessibilityLabel("\(monthlyPoints) points this month")
             }
             ForEach(weeklyChallenges) { challenge in
                 let progress = weeklyProgress(for: challenge)

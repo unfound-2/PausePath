@@ -798,10 +798,13 @@ struct MyPathView: View {
     }
     private var milestones: PathMilestones { PathMilestones(walks: walks) }
     private var totalPathBadgeCount: Int { milestones.badges.count + 1 }
-    private var activities: [PathActivity] {
+    private var sourceActivities: [PathActivity] {
         let all = source == "PausePath" ? walks.map(PathActivity.init) : health.activities.map(PathActivity.init)
         let hidden = (try? JSONDecoder().decode(Set<String>.self, from: hiddenHealthData)) ?? []
-        return all.filter { (!($0.isHealth && hidden.contains($0.id))) && (pathSection != "History" || kind == "All" || $0.kind == kind) }.sorted { $0.date > $1.date }
+        return all.filter { !($0.isHealth && hidden.contains($0.id)) }.sorted { $0.date > $1.date }
+    }
+    private var activities: [PathActivity] {
+        sourceActivities.filter { pathSection != "History" || kind == "All" || $0.kind == kind }
     }
     private var recent: [PathActivity] {
         let start = Calendar.current.date(byAdding: .day, value: -(period - 1), to: Calendar.current.startOfDay(for: Date()))!
@@ -816,8 +819,30 @@ struct MyPathView: View {
             }
             let items = Array(activities.prefix(3))
             if items.isEmpty {
-                ContentUnavailableView("No activity yet", systemImage: "figure.walk", description: Text("Record a path in Explore or choose Apple Health as your source."))
-                    .frame(minHeight: 140)
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "figure.walk")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(PausePathPalette.teal)
+                        .frame(width: 42, height: 42)
+                        .background(PausePathPalette.teal.opacity(0.10), in: RoundedRectangle(cornerRadius: 13))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(source == "PausePath" ? "Your first path starts here" : "No Health workouts yet")
+                            .font(.subheadline.weight(.semibold))
+                        Text(source == "PausePath" ? "Plan a walk to start your history." : "Connect or refresh Apple Health to see shared workouts.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                if source == "PausePath" {
+                    exploreAction
+                } else {
+                    Button(health.hasConnected ? "Refresh Apple Health" : "Connect Apple Health", systemImage: "heart") {
+                        Task { await health.connect() }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .frame(minHeight: 44)
+                    .disabled(health.isLoading)
+                }
             } else {
                 ForEach(items) { activity in
                     NavigationLink { PathJourneyDetail(activity: activity, health: health) } label: {
@@ -828,13 +853,15 @@ struct MyPathView: View {
                     if activity.id != items.last?.id { Divider() }
                 }
             }
-            Button { pathSection = "History" } label: {
-                Label("See all", systemImage: "arrow.right")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+            if !items.isEmpty {
+                Button { pathSection = "History" } label: {
+                    Label("See all", systemImage: "arrow.right")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .buttonStyle(.plain)
+                .tint(PausePathPalette.teal)
             }
-            .buttonStyle(.plain)
-            .tint(PausePathPalette.teal)
         }
         .padding(16)
         .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 22))
@@ -853,11 +880,11 @@ struct MyPathView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     if pathSection != "Overview" && !(demoMode && pathSection == "Insights") { sourceControls }
                     if pathSection == "Overview" {
-                        recentPaths
                         if goalEnabled { personalGoal }
                         else {
                             Button("Set a weekly goal", systemImage: "plus.circle") { goalEnabled = true }.pathCard()
                         }
+                        recentPaths
                         WeeklySuggestionsView(preferences: preferences)
                     } else if pathSection == "History" {
                         history
@@ -867,10 +894,11 @@ struct MyPathView: View {
                             Text("The sample and your recorded trend are shown separately. The sample never replaces your data.")
                                 .font(.callout).foregroundStyle(.secondary).pathCard()
                         } else {
-                            if source == "Apple Health" { healthTotals }
-                            walkingMinutesTrend
-                            trends
-                            records
+                            if source == "Apple Health" && !daily.isEmpty { healthTotals }
+                            if !personalWalkingHistory.isEmpty { walkingMinutesTrend }
+                            else { emptyWalkingTrend }
+                            if !activities.isEmpty { trends }
+                            if !walks.isEmpty { records }
                             bodyMetrics
                             healthConnection
                         }
@@ -901,7 +929,7 @@ struct MyPathView: View {
         HStack(spacing: 12) {
             sourceMenu
             Spacer()
-            if pathSection != "History" {
+            if pathSection != "History" && !activities.isEmpty {
                 Picker("Period", selection: $period) {
                     Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90)
                 }.pickerStyle(.menu).tint(PausePathPalette.teal)
@@ -916,6 +944,26 @@ struct MyPathView: View {
             Text("PausePath").tag("PausePath")
             Text("Apple Health").tag("Apple Health")
         }.pickerStyle(.menu).tint(PausePathPalette.teal).onChange(of: source) { kind = "All" }
+    }
+    private var exploreAction: some View {
+        Button {
+            NotificationCenter.default.post(name: .pausePathOpenExplore, object: nil)
+        } label: {
+            Label("Explore walks", systemImage: "arrow.up.right")
+                .font(.subheadline.weight(.semibold))
+                .frame(minHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(PausePathPalette.teal)
+    }
+    private var emptyWalkingTrend: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Your walking trend", systemImage: "chart.xyaxis.line").font(.headline)
+            Text("Record walks to see how your walking time changes across weeks. Unrecorded weeks stay unknown.")
+                .font(.subheadline).foregroundStyle(.secondary)
+            exploreAction
+        }
+        .pathCard()
     }
     private var filteredHistory: [PathActivity] {
         guard historyDays > 0 else { return activities }
@@ -1206,18 +1254,44 @@ struct MyPathView: View {
                 HStack { Text("Workout history").font(.title3.bold()); Spacer(); historyFilter }
                 VStack(alignment: .leading, spacing: 8) { Text("Workout history").font(.title3.bold()); historyFilter }
             }
-            Picker("History dates", selection: $historyDays) {
-                Text("All dates").tag(0); Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90)
-            }.pickerStyle(.menu)
-            Button("Export filtered history (CSV)", systemImage: "square.and.arrow.up") {
-                exportDocument = PathExportDocument(text: historyCSV); exporting = true
-            }.disabled(filteredHistory.isEmpty)
+            HStack {
+                Picker("History dates", selection: $historyDays) {
+                    Text("All dates").tag(0); Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90)
+                }.pickerStyle(.menu)
+                Spacer()
+                if !filteredHistory.isEmpty {
+                    Button("Export CSV", systemImage: "square.and.arrow.up") {
+                        exportDocument = PathExportDocument(text: historyCSV); exporting = true
+                    }
+                }
+            }
             if source == "Apple Health", !hiddenHealthData.isEmpty {
                 Button("Restore hidden Health workouts") { hiddenHealthData = Data() }
             }
             if !exportMessage.isEmpty { Text(exportMessage).font(.caption) }
-            Text("Available \(source) sessions · newest first").font(.caption).foregroundStyle(.secondary)
-            if filteredHistory.isEmpty { ContentUnavailableView("No sessions in this selection", systemImage: "figure.walk", description: Text("Track a route in Explore, or connect Apple Health for workout history.")) }
+            if filteredHistory.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label(sourceActivities.isEmpty ? "No sessions yet" : "No sessions match these filters", systemImage: "figure.walk")
+                        .font(.headline)
+                    Text(sourceActivities.isEmpty ? "Your recorded walks and workouts will appear here." : "Try another activity or date range.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    if sourceActivities.isEmpty {
+                        if source == "PausePath" { exploreAction }
+                        else {
+                            Button("Connect or refresh Apple Health", systemImage: "heart") {
+                                Task { await health.connect() }
+                            }
+                            .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+                            .disabled(health.isLoading)
+                        }
+                    } else {
+                        Button("Clear filters") { kind = "All"; historyDays = 0 }
+                            .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+                    }
+                }.pathCard()
+            } else {
+                Text("Available \(source) sessions · newest first").font(.caption).foregroundStyle(.secondary)
+            }
             LazyVStack(spacing: 12) {
                 ForEach(filteredHistory) { activity in
                     NavigationLink { PathJourneyDetail(activity: activity, health: health) } label: {
@@ -1250,7 +1324,11 @@ struct MyPathView: View {
             Button { Task { await health.connect() } } label: {
                 HStack { if health.isLoading { ProgressView() }; Text(health.isLoading ? "Reading Health…" : "Connect / refresh Apple Health") }
                     .frame(maxWidth: .infinity)
-            }.buttonStyle(.borderedProminent).disabled(health.isLoading)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(PausePathPalette.lime)
+            .foregroundStyle(PausePathPalette.ink)
+            .disabled(health.isLoading)
             DisclosureGroup("About Health data", isExpanded: $showHealthExplanation) {
                 Text("You choose which readings to share. Missing readings stay unknown. Health readings and journey maps stay on this device.").font(.caption).foregroundStyle(.secondary)
             }.font(.caption)
