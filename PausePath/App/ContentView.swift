@@ -121,101 +121,58 @@ struct ProfileSettingsView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 26) {
-                    AnyLayout(typeSize.isAccessibilitySize
-                              ? AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
-                              : AnyLayout(HStackLayout(alignment: .center, spacing: 16))) {
-                        PhotosPicker(selection: $photo, matching: .images) {
-                            ZStack(alignment: .bottomTrailing) {
-                                Group {
-                                    if let image = UIImage(data: photoData) {
-                                        Image(uiImage: image).resizable().scaledToFill()
-                                    } else {
-                                        Text(String(name.prefix(1)).uppercased()).font(.system(size: 34, weight: .semibold, design: .rounded))
-                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                            .background(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
-                                    }
-                                }.frame(width: 76, height: 76).clipShape(Circle())
-                                Image(systemName: "camera.fill").font(.caption).padding(7)
-                                    .background(PausePathPalette.ink, in: Circle()).foregroundStyle(.white)
-                            }
-                        }.accessibilityLabel("Choose profile photo")
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(name).font(.title2.bold()).foregroundStyle(PausePathPalette.teal)
-                                .lineLimit(2).minimumScaleFactor(0.85)
-                            HStack(spacing: 14) {
-                                NavigationLink("Edit profile") { ChangeUsernameView() }
-                                if !photoData.isEmpty {
-                                    Button("Remove photo", role: .destructive) { photoData = Data(); photo = nil }
-                                }
-                            }
-                            .font(.caption.weight(.semibold))
-                        }
-                    }
-                    .padding(18)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 24))
+                VStack(alignment: .leading, spacing: 22) {
+                    profileHeader
                     if let photoError { Text(photoError).font(.caption).foregroundStyle(.secondary) }
+                    weeklyProgress
 
-                    VStack(alignment: .leading, spacing: 20) {
-                        HStack {
-                            Label("This week", systemImage: "sun.horizon.fill").font(.headline)
-                            Spacer()
-                            NavigationLink { GoalPreferencesEditor(preferences: $preferences) } label: {
-                                Text("Adjust goal").font(.caption.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
-                                    .background(PausePathPalette.lime, in: Capsule()).foregroundStyle(PausePathPalette.ink)
-                            }
-                        }
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 24) { walkMetric; minuteMetric }
-                            VStack(alignment: .leading, spacing: 20) { walkMetric; minuteMetric }
-                        }
-                        Text(weeklyWalks.isEmpty ? "Your recorded walks will appear here." : "Based on PausePath walks recorded this week.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }.padding(20).background(PausePathPalette.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 24))
-
-                    section("Your plan") {
+                    section("Your walking") {
                         NavigationLink { PlannerView(preferences: $preferences, health: health) } label: {
                             row("Walking preferences", detail: "\(preferences.terrain.rawValue) · Rest every \(Int(preferences.maximumRestGapMeters)) m", icon: "slider.horizontal.3")
                         }
-                        Divider().padding(.leading, 60)
+                        Divider().padding(.leading, 62)
                         NavigationLink { GoalPreferencesEditor(preferences: $preferences) } label: {
                             row("Your goals", detail: profile.goal.rawValue, icon: "scope")
                         }
-                    }
-                    section("Community") {
-                        NavigationLink { FriendsSettingsView() } label: {
-                            row("Friends", detail: "Find people and manage requests", icon: "person.2")
-                        }
-                        Divider().padding(.leading, 60)
-                        NavigationLink { SocialInboxView() } label: {
-                            row("Inbox", detail: "Invitations and group updates", icon: "tray")
-                        }
-                    }
-                    section("More") {
+                        Divider().padding(.leading, 62)
                         NavigationLink { SavedRoutesSettingsView(preferences: preferences) } label: {
-                            row("Saved routes", detail: "Favorite and repeat walks", icon: "heart")
+                            row("Saved routes", icon: "heart")
                         }
-                        Divider().padding(.leading, 60)
+                        Divider().padding(.leading, 62)
                         NavigationLink {
                             ScrollView { PathBadgeCollection(walks: trackedWalks).padding(20) }
                                 .pausePathSurface().navigationTitle("Path badges")
                         } label: {
-                            row("Badges", detail: "See your walking milestones", icon: "seal")
+                            row("Badges", icon: "seal")
                         }
-                        Divider().padding(.leading, 60)
+                    }
+                    section("Community") {
+                        NavigationLink { FriendsSettingsView() } label: {
+                            row("Friends", icon: "person.2")
+                        }
+                        Divider().padding(.leading, 62)
+                        NavigationLink { SocialInboxView() } label: {
+                            row("Inbox", icon: "tray")
+                        }
+                    }
+                    section("App") {
+                        NavigationLink { settingsPage } label: {
+                            row("Settings & privacy", detail: "Downloads, services, and display", icon: "gearshape")
+                        }
+                        Divider().padding(.leading, 62)
                         Button {
                             NotificationCenter.default.post(name: .pausePathReplayOnboarding, object: nil)
                         } label: {
-                            row("Replay onboarding", detail: "Take the guided sample walk again", icon: "arrow.counterclockwise", trailing: "play.fill")
+                            row("Replay introduction", icon: "arrow.counterclockwise", trailing: "play.fill")
                         }
                         .accessibilityHint("Replays setup without clearing your saved goals or permissions")
-                        Divider().padding(.leading, 60)
-                        NavigationLink { settingsPage } label: {
-                            row("Settings & privacy", detail: "Downloads, services, display, and account", icon: "gearshape")
+                        Divider().padding(.leading, 62)
+                        NavigationLink { creditsPage } label: {
+                            row("Credits", detail: "Congressional App Challenge", icon: "sparkles")
                         }
                     }
-                }.padding(20).padding(.bottom, 12).frame(maxWidth: 620).frame(maxWidth: .infinity)
+                }.padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 28)
+                    .frame(maxWidth: 620).frame(maxWidth: .infinity)
             }.pausePathSurface().navigationTitle("Profile")
                 .navigationBarTitleDisplayMode(.inline)
                 .task(id: photo) {
@@ -234,6 +191,156 @@ struct ProfileSettingsView: View {
                     } catch { if !Task.isCancelled { photoError = "Couldn’t load that photo. Try another image." } }
                 }
         }
+    }
+
+    private var profileHeader: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 12) {
+                    profileAvatar
+                    profileIdentity
+                }
+            } else {
+                HStack(alignment: .center, spacing: 16) {
+                    profileAvatar
+                    profileIdentity
+                    Spacer(minLength: 0)
+                }
+            }
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    accountStatus
+                    profileEditActions
+                }
+            } else {
+                HStack(spacing: 12) {
+                    accountStatus
+                    Spacer(minLength: 0)
+                    profileEditActions
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 24)
+                .fill(LinearGradient(colors: [PausePathPalette.teal.opacity(0.10), PausePathPalette.surface],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+        }
+        .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(PausePathPalette.teal.opacity(0.10)))
+    }
+
+    private var profileAvatar: some View {
+        PhotosPicker(selection: $photo, matching: .images) {
+            ZStack(alignment: .bottomTrailing) {
+                Group {
+                    if let image = UIImage(data: photoData) {
+                        Image(uiImage: image).resizable().scaledToFill()
+                    } else {
+                        Text(String(name.prefix(1)).uppercased())
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
+                    }
+                }
+                .frame(width: 72, height: 72).clipShape(Circle())
+                .overlay(Circle().strokeBorder(PausePathPalette.surface, lineWidth: 3))
+                Image(systemName: "camera.fill").font(.caption2.weight(.bold))
+                    .frame(width: 26, height: 26)
+                    .background(PausePathPalette.teal, in: Circle()).foregroundStyle(.white)
+            }
+        }.accessibilityLabel("Choose profile photo")
+    }
+
+    private var profileIdentity: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(name).font(.system(.title2, design: .rounded).bold())
+                .foregroundStyle(PausePathPalette.teal)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(profile.goal.rawValue)
+                .font(.subheadline).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var accountStatus: some View {
+        Label(account.sessionState == .ready ? "Apple connected" : account.isSignedIn ? "Checking account" : "On this device",
+              systemImage: account.sessionState == .ready ? "checkmark.circle.fill" : "lock.shield")
+            .font(.caption.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var profileEditActions: some View {
+        HStack(spacing: 10) {
+            NavigationLink { ChangeUsernameView() } label: {
+                Text("Edit name").font(.caption.weight(.semibold)).frame(minHeight: 44)
+            }
+            if !photoData.isEmpty {
+                Menu {
+                    Button("Remove photo", role: .destructive) { photoData = Data(); photo = nil }
+                } label: {
+                    Image(systemName: "ellipsis").frame(width: 44, height: 44)
+                }.accessibilityLabel("Photo options")
+            }
+        }
+    }
+
+    private var weeklyProgress: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Label("This week", systemImage: "figure.walk")
+                    .font(.headline).foregroundStyle(PausePathPalette.teal)
+                Spacer(minLength: 0)
+                NavigationLink { GoalPreferencesEditor(preferences: $preferences) } label: {
+                    Text("Edit goals").font(.caption.weight(.semibold))
+                        .foregroundStyle(PausePathPalette.teal)
+                        .frame(minHeight: 44)
+                }
+            }
+            if typeSize.isAccessibilitySize {
+                VStack(spacing: 10) { walkMetric; minuteMetric }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) { walkMetric; minuteMetric }
+                    VStack(spacing: 10) { walkMetric; minuteMetric }
+                }
+            }
+            Text(weeklyWalks.isEmpty ? "Record a walk to start your weekly progress." : "PausePath walks recorded this week")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .background(PausePathPalette.teal.opacity(0.07), in: RoundedRectangle(cornerRadius: 24))
+    }
+
+    private var creditsPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Image("PausePathLogo")
+                        .resizable().scaledToFit().frame(height: 96)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityLabel("PausePath")
+                    Text("Created for the Congressional App Challenge")
+                        .font(.title2.bold()).foregroundStyle(PausePathPalette.teal)
+                    Text("Our team built PausePath to help people plan walking routes around their goals and places to pause along the way.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 24))
+                section("Created by") {
+                    row("Mekyle Alam", icon: "person.crop.circle", trailing: "")
+                    Divider().padding(.leading, 62)
+                    row("Aiza Jalal", icon: "person.crop.circle", trailing: "")
+                    Divider().padding(.leading, 62)
+                    row("Aarav Patel", icon: "person.crop.circle", trailing: "")
+                }
+            }
+            .padding(20).frame(maxWidth: 620).frame(maxWidth: .infinity)
+        }
+        .pausePathSurface()
+        .navigationTitle("Credits")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var settingsPage: some View {
@@ -320,32 +427,49 @@ struct ProfileSettingsView: View {
     private var walkMetric: some View { metric(value: weeklyWalks.count, target: profile.weeklyWalkTarget, label: "walks") }
     private var minuteMetric: some View { metric(value: minutes, target: profile.weeklyMinutesTarget, label: "minutes") }
     private func metric(value: Int, target: Int, label: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("\(value)").font(.system(.largeTitle, design: .rounded).weight(.semibold))
-                .foregroundStyle(PausePathPalette.teal)
-            Text("of \(target) \(label)").font(.subheadline).foregroundStyle(.secondary)
-            ProgressView(value: Double(min(value, target)), total: Double(max(1, target))).tint(PausePathPalette.teal)
-                .accessibilityLabel("\(label) this week").accessibilityValue("\(value) of \(target)")
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text("\(value)").font(.system(.title2, design: .rounded).bold())
+                    .foregroundStyle(PausePathPalette.teal)
+                Text("/ \(target)").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+            }
+            Text(label.capitalized).font(.caption.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
+            ProgressView(value: Double(min(value, target)), total: Double(max(1, target)))
+                .tint(PausePathPalette.teal)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(13)
+        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(label.capitalized) this week: \(value) of \(target)")
     }
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.headline).foregroundStyle(PausePathPalette.teal).padding(.leading, 4)
-            VStack(spacing: 0, content: content).background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: PausePathPalette.corner))
-                .overlay(RoundedRectangle(cornerRadius: 22).stroke(PausePathPalette.teal.opacity(0.10), lineWidth: 1))
+        VStack(alignment: .leading, spacing: 9) {
+            Text(title.uppercased())
+                .font(.caption.weight(.bold)).tracking(1)
+                .foregroundStyle(PausePathPalette.teal).padding(.leading, 4)
+            VStack(spacing: 0, content: content)
+                .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: PausePathPalette.corner))
+                .overlay(RoundedRectangle(cornerRadius: PausePathPalette.corner).strokeBorder(PausePathPalette.teal.opacity(0.08)))
         }.buttonStyle(.plain)
     }
-    private func row(_ title: String, detail: String, icon: String, trailing: String = "chevron.right") -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon).font(.title3).foregroundStyle(PausePathPalette.teal)
-                .frame(width: 40, height: 40).background(PausePathPalette.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 13))
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.body.weight(.medium)).foregroundStyle(.primary)
-                Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+    private func row(_ title: String, detail: String? = nil, icon: String, trailing: String = "chevron.right") -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon).font(.subheadline.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
+                .frame(width: 38, height: 38)
+                .background(PausePathPalette.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
+                if let detail {
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: 0)
-            Image(systemName: trailing).font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
-        }.padding(16).contentShape(Rectangle())
+            if !trailing.isEmpty {
+                Image(systemName: trailing).font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+        }.padding(.horizontal, 14).padding(.vertical, 11).contentShape(Rectangle())
     }
     private var healthSettings: some View {
         Form {
