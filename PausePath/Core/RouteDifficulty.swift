@@ -178,7 +178,8 @@ public enum RouteDifficultyCalculator {
 
         let averageSeverity = Double(selectedKnown.reduce(0) { $0 + $1.severity }) / Double(selectedKnown.count)
         let averageLevel: RouteDifficultyLevel = averageSeverity < 1.5 ? .easy : (averageSeverity < 2.5 ? .moderate : .hard)
-        let mostDemandingKnown = factors.compactMap(\.level).max() ?? .easy
+        // Only factors the person kept in Plan may raise the rating.
+        let mostDemandingKnown = selectedKnown.max() ?? .easy
         return RouteDifficultyAssessment(rating: max(averageLevel, mostDemandingKnown), factors: factors)
     }
 

@@ -215,11 +215,12 @@ private struct WeatherObservation {
             let expirations = forecasts.map { $0.expiresAt }
             let distinctHours = Set(relevant.map { Calendar.current.dateInterval(of: .hour, for: $0.date)?.start ?? $0.date })
 
+            let maximumFeelsLike = relevant.map { $0.temperature }.max()
             let result = RouteWeatherSummary(
                 conditions: conditions,
                 minimumFeelsLikeCelsius: relevant.map { $0.temperature }.min() ?? 0,
-                maximumFeelsLikeCelsius: relevant.map { $0.temperature }.max() ?? 0,
-                includesHotConditions: false,
+                maximumFeelsLikeCelsius: maximumFeelsLike ?? 0,
+                includesHotConditions: HeatGuidance.isHot(maximumFeelsLikeCelsius: maximumFeelsLike),
                 maximumPrecipitationChance: relevant.map(\.precipitationChance).max() ?? 0,
                 windowStart: windowStart,
                 windowEnd: windowEnd,

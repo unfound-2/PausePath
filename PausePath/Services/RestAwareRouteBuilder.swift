@@ -83,10 +83,13 @@ extension WalkingRouteOption {
                 var legs = option.legs; legs.replaceSubrange(choice.leg...choice.leg, with: [first, second])
                 var stops = option.stops; stops.insert(choice.place, at: choice.leg)
                 let revised = WalkingRouteOption(id: UUID(), title: "With mapped rest stops", destinationName: option.destinationName, stops: stops, legs: legs)
-                // Reject a detour that does not improve the longest measured interval.
-                let previousGap = assessment.longestGap ?? .infinity
-                let newGap = revised.restAssessment(preferences, allowUnknown: allowUnknown).longestGap ?? .infinity
-                if newGap <= previousGap + 0.5 { option = revised; rejected.remove(choice.place.id) }
+                // Keep a detour only when it shortens the longest measured interval.
+                // The chosen bench stays in `rejected` either way: once on the route it
+                // must not be offered again as a new stop.
+                let newGap = revised.restAssessment(preferences, allowUnknown: allowUnknown).longestGap
+                if RestGapAssessment.detourImproves(previousLongestGap: assessment.longestGap, revisedLongestGap: newGap) {
+                    option = revised
+                }
             } catch { if Task.isCancelled { break } }
         }
         return option
