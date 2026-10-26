@@ -108,11 +108,13 @@ struct ProfileSettingsView: View {
     @State private var photoError: String?
     @State private var account = PausePathAccount.shared
     @Environment(\.openURL) private var openURL
+    @Environment(\.dynamicTypeSize) private var typeSize
     private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
     private var name: String { profile.username.flatMap { $0.isEmpty ? nil : $0 } ?? "Walker" }
+    private var trackedWalks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedData)) ?? [] }
     private var weeklyWalks: [TrackedWalk] {
         guard let interval = Calendar.current.dateInterval(of: .weekOfYear, for: Date()) else { return [] }
-        return ((try? JSONDecoder().decode([TrackedWalk].self, from: trackedData)) ?? []).filter { interval.contains($0.date) }
+        return trackedWalks.filter { interval.contains($0.date) }
     }
     private var minutes: Int { Int(weeklyWalks.reduce(0) { $0 + $1.activeSeconds } / 60) }
 
@@ -120,7 +122,9 @@ struct ProfileSettingsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
-                    HStack(alignment: .center, spacing: 18) {
+                    AnyLayout(typeSize.isAccessibilitySize
+                              ? AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
+                              : AnyLayout(HStackLayout(alignment: .center, spacing: 16))) {
                         PhotosPicker(selection: $photo, matching: .images) {
                             ZStack(alignment: .bottomTrailing) {
                                 Group {
@@ -137,14 +141,20 @@ struct ProfileSettingsView: View {
                             }
                         }.accessibilityLabel("Choose profile photo")
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(name).font(.title.bold()).foregroundStyle(PausePathPalette.teal)
-                            NavigationLink("Edit profile") { ChangeUsernameView() }.font(.subheadline.weight(.semibold))
+                            Text(name).font(.title2.bold()).foregroundStyle(PausePathPalette.teal)
+                                .lineLimit(2).minimumScaleFactor(0.85)
+                            HStack(spacing: 14) {
+                                NavigationLink("Edit profile") { ChangeUsernameView() }
+                                if !photoData.isEmpty {
+                                    Button("Remove photo", role: .destructive) { photoData = Data(); photo = nil }
+                                }
+                            }
+                            .font(.caption.weight(.semibold))
                         }
-                        Spacer(minLength: 0)
                     }
-                    if !photoData.isEmpty {
-                        Button("Remove photo", role: .destructive) { photoData = Data(); photo = nil }.font(.caption)
-                    }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 24))
                     if let photoError { Text(photoError).font(.caption).foregroundStyle(.secondary) }
 
                     VStack(alignment: .leading, spacing: 20) {
@@ -160,12 +170,11 @@ struct ProfileSettingsView: View {
                             HStack(spacing: 24) { walkMetric; minuteMetric }
                             VStack(alignment: .leading, spacing: 20) { walkMetric; minuteMetric }
                         }
-                        Text(weeklyWalks.isEmpty ? "Completed PausePath walks will appear here." : "You can change your weekly goal at any time.")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                        Text("PausePath-tracked walks · This device").font(.caption2).foregroundStyle(.secondary)
-                    }.padding(22).background(PausePathPalette.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 26))
+                        Text(weeklyWalks.isEmpty ? "Your recorded walks will appear here." : "Based on PausePath walks recorded this week.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }.padding(20).background(PausePathPalette.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 24))
 
-                    section("Made for you") {
+                    section("Your plan") {
                         NavigationLink { PlannerView(preferences: $preferences, health: health) } label: {
                             row("Walking preferences", detail: "\(preferences.terrain.rawValue) · Rest every \(Int(preferences.maximumRestGapMeters)) m", icon: "slider.horizontal.3")
                         }
@@ -174,95 +183,39 @@ struct ProfileSettingsView: View {
                             row("Your goals", detail: profile.goal.rawValue, icon: "scope")
                         }
                     }
-                    section("Product demo") {
-                        Button {
-                            NotificationCenter.default.post(name: .pausePathReplayOnboarding, object: nil)
-                        } label: {
-                            row("Replay onboarding", detail: "Take the guided sample walk again", icon: "arrow.counterclockwise")
-                        }
-                        .accessibilityHint("Replays setup without clearing your saved goals or permissions")
-                        Divider().padding(.leading, 60)
-                        Toggle(isOn: $demoMode) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Sample walking insights")
-                                Text("Also show a labeled sample model in Insights and route suggestions. Your own walking trend stays separate.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }.padding(16)
-                    }
-                    section("Connected services") {
-                        NavigationLink { healthSettings } label: {
-                            row("Apple Health", detail: health.activities.isEmpty ? "Optional · Review access" : "\(health.activities.count) activities available", icon: "heart")
-                        }
-                        Divider().padding(.leading, 60)
-                        NavigationLink { weatherSettings } label: {
-                            row("Weather", detail: weatherEnabled ? "Forecasts on" : "Forecasts off", icon: "cloud.sun")
-                        }
-                        Divider().padding(.leading, 60)
-                        NavigationLink { locationSettings } label: {
-                            row("Location", detail: "Manage access in iOS Settings", icon: "location")
-                        }
-                    }
-                    section("People & notifications") {
+                    section("Community") {
                         NavigationLink { FriendsSettingsView() } label: {
-                            row("Friends", detail: "Find people · Requests · Privacy", icon: "person.2")
+                            row("Friends", detail: "Find people and manage requests", icon: "person.2")
                         }
                         Divider().padding(.leading, 60)
                         NavigationLink { SocialInboxView() } label: {
-                            row("Community inbox", detail: "Invitations, walk and goal updates", icon: "tray")
-                        }
-                        Divider().padding(.leading, 60)
-                        NavigationLink { NotificationSettingsView() } label: {
-                            row("Notifications", detail: "Inbox preferences & walk reminders", icon: "bell")
+                            row("Inbox", detail: "Invitations and group updates", icon: "tray")
                         }
                     }
-                    section("Saved areas & navigation") {
+                    section("More") {
                         NavigationLink { SavedRoutesSettingsView(preferences: preferences) } label: {
-                            row("Saved routes", detail: "Favorites, collections & repeat walks", icon: "heart")
+                            row("Saved routes", detail: "Favorite and repeat walks", icon: "heart")
                         }
                         Divider().padding(.leading, 60)
-                        NavigationLink { SavedAreasSettingsView() } label: {
-                            row("Downloaded areas", detail: "On this device · up to 5 MB", icon: "square.and.arrow.down")
-                        }
-                    }
-                    section("Distance units") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Picker("Distance units", selection: $distanceUnitRaw) {
-                                ForEach(DistanceDisplayUnit.allCases) { unit in Text(unit.title).tag(unit.rawValue) }
-                            }.pickerStyle(.segmented)
-                            Text("Used for Explore routes and navigation.").font(.caption).foregroundStyle(.secondary)
-                        }.padding(16)
-                    }
-                    section("Appearance") {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Picker("App appearance", selection: $appearanceRawValue) {
-                                ForEach(PausePathAppearance.allCases) { appearance in
-                                    Text(appearance.title).tag(appearance.rawValue)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                            Text("System follows your device appearance. Light and Dark keep PausePath in your chosen mode.")
-                                .font(.caption).foregroundStyle(.secondary)
-                            HStack(spacing: 16) {
-                                paletteSwatch("Mint", color: PausePathPalette.background)
-                                paletteSwatch("Teal", color: PausePathPalette.teal)
-                                paletteSwatch("Lime", color: PausePathPalette.lime)
-                            }
-                        }.padding(16)
-                    }
-                    section("Account & privacy") {
-                        NavigationLink { AccountView() } label: {
-                            row("Account settings", detail: account.isSignedIn ? account.sessionStatusText : "Sign in to join your community", icon: "person.crop.circle")
+                        NavigationLink {
+                            ScrollView { PathBadgeCollection(walks: trackedWalks).padding(20) }
+                                .pausePathSurface().navigationTitle("Path badges")
+                        } label: {
+                            row("Badges", detail: "See your walking milestones", icon: "seal")
                         }
                         Divider().padding(.leading, 60)
-                        NavigationLink { privacySettings } label: {
-                            row("Privacy & credits", detail: "Your data, your choices", icon: "hand.raised")
+                        Button {
+                            NotificationCenter.default.post(name: .pausePathReplayOnboarding, object: nil)
+                        } label: {
+                            row("Replay onboarding", detail: "Take the guided sample walk again", icon: "arrow.counterclockwise", trailing: "play.fill")
+                        }
+                        .accessibilityHint("Replays setup without clearing your saved goals or permissions")
+                        Divider().padding(.leading, 60)
+                        NavigationLink { settingsPage } label: {
+                            row("Settings & privacy", detail: "Downloads, services, display, and account", icon: "gearshape")
                         }
                     }
-                    PathBadgeCollection(walks: (try? JSONDecoder().decode([TrackedWalk].self, from: trackedData)) ?? [])
-                    Text("Built around you, one walk at a time.")
-                        .font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.bottom, 16)
-                }.padding(20).frame(maxWidth: 620).frame(maxWidth: .infinity)
+                }.padding(20).padding(.bottom, 12).frame(maxWidth: 620).frame(maxWidth: .infinity)
             }.pausePathSurface().navigationTitle("Profile")
                 .navigationBarTitleDisplayMode(.inline)
                 .task(id: photo) {
@@ -283,6 +236,87 @@ struct ProfileSettingsView: View {
         }
     }
 
+    private var settingsPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                section("Saved on this device") {
+                    NavigationLink { SavedAreasSettingsView() } label: {
+                        row("Downloaded areas", detail: "Manage saved stop data", icon: "square.and.arrow.down")
+                    }
+                }
+                section("Connected services") {
+                    NavigationLink { healthSettings } label: {
+                        row("Apple Health", detail: health.activities.isEmpty ? "Optional · Review access" : "\(health.activities.count) activities available", icon: "heart")
+                    }
+                    Divider().padding(.leading, 60)
+                    NavigationLink { weatherSettings } label: {
+                        row("Weather", detail: weatherEnabled ? "Forecasts on" : "Forecasts off", icon: "cloud.sun")
+                    }
+                    Divider().padding(.leading, 60)
+                    NavigationLink { locationSettings } label: {
+                        row("Location", detail: "Manage access in iOS Settings", icon: "location")
+                    }
+                }
+                section("Notifications") {
+                    NavigationLink { NotificationSettingsView() } label: {
+                        row("Walk reminders & inbox", detail: "Choose which updates you receive", icon: "bell")
+                    }
+                }
+                section("Display") {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack {
+                            Text("Distance units")
+                            Spacer()
+                            Picker("Distance units", selection: $distanceUnitRaw) {
+                                ForEach(DistanceDisplayUnit.allCases) { unit in Text(unit.title).tag(unit.rawValue) }
+                            }
+                            .labelsHidden()
+                        }
+                        Divider()
+                        HStack {
+                            Text("Appearance")
+                            Spacer()
+                            Picker("App appearance", selection: $appearanceRawValue) {
+                                ForEach(PausePathAppearance.allCases) { appearance in
+                                    Text(appearance.title).tag(appearance.rawValue)
+                                }
+                            }
+                            .labelsHidden()
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .padding(16)
+                }
+                section("Sample content") {
+                    Toggle(isOn: $demoMode) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Sample walking insights")
+                            Text("Show labeled examples alongside your own data")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(16)
+                }
+                section("Account & privacy") {
+                    NavigationLink { AccountView() } label: {
+                        row("Account settings", detail: account.isSignedIn ? account.sessionStatusText : "Sign in to join your community", icon: "person.crop.circle")
+                    }
+                    Divider().padding(.leading, 60)
+                    NavigationLink { privacySettings } label: {
+                        row("Privacy & credits", detail: "Your data and map sources", icon: "hand.raised")
+                    }
+                }
+            }
+            .padding(20)
+            .padding(.bottom, 12)
+            .frame(maxWidth: 620)
+            .frame(maxWidth: .infinity)
+        }
+        .pausePathSurface()
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
     private var walkMetric: some View { metric(value: weeklyWalks.count, target: profile.weeklyWalkTarget, label: "walks") }
     private var minuteMetric: some View { metric(value: minutes, target: profile.weeklyMinutesTarget, label: "minutes") }
     private func metric(value: Int, target: Int, label: String) -> some View {
@@ -301,7 +335,7 @@ struct ProfileSettingsView: View {
                 .overlay(RoundedRectangle(cornerRadius: 22).stroke(PausePathPalette.teal.opacity(0.10), lineWidth: 1))
         }.buttonStyle(.plain)
     }
-    private func row(_ title: String, detail: String, icon: String) -> some View {
+    private func row(_ title: String, detail: String, icon: String, trailing: String = "chevron.right") -> some View {
         HStack(spacing: 14) {
             Image(systemName: icon).font(.title3).foregroundStyle(PausePathPalette.teal)
                 .frame(width: 40, height: 40).background(PausePathPalette.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 13))
@@ -310,16 +344,8 @@ struct ProfileSettingsView: View {
                 Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+            Image(systemName: trailing).font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
         }.padding(16).contentShape(Rectangle())
-    }
-    private func paletteSwatch(_ title: String, color: Color) -> some View {
-        HStack(spacing: 6) {
-            Circle().fill(color).frame(width: 16, height: 16)
-                .overlay(Circle().strokeBorder(Color.primary.opacity(0.18), lineWidth: 1))
-            Text(title).font(.caption)
-        }
-        .accessibilityElement(children: .combine)
     }
     private var healthSettings: some View {
         Form {
