@@ -466,7 +466,7 @@ public struct WalkingTrendSummary: Sendable {
                   $0.weekEnd.timeIntervalSinceReferenceDate.isFinite && $0.weekStart < $0.weekEnd &&
                   calendar.dateComponents([.day], from: $0.weekStart, to: $0.weekEnd).day == 7 &&
                   $0.weight.isFinite && $0.weight >= 0 && $0.recordCount >= 0 &&
-                  ($0.minutesPerDay == nil || ($0.minutesPerDay!.isFinite && $0.minutesPerDay! >= 0)) &&
+                  ($0.minutesPerDay.map { $0.isFinite && $0 >= 0 } ?? true) &&
                   (!$0.validForFit || ($0.coverage == .observed && $0.minutesPerDay != nil && $0.weight > 0 && $0.recordCount > 0)) }),
               zip(observations, observations.dropFirst()).allSatisfy({ $0.weekEnd <= $1.weekStart }) else {
             return Self(status: .invalid, observations: observations, observedPoints: [], limitation: "Invalid weekly records.")
@@ -497,7 +497,10 @@ public struct WalkingTrendSummary: Sendable {
         let comparisonReady = observations.count == 8 && observations.allSatisfy {
             $0.validForFit && $0.coverage == .observed && $0.weight > 0 && $0.recordCount > 0 && $0.minutesPerDay != nil
         }
-        let additional = comparisonReady && baseline != nil ? total - baseline! * 56 : nil
+        let additional: Double? = {
+            guard comparisonReady, let baseline else { return nil }
+            return total - baseline * 56
+        }()
         let change = baseline.flatMap { base in base > 0 ? recent.map { ($0 - base) / base * 100 } : nil }
         guard points.count >= 4 else {
             return Self(status: .insufficient, observations: observations, observedPoints: observed,
@@ -582,7 +585,11 @@ private enum CubicWalkingSpline {
             let denominator = lambda * trace
             let gcv = n < 6 ? residual : (denominator > 1e-10 ? Double(n) * residual / (denominator * denominator) : .infinity)
             guard gcv.isFinite else { continue }
-            if winner == nil || gcv < winner!.gcv - 1e-12 { winner = (lambda, fitted, residual, gcv) }
+            if let currentWinner = winner, gcv < currentWinner.gcv - 1e-12 {
+                winner = (lambda, fitted, residual, gcv)
+            } else if winner == nil {
+                winner = (lambda, fitted, residual, gcv)
+            }
         }
         guard let best = winner else { return nil }
         // Natural cubic interpolation through the smoothed knots gives a C² curve.
@@ -728,8 +735,11 @@ public enum PersonalRouteRanker {
                                 history: [WalkingHistoryEntry], weights: RouteCostWeights = .standard) -> RouteRankingResult {
         let personalRecordsPresent = history.contains { $0.source != .sample }
         let selectedHistory = personalRecordsPresent ? history.filter { $0.source != .sample } : history
-        let recent = selectedHistory.filter { $0.completed && $0.feedback?.manageability != .difficult &&
-            $0.distanceMeters != nil && $0.distanceMeters!.isFinite && $0.distanceMeters! > 0 }
+        let recent = selectedHistory.filter { entry in
+            guard entry.completed, entry.feedback?.manageability != .difficult,
+                  let distance = entry.distanceMeters else { return false }
+            return distance.isFinite && distance > 0
+        }
             .sorted { $0.end > $1.end }.prefix(12).compactMap(\.distanceMeters).sorted()
         let target = recent.count >= 3 ? recent[recent.count / 2] : preferences.distanceMeters
         guard weights.isValid, preferences.distanceMeters.isFinite, preferences.distanceMeters > 0,

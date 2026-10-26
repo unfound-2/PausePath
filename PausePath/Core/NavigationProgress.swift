@@ -40,7 +40,9 @@ public enum WalkingGeometry {
             let along = accumulated + length * fraction
             guard along >= max(0, progress - 40), along <= progress + forwardAllowance else { continue }
             let away = hypot(ax + dx * fraction, ay + dy * fraction)
-            if best == nil || away < best!.metersAway {
+            if let currentBest = best, away < currentBest.metersAway {
+                best = Projection(metersAlong: along, metersAway: away)
+            } else if best == nil {
                 best = Projection(metersAlong: along, metersAway: away)
             }
         }

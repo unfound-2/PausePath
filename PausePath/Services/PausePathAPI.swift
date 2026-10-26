@@ -476,9 +476,14 @@ private struct ChallengeListResponse: Decodable { let challenges: [WalkingCommun
         let user = account.userID
         let token = requiresAccount ? try await account.accessToken() : nil
         guard !requiresAccount || account.userID == user else { throw CancellationError() }
-        var components = URLComponents(url: ServiceConfiguration.api.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+        guard var components = URLComponents(url: ServiceConfiguration.api.appendingPathComponent(path), resolvingAgainstBaseURL: false) else {
+            throw ServiceFailure(status: 500, message: "The service request could not be prepared. Please try again.")
+        }
         if !query.isEmpty { components.queryItems = query }
-        var request = URLRequest(url: components.url!)
+        guard let url = components.url else {
+            throw ServiceFailure(status: 500, message: "The service request could not be prepared. Please try again.")
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = body == nil ? "GET" : "POST"
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -519,15 +524,20 @@ private struct ChallengeListResponse: Decodable { let challenges: [WalkingCommun
             let data = try await request("api/v1/pois/search", body: body)
             let page = try JSONDecoder().decode(SharedSearch.self, from: data)
             try Task.checkCancellation()
-            if combined == nil { combined = page }
-            else {
-                let known = Set(combined!.pois.map(\.id))
-                combined!.pois += page.pois.filter { !known.contains($0.id) }
-                combined!.next_cursor = page.next_cursor
-                combined!.truncated = page.truncated
+            if var accumulated = combined {
+                let known = Set(accumulated.pois.map(\.id))
+                accumulated.pois += page.pois.filter { !known.contains($0.id) }
+                accumulated.next_cursor = page.next_cursor
+                accumulated.truncated = page.truncated
+                combined = accumulated
+            } else {
+                combined = page
             }
             onPage?(page)
-            guard let cursor = page.next_cursor else { return combined! }
+            guard let cursor = page.next_cursor else {
+                guard let combined else { throw ServiceFailure(status: 502, message: "Stop loading returned no results. Please refresh this area.") }
+                return combined
+            }
             guard seenCursors.insert(cursor).inserted else {
                 throw ServiceFailure(status: 502, message: "Stop loading paused. Please refresh this area.")
             }
@@ -536,9 +546,13 @@ private struct ChallengeListResponse: Decodable { let challenges: [WalkingCommun
     }
     static func cafes(_ region: MKCoordinateRegion) async throws -> [DiscoveredPlace] {
         let b = try bounds(region)
+        guard let west = b["west"], let south = b["south"],
+              let east = b["east"], let north = b["north"] else {
+            throw ServiceFailure(status: 500, message: "The map area could not be prepared. Please search again.")
+        }
         let body: [String: Any] = ["category":"coffee", "limit": 25,
             "proximity": ["type":"Point", "coordinates":[region.center.longitude,region.center.latitude]],
-            "bbox":[b["west"]!, b["south"]!, b["east"]!, b["north"]!]]
+            "bbox":[west, south, east, north]]
         let data = try await request("api/v1/commercial/mapbox/category", body: body)
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let collection = object?["data"] as? [String: Any]

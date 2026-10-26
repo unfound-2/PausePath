@@ -30,18 +30,19 @@ public struct FacilityHours: Codable, Sendable {
         }
         guard let weekly, let timezone, let zone = TimeZone(identifier: timezone) else { return nil }
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = zone
-        let localDate = calendar.dateComponents([.year, .month, .day], from: date)
-        func key(_ date: Date) -> String {
+        func key(_ date: Date) -> String? {
             let parts = calendar.dateComponents([.year, .month, .day], from: date)
-            return String(format: "%04d-%02d-%02d", parts.year!, parts.month!, parts.day!)
+            guard let year = parts.year, let month = parts.month, let day = parts.day else { return nil }
+            return String(format: "%04d-%02d-%02d", year, month, day)
         }
-        guard localDate.year != nil else { return nil }
+        guard let currentDayKey = key(date) else { return nil }
         let minute = calendar.component(.hour, from: date) * 60 + calendar.component(.minute, from: date)
         for offset in [0, -1] {
             guard let day = calendar.date(byAdding: .day, value: offset, to: date) else { return nil }
-            if offset == -1 && exceptions?[key(date)] != nil { continue }
+            guard let dayKey = key(day) else { return nil }
+            if offset == -1, exceptions?[currentDayKey] != nil { continue }
             let weekday = (calendar.component(.weekday, from: day) + 5) % 7
-            let periods = exceptions?[key(day)] ?? weekly.filter { $0.weekday == weekday }
+            let periods = exceptions?[dayKey] ?? weekly.filter { $0.weekday == weekday }
             for period in periods {
                 guard let opened = Self.minutes(period.open), var closed = Self.minutes(period.close) else { return nil }
                 if closed <= opened { closed += 1440 }

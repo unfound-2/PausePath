@@ -404,8 +404,9 @@ import UIKit
                   WalkingGeometry.distance(Coordinate(location.coordinate.latitude,location.coordinate.longitude),Coordinate(currentFix.coordinate.latitude,currentFix.coordinate.longitude)) <= 50 else {
                 status = "Your location changed while checking. Choose an alternative again from your current position."; return
             }
-            self.plan = GeneratedWalk(name: plan.name, legs: legs, preferences: plan.preferences, stops: stops, allowUnknownRestStops: plan.allowUnknownRestStops)
-            progress = WalkProgress(paths: self.plan!.paths)
+            let updatedPlan = GeneratedWalk(name: plan.name, legs: legs, preferences: plan.preferences, stops: stops, allowUnknownRestStops: plan.allowUnknownRestStops)
+            self.plan = updatedPlan
+            progress = WalkProgress(paths: updatedPlan.paths)
             lastSpoken = ""; updateActivity(force: true)
             status = "Pause replaced. Remaining distance changed; review the updated rest gap."
         } catch { if request == token { status = "Could not replace this pause. Your previous route remains available." } }
