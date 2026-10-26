@@ -2,11 +2,13 @@ import SwiftUI
 import MapKit
 
 struct WalkingNavigationView: View {
+    @AppStorage(DistanceDisplayUnit.storageKey) private var distanceUnitRaw = DistanceDisplayUnit.kilometers.rawValue
+    private var distanceUnit: DistanceDisplayUnit { DistanceDisplayUnit(rawValue: distanceUnitRaw) ?? .kilometers }
+
     let walk: GeneratedWalk
     @State private var navigator = WalkingNavigator()
     @State private var weatherGuidance = WeatherGuidanceStore()
     @State private var camera: MapCameraPosition = .automatic
-    @State private var acknowledged = false
     @State private var savedRoute = false
     @State private var saveMessage = ""
     @State private var showWeather = false
@@ -31,6 +33,7 @@ struct WalkingNavigationView: View {
     @AppStorage("pausepath.weather.openMeteo.walkUpdates.enabled") private var weatherWalkUpdatesEnabled = true
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     private var plan: GeneratedWalk { navigator.plan ?? walk }
     var body: some View {
         NavigationStack {
@@ -108,7 +111,7 @@ struct WalkingNavigationView: View {
                                 if !step.instructions.isEmpty {
                                     VStack(alignment: .leading) {
                                         Text(step.instructions)
-                                        Text("\(Int(step.distance)) m").font(.caption).foregroundStyle(.secondary)
+                                        Text(distanceUnit.nearby(step.distance)).font(.caption).foregroundStyle(.secondary)
                                         if let notice = step.notice { Text(notice).font(.caption) }
                                     }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
                                 }
@@ -204,10 +207,17 @@ struct WalkingNavigationView: View {
         }
     }
     private func closeCheckIn() { checkInWalk = nil; walkCompletionMessage = ""; navigator.stop(); dismiss() }
+    private func startWalk() {
+        if navigator.plan == nil { navigator.prepare(walk) }
+        navigator.backgroundEnabled = backgroundWalks
+        navigator.liveActivityEnabled = liveActivities
+        navigator.start()
+        camera = .userLocation(followsHeading: true, fallback: .automatic)
+    }
     private var routeReadyControls: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("\(plan.distance / 1000, specifier: "%.1f") km · \(max(1, Int(plan.duration / 60))) min").font(.title2.bold())
+                Text("\(distanceUnit.distance(plan.distance)) · \(max(1, Int(plan.duration / 60))) min").font(.title2.bold())
                 Spacer()
                 Button(savedRoute ? "Saved" : "Save", systemImage: savedRoute ? "heart.fill" : "heart") {
                     if var record = SavedRouteStore.saveWalk(plan) { record.isFavorite = true; SavedRouteStore.update(record); savedRoute = true }
@@ -219,12 +229,11 @@ struct WalkingNavigationView: View {
             if plan.restAssessment.status == .exceeds {
                 Label("Rest gap exceeds your preference", systemImage: "exclamationmark.circle").font(.subheadline)
             }
-            Toggle("I'll check route conditions", isOn: $acknowledged).font(.subheadline).tint(PausePathPalette.teal)
-            Button("Start walk", systemImage: "figure.walk") {
-                navigator.backgroundEnabled = backgroundWalks; navigator.liveActivityEnabled = liveActivities
-                navigator.start(); camera = .userLocation(followsHeading: true, fallback: .automatic)
+            Button(action: startWalk) {
+                Label("Start navigation", systemImage: "location.fill")
+                    .font(.headline).frame(maxWidth: .infinity, minHeight: 52)
+                    .contentShape(Rectangle())
             }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
-                .controlSize(.large).disabled(!acknowledged)
             DisclosureGroup("Route details") {
                 RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: plan.distance, durationSeconds: plan.duration))
                 RestGapStatusCard(assessment: plan.restAssessment, limit: plan.preferences.maximumRestGapMeters)
@@ -277,7 +286,7 @@ struct WalkingNavigationView: View {
                 let fresh = navigator.freshLocation(at: timeline.date)
                 Text(navigator.state == .paused ? "Walk paused" : (!fresh && navigator.state != .arrived ? "Waiting for accurate GPS" : navigator.currentInstruction)).font(.title2.bold())
                 if fresh, navigator.state == .walking, !navigator.progress.offRoute, navigator.progress.hasStarted, let step = navigator.stepDetails {
-                    Text("In \(Int(step.meters)) m").foregroundStyle(.secondary)
+                    Text("In \(distanceUnit.nearby(step.meters))").foregroundStyle(.secondary)
                 }
             }
             ProgressView(value: min(navigator.progress.completedMeters, navigator.progress.totalMeters), total: max(1, navigator.progress.totalMeters))
@@ -288,7 +297,7 @@ struct WalkingNavigationView: View {
                     Text(elapsedText(navigator.elapsedActiveSeconds)).monospacedDigit().fontWeight(.semibold)
                 }.font(.subheadline)
             }
-            Text("\(navigator.remainingMeters / 1000, specifier: "%.1f") km left · \(max(1, Int(navigator.remainingMeters / max(0.3, plan.preferences.speedMetersPerSecond) / 60))) min")
+            Text("\(distanceUnit.distance(navigator.remainingMeters)) left · \(max(1, Int(navigator.remainingMeters / max(0.3, plan.preferences.speedMetersPerSecond) / 60))) min")
                 .font(.subheadline.weight(.semibold))
             if navigator.remainingRestAssessment.status == .exceeds {
                 Label("Next rest gap exceeds your preference", systemImage: "exclamationmark.circle").font(.caption)
@@ -297,6 +306,12 @@ struct WalkingNavigationView: View {
                 RestGapStatusCard(assessment: navigator.remainingRestAssessment, limit: plan.preferences.maximumRestGapMeters)
             }.font(.subheadline)
             if navigator.state != .arrived {
+                if navigator.locationPermissionDenied {
+                    Button("Allow location in Settings", systemImage: "location.slash") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                    }.buttonStyle(.bordered)
+                }
+                if navigator.state == .locating { ProgressView("Finding your location…") }
                 HStack {
                     Button(navigator.state == .paused ? "Resume" : "Pause") { if navigator.state == .paused { navigator.start() } else { navigator.pause() } }
                         .buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
@@ -327,7 +342,7 @@ struct WalkingNavigationView: View {
         for badge in newBadges { earned[badge.id] = Date() }
         if let data = try? JSONEncoder().encode(earned) { defaults.set(data, forKey: "pausepath.earnedBadges.v1") }
         if completed, previousBest > 0, distance > previousBest {
-            milestoneMessage = "A new distance PR! " + String(format: "%.2f km", distance / 1000) + ". See your milestones in My Path."
+            milestoneMessage = "A new distance PR! " + distanceUnit.distance(distance, digits: 2) + ". See your milestones in My Path."
         } else if completed, let badge = newBadges.first {
             milestoneMessage = "Badge earned: " + badge.name + ". Find your collection in Profile."
         }
@@ -343,9 +358,7 @@ struct WalkingNavigationView: View {
         }
         Task { await DailyRecapNotifications.schedule() }
         if completed {
-            let distanceText = distance >= 1_000
-                ? String(format: "%.2f km", distance / 1_000)
-                : String(format: "%.0f m", distance)
+            let distanceText = distanceUnit.nearby(distance)
             walkCompletionMessage = "\(distanceText) recorded in \(elapsedText(activity.activeSeconds)) active time. Saved in My Path."
         } else {
             navigator.stop()

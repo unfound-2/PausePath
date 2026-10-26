@@ -23,6 +23,9 @@ extension FacilityKind {
 }
 
 struct DiscoverView: View {
+    @AppStorage(DistanceDisplayUnit.storageKey) private var distanceUnitRaw = DistanceDisplayUnit.kilometers.rawValue
+    private var distanceUnit: DistanceDisplayUnit { DistanceDisplayUnit(rawValue: distanceUnitRaw) ?? .kilometers }
+
     let preferences: RoutePreferences
     let profile: PausePathProfile
     let health: HealthActivityStore
@@ -562,7 +565,7 @@ struct DiscoverView: View {
     private func distanceText(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) -> String {
         let meters = CLLocation(latitude: start.latitude, longitude: start.longitude)
             .distance(from: CLLocation(latitude: end.latitude, longitude: end.longitude))
-        return meters < 1000 ? String(format: "%.0f m away", meters) : String(format: "%.1f km away", meters / 1000)
+        return distanceUnit.nearby(meters) + " away"
     }
 
     private var topControls: some View {

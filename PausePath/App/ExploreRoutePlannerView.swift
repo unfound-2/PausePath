@@ -20,6 +20,9 @@ enum RoutePlannerDifficultyFilter: String, CaseIterable, Identifiable {
 
 @MainActor
 struct ExploreRoutePlannerView: View {
+    @AppStorage(DistanceDisplayUnit.storageKey) private var distanceUnitRaw = DistanceDisplayUnit.kilometers.rawValue
+    private var distanceUnit: DistanceDisplayUnit { DistanceDisplayUnit(rawValue: distanceUnitRaw) ?? .kilometers }
+
     let discovery: PlaceDiscovery
     let preferences: RoutePreferences
     let profile: PausePathProfile
@@ -191,14 +194,14 @@ struct ExploreRoutePlannerView: View {
                     if discovery.routeOptions.isEmpty { planningControls }
                     else { DisclosureGroup("Change start or destination") { planningControls } }
                     DisclosureGroup(isExpanded: $showRestPreferences) {
-                        Stepper("Rest gap: at most \(Int(requestedRestGap)) m", value: $requestedRestGap, in: 100...1000, step: 50)
+                        Stepper("Rest gap: \(distanceUnit.nearby(requestedRestGap))", value: $requestedRestGap, in: 100...1000, step: 50)
                         Toggle("Include benches with unknown hours or access", isOn: $allowUnknownRestStops)
                         Text("Closed and restricted benches are excluded. Unknown availability stays marked.").font(.caption).foregroundStyle(.secondary)
                         Button("Update choices") { requestRoutes(for: UUID()) }.disabled(discovery.isLoading || destination == nil)
                     } label: {
                         HStack(spacing: 8) {
                             BenchSymbol().fill(PausePathPalette.teal).frame(width: 18, height: 18)
-                            Text("Rest stops · \(Int(requestedRestGap)) m")
+                            Text("Rest stops · \(distanceUnit.nearby(requestedRestGap))")
                                 .font(.subheadline.weight(.semibold))
                         }
                     }.padding(14).background(PausePathPalette.teal.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
@@ -378,7 +381,7 @@ struct ExploreRoutePlannerView: View {
                     Spacer(minLength: 0)
                 }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 80), spacing: 8)], spacing: 8) {
-                    routeMetric("Distance", value: String(format: "%.1f km", option.distance / 1000))
+                    routeMetric("Distance", value: distanceUnit.distance(option.distance))
                     routeMetric("Est. time", value: "\(max(1, Int(ceil(option.distance / max(0.3, routePreferences.speedMetersPerSecond) / 60)))) min")
                     routeMetric("Planned stops", value: "\(option.stops.count)")
                 }
@@ -431,7 +434,7 @@ struct ExploreRoutePlannerView: View {
 
     private func longestBenchGap(_ option: WalkingRouteOption) -> String {
         guard let meters = option.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops).longestGap else { return "Unknown" }
-        return meters < 1000 ? String(format: "%.0f m", meters) : String(format: "%.1f km", meters / 1000)
+        return distanceUnit.nearby(meters)
     }
 
     private func routeMetric(_ title: String, value: String) -> some View {

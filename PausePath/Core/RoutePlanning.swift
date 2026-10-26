@@ -975,3 +975,27 @@ public enum RouteStopOrdering {
         return result
     }
 }
+
+/// Presentation only. Routing, GPS and saved distances always remain in meters.
+public enum DistanceDisplayUnit: String, CaseIterable, Identifiable, Sendable {
+    case kilometers = "km"
+    case miles = "mi"
+    public static let storageKey = "pausepath.distanceUnit"
+    public var id: String { rawValue }
+    public var title: String { self == .miles ? "Miles" : "Kilometers" }
+    public func distance(_ meters: Double, digits: Int = 1, locale: Locale = .current) -> String {
+        guard meters.isFinite, meters >= 0 else { return "Unknown" }
+        let value = meters / (self == .miles ? 1609.344 : 1000.0)
+        return String(format: "%.*f %@", locale: locale, max(0, min(digits, 3)), value, rawValue)
+    }
+    public func nearby(_ meters: Double, locale: Locale = .current) -> String {
+        guard meters.isFinite, meters >= 0 else { return "Unknown" }
+        if self == .kilometers && meters < 1000 {
+            return String(format: "%.0f m", locale: locale, meters)
+        }
+        if self == .miles && meters < 160.9344 {
+            return String(format: "%.0f ft", locale: locale, meters / 0.3048)
+        }
+        return distance(meters, locale: locale)
+    }
+}

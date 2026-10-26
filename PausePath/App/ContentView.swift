@@ -102,7 +102,8 @@ struct ProfileSettingsView: View {
     @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherEnabled = true
     @AppStorage("pausepath.weather.openMeteo.walkUpdates.enabled") private var weatherUpdates = true
     @AppStorage("pausepath.demoMode") private var demoMode = false
-    @AppStorage("pausepath.appearance") private var appearanceRawValue = PausePathAppearance.system.rawValue
+    @AppStorage("pausepath.appearance") private var appearanceRawValue = PausePathAppearance.light.rawValue
+    @AppStorage(DistanceDisplayUnit.storageKey) private var distanceUnitRaw = DistanceDisplayUnit.kilometers.rawValue
     @State private var photo: PhotosPickerItem?
     @State private var photoError: String?
     @State private var account = PausePathAccount.shared
@@ -216,6 +217,14 @@ struct ProfileSettingsView: View {
                         NavigationLink { SavedAreasSettingsView() } label: {
                             row("Downloaded areas", detail: "On this device · up to 5 MB", icon: "square.and.arrow.down")
                         }
+                    }
+                    section("Distance units") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Picker("Distance units", selection: $distanceUnitRaw) {
+                                ForEach(DistanceDisplayUnit.allCases) { unit in Text(unit.title).tag(unit.rawValue) }
+                            }.pickerStyle(.segmented)
+                            Text("Used for Explore routes and navigation.").font(.caption).foregroundStyle(.secondary)
+                        }.padding(16)
                     }
                     section("Appearance") {
                         VStack(alignment: .leading, spacing: 12) {

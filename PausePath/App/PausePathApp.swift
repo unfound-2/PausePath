@@ -92,8 +92,8 @@ private struct LaunchExperienceView: View {
     @AppStorage("pausepath.onboarding.permissions-gate.v2.complete") private var onboardingComplete = false
     @AppStorage("pausepath.onboarding.personal-goals.v2.complete") private var personalizationComplete = false
     @AppStorage("pausepath.personalProfile") private var profileData = Data()
-    @AppStorage("pausepath.appearance") private var appearanceRawValue = PausePathAppearance.system.rawValue
-    private var appearance: PausePathAppearance { PausePathAppearance(rawValue: appearanceRawValue) ?? .system }
+    @AppStorage("pausepath.appearance") private var appearanceRawValue = PausePathAppearance.light.rawValue
+    private var appearance: PausePathAppearance { PausePathAppearance(rawValue: appearanceRawValue) ?? .light }
     @AppStorage("pausepath.preferences") private var preferencesData = Data()
 
     private let mint = PausePathPalette.background

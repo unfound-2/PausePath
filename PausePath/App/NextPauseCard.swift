@@ -2,6 +2,9 @@ import SwiftUI
 import MapKit
 
 struct NextPauseCard: View {
+    @AppStorage(DistanceDisplayUnit.storageKey) private var distanceUnitRaw = DistanceDisplayUnit.kilometers.rawValue
+    private var distanceUnit: DistanceDisplayUnit { DistanceDisplayUnit(rawValue: distanceUnitRaw) ?? .kilometers }
+
     let navigator: WalkingNavigator
     @State private var alternatives: [(poi: SharedPOI, meters: Double)] = []
     @State private var message = ""
@@ -17,7 +20,7 @@ struct NextPauseCard: View {
                 let poi = navigator.stopStatuses[next.place.id] ?? next.place.shared
                 let arrival = Date().addingTimeInterval(next.meters / max(0.3, plan.preferences.speedMetersPerSecond) + Double(max(0, next.index - navigator.progress.legIndex)) * 300)
                 Text(next.place.item.name ?? "Mapped bench").font(.title3.bold())
-                Text("\(Int(next.meters.rounded())) m · \(max(1, Int(ceil(next.meters / max(0.3, plan.preferences.speedMetersPerSecond) / 60)))) min").font(.subheadline)
+                Text("\(distanceUnit.nearby(next.meters)) · \(max(1, Int(ceil(next.meters / max(0.3, plan.preferences.speedMetersPerSecond) / 60)))) min").font(.subheadline)
                 Text(poi?.availabilityDescription(at: arrival) ?? "Opening hours at arrival unknown").font(.caption.weight(.semibold))
                 DisclosureGroup("Stop details") {
                     Text(poi?.attributes?.summary ?? "Access, backrest and shade unknown").font(.caption).foregroundStyle(.secondary)
@@ -35,7 +38,7 @@ struct NextPauseCard: View {
                 ForEach(alternatives, id: \.poi.id) { alternative in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(alternative.poi.name ?? "Alternative bench").font(.subheadline.bold())
-                        Text("\(Int(alternative.meters)) m walking to this stop · remaining route will change").font(.caption)
+                        Text("\(distanceUnit.nearby(alternative.meters)) to this stop · route will change").font(.caption)
                         Text(alternative.poi.attributes?.summary ?? "Accessibility information unknown").font(.caption).foregroundStyle(.secondary)
                         Text(alternative.poi.availabilityDescription(at: Date().addingTimeInterval(alternative.meters / max(0.3, plan.preferences.speedMetersPerSecond)))).font(.caption)
                         Button("Use this alternative") {

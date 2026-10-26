@@ -60,6 +60,9 @@ import UIKit
         previousSteps = 0; intervalSteps = nil; recordedDistanceMeters = 0
         state = .ready; status = "Go to the start marker, then start navigation."
     }
+    var locationPermissionDenied: Bool {
+        manager.authorizationStatus == .denied || manager.authorizationStatus == .restricted
+    }
     func locate() { wantsNavigation = false; wantsPosition = true; requestLocation() }
     func start() {
         guard plan != nil else { return }
