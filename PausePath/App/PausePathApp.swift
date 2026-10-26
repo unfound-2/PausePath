@@ -233,7 +233,7 @@ private struct WelcomeSetupView: View {
     @State private var selectedSampleStop: SampleStop = .bench
     @State private var helpExpanded = false
     @State private var outlookRevealed = false
-    @State private var introRouteDrawn = false
+    @State private var journeyProgress: CGFloat = JourneyCheckpoint.trailhead.progress
     @State private var demoRouteDrawn = false
     @State private var pinPulse = false
     @State private var demoPlayer = AVPlayer()
@@ -332,6 +332,27 @@ private struct WelcomeSetupView: View {
         default: 3
         }
     }
+    private var journeyCheckpoint: JourneyCheckpoint { checkpoint(for: step) }
+    private func checkpoint(for step: Int) -> JourneyCheckpoint {
+        switch step {
+        case 0: .trailhead
+        case 1...3: .bench
+        case 4...6: .water
+        case 7...8: .restroom
+        case 9...10: .cafe
+        default: .finish
+        }
+    }
+    private var journeyDetail: String {
+        switch journeyCheckpoint {
+        case .trailhead: "A sample walk begins here."
+        case .bench: "Tell us what makes a walk work for you."
+        case .water: "Build a flexible plan for the weeks ahead."
+        case .restroom: "See how routes and mapped stops appear."
+        case .cafe: "Choose your name and optional connections."
+        case .finish: "Review real activity when it is available."
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -345,8 +366,15 @@ private struct WelcomeSetupView: View {
                 topBar.padding(.horizontal, 22).padding(.top, 12)
                     .padding(.bottom, 9)
                     .background(headerFade)
+                OnboardingJourneyScene(progress: journeyProgress, checkpoint: journeyCheckpoint,
+                                       detail: journeyDetail, reduceMotion: reduceMotion)
+                    .frame(maxWidth: 560)
+                    .frame(height: typeSize.isAccessibilitySize ? 146 : 190)
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 6)
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 18) {
+                        journeyStopLabel
                         prompt
                         page
                         howThisWorks
@@ -381,6 +409,7 @@ private struct WelcomeSetupView: View {
             else { profile.goal.applyRouteDefaults(to: &preferences) }
             notificationEnabled = profile.dailyRecapNotifications
             if notificationEnabled { notificationStatus = "Reminder set for 8 PM. You can turn it off any time." }
+            journeyProgress = journeyCheckpoint.progress
         }
         .onChange(of: account.appleProvidedName) { _, name in
             guard let name, profile.username?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false else { return }
@@ -444,6 +473,20 @@ private struct WelcomeSetupView: View {
                        : [PausePathPalette.background.opacity(0), PausePathPalette.background.opacity(0.97)],
                        startPoint: .top, endPoint: .bottom)
             .ignoresSafeArea(edges: .bottom)
+    }
+
+    private var journeyStopLabel: some View {
+        HStack(spacing: 7) {
+            Circle().fill(journeyCheckpoint.color).frame(width: 8, height: 8)
+            Text(journeyCheckpoint.title.uppercased())
+                .font(.caption2.weight(.heavy)).tracking(1.2)
+            Spacer()
+            Text(journeyCheckpoint == .trailhead ? "THE START" : journeyCheckpoint == .finish ? "THE FINISH" : "A PLACE TO PAUSE")
+                .font(.caption2.weight(.semibold)).tracking(0.5)
+        }
+        .foregroundStyle(isDarkInsight ? .white.opacity(0.86) : PausePathPalette.teal)
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .combine)
     }
 
     private var prompt: some View {
@@ -548,51 +591,14 @@ private struct WelcomeSetupView: View {
     }
 
     private var introductionStep: some View {
-        VStack(spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 30).fill(PausePathPalette.teal)
-                AdventureContours().stroke(.white.opacity(0.09), lineWidth: 1).clipShape(RoundedRectangle(cornerRadius: 30))
-                GeometryReader { geometry in
-                    let width = geometry.size.width
-                    let height = geometry.size.height
-                    OnboardingRouteLine(layout: .intro)
-                        .trim(from: 0, to: introRouteDrawn ? 1 : 0)
-                        .stroke(PausePathPalette.lime, style: StrokeStyle(lineWidth: 7, lineCap: .round, dash: [10, 9]))
-                    Image(systemName: "figure.walk")
-                        .font(.title2.weight(.bold)).foregroundStyle(PausePathPalette.ink)
-                        .frame(width: 54, height: 54)
-                        .background(PausePathPalette.lime, in: Circle())
-                        .position(x: width * 0.16, y: height * 0.78)
-                    ZStack {
-                        Circle().fill(PausePathPalette.lime.opacity(0.19))
-                            .frame(width: pinPulse ? 83 : 61, height: pinPulse ? 83 : 61)
-                        BenchSymbol().fill(PausePathPalette.teal)
-                            .frame(width: 30, height: 30)
-                            .frame(width: 54, height: 54)
-                            .background(.white, in: Circle())
-                    }
-                    .position(x: width * 0.78, y: height * 0.24)
-                }.padding(24)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("A WALK WITH ROOM TO PAUSE")
-                        .font(.caption2.weight(.heavy)).tracking(1.2)
-                        .foregroundStyle(PausePathPalette.lime)
-                    Text("Your path, your pace, your next stop.")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(20)
-            }
-            .frame(height: 250)
-            .accessibilityLabel("Illustration of a walking route with a place to rest")
-            .onAppear {
-                introRouteDrawn = reduceMotion
-                pinPulse = false
-                guard !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: 1.25)) { introRouteDrawn = true }
-                withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) { pinPulse = true }
-            }
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Take a short sample walk with us. At each pause, choose what matters to you and see how PausePath can help you plan.")
+                .font(.body)
+                .foregroundStyle(PausePathPalette.ink)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 20))
             HStack(spacing: 8) {
                 featurePill("Real walking routes", icon: "map")
                 featurePill("Places to pause", icon: "bench")
@@ -1266,11 +1272,14 @@ private struct WelcomeSetupView: View {
 
     private var continueTitle: String {
         switch step {
-        case 0: "Get started"
+        case 0: "Walk to the bench"
         case 2: "See my starting point"
+        case 3: "Continue to water"
         case 5: "See my four-week plan"
+        case 6: "Continue to restroom"
         case 7: "Try the stops"
-        case 10: "See my baseline"
+        case 8: "Continue to café"
+        case 10: "Reach the finish"
         case 11: "Start exploring"
         default: "Continue"
         }
@@ -1332,6 +1341,9 @@ private struct WelcomeSetupView: View {
     private func advance(to newStep: Int) {
         guard (0..<stepCount).contains(newStep) else { return }
         helpExpanded = false
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.8)) {
+            journeyProgress = checkpoint(for: newStep).progress
+        }
         withAnimation(reduceMotion ? nil : .snappy(duration: 0.28)) { step = newStep }
     }
 
@@ -1346,8 +1358,194 @@ private struct WelcomeSetupView: View {
     }
 }
 
+private enum JourneyCheckpoint: String, CaseIterable, Identifiable {
+    case trailhead, bench, water, restroom, cafe, finish
+
+    var id: String { rawValue }
+    var progress: CGFloat {
+        switch self {
+        case .trailhead: 0
+        case .bench: 0.2
+        case .water: 0.4
+        case .restroom: 0.6
+        case .cafe: 0.8
+        case .finish: 1
+        }
+    }
+    var title: String {
+        switch self {
+        case .trailhead: "Trailhead"
+        case .bench: "Bench"
+        case .water: "Water stop"
+        case .restroom: "Restroom"
+        case .cafe: "Café"
+        case .finish: "Finish"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .trailhead: "figure.walk"
+        case .bench: "bench"
+        case .water: "drop.fill"
+        case .restroom: "figure.stand"
+        case .cafe: "cup.and.saucer.fill"
+        case .finish: "flag.checkered"
+        }
+    }
+    var color: Color {
+        switch self {
+        case .trailhead, .finish: PausePathPalette.lime
+        case .bench: FacilityKind.bench.mapColor
+        case .water: FacilityKind.fountain.mapColor
+        case .restroom: FacilityKind.bathroom.mapColor
+        case .cafe: FacilityKind.cafe.mapColor
+        }
+    }
+}
+
+private struct OnboardingJourneyScene: View {
+    let progress: CGFloat
+    let checkpoint: JourneyCheckpoint
+    let detail: String
+    let reduceMotion: Bool
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 24).fill(PausePathPalette.teal)
+            AdventureContours()
+                .stroke(.white.opacity(0.08), lineWidth: 1)
+                .clipShape(RoundedRectangle(cornerRadius: 24))
+            GeometryReader { geometry in
+                let mapRect = CGRect(x: 0, y: 0, width: geometry.size.width, height: geometry.size.height)
+                JourneyCurve()
+                    .stroke(.white.opacity(0.38), style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [5, 7]))
+                JourneyCurve()
+                    .trim(from: 0, to: progress)
+                    .stroke(PausePathPalette.lime, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                ForEach(JourneyCheckpoint.allCases.filter { $0 != .trailhead }) { stop in
+                    JourneyStopPin(stop: stop, selected: stop == checkpoint)
+                        .position(JourneyCurve.point(at: stop.progress, in: mapRect))
+                }
+                JourneyWalker(progress: progress)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 34)
+            .padding(.bottom, 46)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("A SAMPLE WALK")
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .tracking(1.3)
+                        .foregroundStyle(PausePathPalette.lime)
+                    Spacer()
+                    Text("DEMO · NOT LIVE")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .tracking(0.7)
+                        .foregroundStyle(.white.opacity(0.76))
+                }
+                Spacer()
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(checkpoint.title)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                    Text("·  \(detail)")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.8))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Sample walking route. At \(checkpoint.title). \(detail)")
+        .accessibilityHint(reduceMotion ? "Route progress changes without animation." : "The walker moves to each stop as you continue.")
+    }
+}
+
+private struct JourneyStopPin: View {
+    let stop: JourneyCheckpoint
+    let selected: Bool
+
+    var body: some View {
+        ZStack {
+            Circle().fill(stop.color.opacity(selected ? 0.30 : 0.16))
+                .frame(width: selected ? 43 : 34, height: selected ? 43 : 34)
+            Circle().fill(stop.color)
+                .frame(width: 29, height: 29)
+                .overlay {
+                    Group {
+                        if stop == .bench {
+                            BenchSymbol().fill(PausePathPalette.ink).frame(width: 16, height: 16)
+                        } else {
+                            Image(systemName: stop.symbol)
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(PausePathPalette.ink)
+                        }
+                    }
+                }
+        }
+        .frame(width: 44, height: 44)
+    }
+}
+
+private struct JourneyCurve: Shape {
+    private static let nodes: [CGPoint] = [
+        CGPoint(x: 0.08, y: 0.68), CGPoint(x: 0.25, y: 0.35),
+        CGPoint(x: 0.42, y: 0.67), CGPoint(x: 0.59, y: 0.35),
+        CGPoint(x: 0.76, y: 0.68), CGPoint(x: 0.92, y: 0.35)
+    ]
+
+    func path(in rect: CGRect) -> Path {
+        Path { path in
+            guard let first = Self.nodes.first else { return }
+            path.move(to: CGPoint(x: rect.minX + rect.width * first.x, y: rect.minY + rect.height * first.y))
+            for index in 1..<Self.nodes.count {
+                let start = Self.nodes[index - 1]
+                let end = Self.nodes[index]
+                let middleX = (start.x + end.x) / 2
+                path.addCurve(
+                    to: CGPoint(x: rect.minX + rect.width * end.x, y: rect.minY + rect.height * end.y),
+                    control1: CGPoint(x: rect.minX + rect.width * middleX, y: rect.minY + rect.height * start.y),
+                    control2: CGPoint(x: rect.minX + rect.width * middleX, y: rect.minY + rect.height * end.y)
+                )
+            }
+        }
+    }
+
+    static func point(at progress: CGFloat, in rect: CGRect) -> CGPoint {
+        let route = JourneyCurve().path(in: rect)
+        return route.trimmedPath(from: 0, to: min(max(progress, 0.0001), 1)).currentPoint
+            ?? CGPoint(x: rect.minX + rect.width * nodes[0].x, y: rect.minY + rect.height * nodes[0].y)
+    }
+}
+
+private struct JourneyWalker: View, Animatable {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let location = JourneyCurve.point(at: progress, in: CGRect(origin: .zero, size: geometry.size))
+            Image(systemName: "figure.walk")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(PausePathPalette.ink)
+                .frame(width: 32, height: 32)
+                .background(PausePathPalette.lime, in: Circle())
+                .overlay(Circle().strokeBorder(PausePathPalette.teal, lineWidth: 2))
+                .position(x: location.x + 7, y: location.y - 23)
+        }
+    }
+}
+
 private struct OnboardingRouteLine: Shape {
-    enum Layout { case intro, demo }
+    enum Layout { case demo }
     let layout: Layout
 
     func path(in rect: CGRect) -> Path {
@@ -1355,11 +1553,6 @@ private struct OnboardingRouteLine: Shape {
         let height = rect.height
         return Path { path in
             switch layout {
-            case .intro:
-                path.move(to: CGPoint(x: width * 0.16, y: height * 0.78))
-                path.addCurve(to: CGPoint(x: width * 0.78, y: height * 0.24),
-                              control1: CGPoint(x: width * 0.85, y: height * 0.95),
-                              control2: CGPoint(x: width * 0.18, y: height * 0.10))
             case .demo:
                 path.move(to: CGPoint(x: width * 0.08, y: height * 0.86))
                 path.addCurve(to: CGPoint(x: width * 0.44, y: height * 0.42),
