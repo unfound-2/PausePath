@@ -362,10 +362,11 @@ private struct WelcomeSetupView: View {
         case 4: return 0.52
         case 5: return 0.63
         case 6: return 0.64
-        case 7, 8: return 0.65
+        case 7: return 0.60
+        case 8: return 0.65
         case 9: return 0.53
         case 10: return 0.60
-        case 11: return 0.69
+        case 11: return 0.74
         default: return 0.60
         }
     }
@@ -591,7 +592,7 @@ private struct WelcomeSetupView: View {
         case 4: "Set a flexible goal for the weeks ahead."
         case 5: "Set weekly goals. Routes cannot estimate calories."
         case 6: "A four-week view from your answers, not a prediction."
-        case 7: "A sample shows how a route becomes a guided walk."
+        case 7: "Follow a sample route on screen."
         case 8: "Tap a pin and watch the next pause change."
         case 9: "Use a name you’ll recognize."
         case 10: "Optional connections. Search anywhere."
@@ -955,36 +956,62 @@ private struct WelcomeSetupView: View {
     private var walkthroughStep: some View {
         VStack(spacing: 10) {
             if let videoURL = Bundle.main.url(forResource: "PausePathWalkthrough", withExtension: "mp4") {
-                VideoPlayer(player: demoPlayer)
-                    .frame(height: 235)
-                    .clipShape(RoundedRectangle(cornerRadius: 27))
-                    .overlay(RoundedRectangle(cornerRadius: 27).strokeBorder(PausePathPalette.teal.opacity(0.13)))
-                    .accessibilityLabel("Sample video: set distance, terrain, and rest stops; review a route; see the next planned pause")
-                    .onAppear {
-                        if demoPlayer.currentItem == nil {
-                            demoPlayer.replaceCurrentItem(with: AVPlayerItem(url: videoURL))
+                GeometryReader { geometry in
+                    let videoWidth = min(190, geometry.size.width * 0.54)
+                    HStack(spacing: 12) {
+                        VideoPlayer(player: demoPlayer)
+                            .frame(width: videoWidth, height: videoWidth / 0.9)
+                            .clipShape(RoundedRectangle(cornerRadius: 19))
+                            .accessibilityLabel("Illustrative walkthrough: plan a route, preview its stops, and follow the next pause")
+                            .onAppear {
+                                if demoPlayer.currentItem == nil {
+                                    demoPlayer.replaceCurrentItem(with: AVPlayerItem(url: videoURL))
+                                }
+                                demoPlayer.seek(to: .zero)
+                                demoPlayer.isMuted = true
+                                if !reduceMotion { demoPlayer.play() }
+                            }
+                            .onDisappear { demoPlayer.pause() }
+                            .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { _ in
+                                demoPlayer.seek(to: .zero)
+                                if !reduceMotion { demoPlayer.play() }
+                            }
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("THE WALK")
+                                .font(.caption2.weight(.heavy)).tracking(1)
+                                .foregroundStyle(PausePathPalette.teal.opacity(0.72))
+                            ForEach(Array(["Plan", "Preview", "Navigate"].enumerated()), id: \.offset) { index, label in
+                                HStack(spacing: 6) {
+                                    Text("\(index + 1)")
+                                        .font(.caption2.weight(.bold))
+                                        .frame(width: 19, height: 19)
+                                        .background(PausePathPalette.lime, in: Circle())
+                                    Text(label).font(.caption.weight(.semibold))
+                                }
+                                .foregroundStyle(PausePathPalette.teal)
+                            }
+                            Spacer(minLength: 0)
+                            Button("Replay", systemImage: "arrow.counterclockwise") {
+                                demoPlayer.seek(to: .zero)
+                                demoPlayer.play()
+                            }
+                            .font(.caption.weight(.semibold))
+                            .buttonStyle(.plain)
+                            .foregroundStyle(PausePathPalette.teal)
+                            Text("Illustration")
+                                .font(.caption2).foregroundStyle(.secondary)
                         }
-                        demoPlayer.seek(to: .zero)
-                        demoPlayer.isMuted = true
-                        if !reduceMotion { demoPlayer.play() }
                     }
-                    .onDisappear { demoPlayer.pause() }
-                    .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { _ in
-                        demoPlayer.seek(to: .zero)
-                        if !reduceMotion { demoPlayer.play() }
-                    }
-                Button("Replay walkthrough", systemImage: "arrow.counterclockwise") {
-                    demoPlayer.seek(to: .zero)
-                    demoPlayer.play()
                 }
-                .font(.subheadline.weight(.semibold))
+                .frame(height: 212)
+                .padding(12)
+                .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 25))
+                .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(PausePathPalette.teal.opacity(0.09)))
             } else {
                 Label("Walkthrough unavailable in this build", systemImage: "video.slash")
                     .frame(maxWidth: .infinity, minHeight: 190)
                     .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 27))
             }
-            Label("Illustrative route · no live location or facility guarantee", systemImage: "info.circle")
-                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -1228,25 +1255,29 @@ private struct WelcomeSetupView: View {
         let sample = ActivityGrowthModel.illustrativeSample
 
         return VStack(spacing: 8) {
-            setupCard(title: "Fictional 8-week path", subtitle: "Not a prediction", icon: "chart.xyaxis.line") {
+            setupCard(title: "A sample walking pattern", subtitle: "Illustrative · not a prediction", icon: "chart.xyaxis.line") {
                 ActivityGrowthChart(model: sample)
-                    .frame(height: 38)
+                    .frame(height: 88)
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("BEFORE").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
-                    Text(sample.baselineMinutesPerDay, format: .number.precision(.fractionLength(0)))
-                        .font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit()
+                        Text("AT THE START").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                        HStack(alignment: .firstTextBaseline, spacing: 3) {
+                            Text(sample.baselineMinutesPerDay, format: .number.precision(.fractionLength(0)))
+                                .font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit()
+                            Text("min/day").font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                        }
                     }
-                    Spacer()
-                    Image(systemName: "arrow.right").font(.subheadline.bold()).foregroundStyle(PausePathPalette.teal)
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
                         Text("WEEK 8 · MODELED").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
-                        Text(sample.predictedMinutesPerDay(atWeek: sample.horizonWeeks), format: .number.precision(.fractionLength(1)))
-                            .font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit()
+                        HStack(alignment: .firstTextBaseline, spacing: 3) {
+                            Text(sample.predictedMinutesPerDay(atWeek: sample.horizonWeeks), format: .number.precision(.fractionLength(1)))
+                                .font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit()
+                            Text("min/day").font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                        }
                     }
                 }
-                DisclosureGroup("How the curve is calculated") {
+                DisclosureGroup("How this example is calculated") {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("m(t) = b + A(1 − e⁻ᵏᵗ)").font(.system(.body, design: .serif).weight(.semibold))
                         Text("For this example: b = 12 min/day, A = 10 min/day, k = 0.25/week, t = 8 weeks.")
@@ -1805,43 +1836,64 @@ struct ActivityGrowthChart: View {
     let model: ActivityGrowthModel
 
     var body: some View {
-        GeometryReader { geometry in
-            let size = geometry.size
-            let values = (0...32).map { index in
-                model.predictedMinutesPerDay(atWeek: model.horizonWeeks * Double(index) / 32)
-            }
-            let low = model.baselineMinutesPerDay
-            let high = max(low + 1, values.last ?? low + 1)
-            let points = values.enumerated().map { index, value in
-                CGPoint(x: size.width * CGFloat(index) / CGFloat(max(values.count - 1, 1)),
-                        y: size.height - 12 - (size.height - 26) * CGFloat((value - low) / (high - low)))
-            }
-            ZStack(alignment: .bottomLeading) {
-                Path { path in
-                    path.move(to: CGPoint(x: 0, y: size.height - 12))
-                    path.addLine(to: CGPoint(x: size.width, y: size.height - 12))
-                }.stroke(PausePathPalette.teal.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                Path { path in
-                    guard let first = points.first else { return }
-                    path.move(to: first)
-                    points.dropFirst().forEach { path.addLine(to: $0) }
+        VStack(spacing: 3) {
+            GeometryReader { geometry in
+                let size = geometry.size
+                let values = (0...32).map { index in
+                    model.predictedMinutesPerDay(atWeek: model.horizonWeeks * Double(index) / 32)
                 }
-                .trim(from: 0, to: reveal)
-                .stroke(PausePathPalette.teal, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
-                if let first = points.first, let last = points.last {
-                    Circle().fill(PausePathPalette.teal).frame(width: 9, height: 9).position(first)
-                    Circle().fill(PausePathPalette.lime).overlay(Circle().stroke(PausePathPalette.teal, lineWidth: 2))
-                        .frame(width: 13, height: 13).position(last)
+                let low = model.baselineMinutesPerDay
+                let high = max(low + 1, values.last ?? low + 1)
+                let bottom = size.height - 6
+                let points = values.enumerated().map { index, value in
+                    CGPoint(x: 8 + (size.width - 16) * CGFloat(index) / CGFloat(max(values.count - 1, 1)),
+                            y: bottom - (size.height - 17) * CGFloat((value - low) / (high - low)))
                 }
-                HStack {
-                    Text("WEEK 0"); Spacer(); Text("WEEK 8")
+                ZStack {
+                    Path { path in
+                        path.move(to: CGPoint(x: 8, y: bottom))
+                        path.addLine(to: CGPoint(x: size.width - 8, y: bottom))
+                    }
+                    .stroke(PausePathPalette.teal.opacity(0.15), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    Path { path in
+                        guard let first = points.first, let last = points.last else { return }
+                        path.move(to: CGPoint(x: first.x, y: bottom))
+                        path.addLine(to: first)
+                        points.dropFirst().forEach { path.addLine(to: $0) }
+                        path.addLine(to: CGPoint(x: last.x, y: bottom))
+                        path.closeSubpath()
+                    }
+                    .fill(LinearGradient(colors: [PausePathPalette.lime.opacity(0.22), PausePathPalette.lime.opacity(0.02)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .mask(alignment: .leading) { Rectangle().frame(width: size.width * reveal) }
+                    Path { path in
+                        guard let first = points.first else { return }
+                        path.move(to: first)
+                        points.dropFirst().forEach { path.addLine(to: $0) }
+                    }
+                    .trim(from: 0, to: reveal)
+                    .stroke(PausePathPalette.teal, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                    if let first = points.first, let last = points.last {
+                        Circle().fill(PausePathPalette.teal).frame(width: 9, height: 9).position(first)
+                        Circle().fill(PausePathPalette.lime)
+                            .overlay(Circle().strokeBorder(PausePathPalette.teal, lineWidth: 2))
+                            .frame(width: 14, height: 14).position(last)
+                            .mask(alignment: .leading) { Rectangle().frame(width: size.width * reveal) }
+                    }
                 }
-                .font(.system(size: 9, weight: .bold, design: .rounded))
-                .foregroundStyle(.secondary)
-                .padding(.bottom, 0)
             }
+            .frame(height: 67)
+            HStack {
+                Text("WEEK 0")
+                Spacer()
+                Text("WEEK 8")
+            }
+            .font(.system(size: 9, weight: .bold, design: .rounded))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 1)
         }
-        .accessibilityLabel("Illustrative exponential model: walking time gradually rises from 12 minutes per day at week zero to about 20.6 at week eight")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Illustrative model: from \(model.baselineMinutesPerDay.formatted(.number.precision(.fractionLength(0)))) minutes per day at week zero to \(model.predictedMinutesPerDay(atWeek: model.horizonWeeks).formatted(.number.precision(.fractionLength(1)))) at week eight. Not a prediction.")
         .onAppear {
             if reduceMotion { reveal = 1 }
             else { withAnimation(.easeOut(duration: 1.1)) { reveal = 1 } }
