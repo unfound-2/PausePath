@@ -810,6 +810,11 @@ struct MyPathView: View {
         let start = Calendar.current.date(byAdding: .day, value: -(period - 1), to: Calendar.current.startOfDay(for: Date()))!
         return activities.filter { $0.date >= start && $0.date <= Date() }
     }
+    private var weekInterval: DateInterval? { Calendar.current.dateInterval(of: .weekOfYear, for: Date()) }
+    private var weekWalks: [TrackedWalk] {
+        guard let weekInterval else { return [] }
+        return walks.filter { weekInterval.contains($0.date) }
+    }
     private var recentPaths: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -880,10 +885,7 @@ struct MyPathView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     if pathSection != "Overview" && !(demoMode && pathSection == "Insights") { sourceControls }
                     if pathSection == "Overview" {
-                        if goalEnabled { personalGoal }
-                        else {
-                            Button("Set a weekly goal", systemImage: "plus.circle") { goalEnabled = true }.pathCard()
-                        }
+                        weeklyDashboard
                         recentPaths
                         WeeklySuggestionsView(preferences: preferences)
                     } else if pathSection == "History" {
@@ -895,6 +897,7 @@ struct MyPathView: View {
                                 .font(.callout).foregroundStyle(.secondary).pathCard()
                         } else {
                             if source == "Apple Health" && !daily.isEmpty { healthTotals }
+                            if !activities.isEmpty { insightSummary }
                             if !personalWalkingHistory.isEmpty { walkingMinutesTrend }
                             else { emptyWalkingTrend }
                             if !activities.isEmpty { trends }
@@ -923,6 +926,7 @@ struct MyPathView: View {
                 .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .commaSeparatedText, defaultFilename: "PausePath-history") { result in
                     if case .failure = result { exportMessage = "Export could not be saved. Try again." }
                 }
+                .sheet(isPresented: $editingGoal) { goalEditor }
         }
     }
     private var sourceControls: some View {
@@ -979,36 +983,136 @@ struct MyPathView: View {
             [ISO8601DateFormatter().string(from: a.date), a.kind, a.title, a.hasDistance ? String(a.meters) : "", String(a.seconds), a.steps.map { String($0) } ?? "", a.calories.map { String($0) } ?? ""].map(cell).joined(separator: ",")
         }.joined(separator: "\n")
     }
-    private var personalGoal: some View {
-        let week = Calendar.current.dateInterval(of: .weekOfYear, for: Date())!
-        let value = PersonalGoalProgress.total(metric: goalMetric, walks: walks, start: week.start, end: min(Date(), week.end))
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Weekly goal", systemImage: "flag.fill").font(.headline)
-                Spacer()
-                goalEditButton
+    private var weeklyDashboard: some View {
+        let distance = weekWalks.reduce(0) { $0 + ($1.distanceMeters.isFinite ? max(0, $1.distanceMeters) : 0) } / 1_000
+        let minutes = Int(weekWalks.reduce(0) { $0 + ($1.activeSeconds.isFinite ? max(0, $1.activeSeconds) : 0) } / 60)
+        let goalValue: Double = weekInterval.map {
+            PersonalGoalProgress.total(metric: goalMetric, walks: walks, start: $0.start, end: min(Date(), $0.end))
+        } ?? 0
+        return VStack(alignment: .leading, spacing: 17) {
+            HStack(alignment: .top) {
+                Label("This week", systemImage: "figure.walk")
+                    .font(.headline.weight(.bold))
+                Spacer(minLength: 8)
+                Text("PAUSEPATH RECORDINGS")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .tracking(0.6)
+                    .foregroundStyle(.white.opacity(0.76))
+                    .multilineTextAlignment(.trailing)
             }
-            ProgressView(value: min(value, goalTarget), total: goalTarget).tint(PausePathPalette.teal)
-            HStack {
-                Text("\(value, specifier: "%.1f") / \(goalTarget, specifier: "%.0f") \(goalUnit)")
-                    .font(.subheadline.weight(.medium).monospacedDigit())
-                Spacer()
-                if value >= goalTarget { Label("Done", systemImage: "checkmark.circle.fill").font(.caption.weight(.semibold)).foregroundStyle(.green) }
-                else { Text("PausePath only").font(.caption).foregroundStyle(.secondary) }
+            .foregroundStyle(.white)
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(distance, format: .number.precision(.fractionLength(1)))
+                    .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 34 : 42, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                Text("km").font(.title3.weight(.semibold)).foregroundStyle(.white.opacity(0.76))
             }
-            if editingGoal {
-                goalPicker
-                Stepper(value: $goalTarget, in: goalRange, step: 1.0) {
-                    Text("Goal: " + String(format: "%.0f", goalTarget) + " " + goalUnit)
+            .foregroundStyle(.white)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(distance.formatted(.number.precision(.fractionLength(1)))) kilometers recorded this week")
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: 10) {
+                    weeklyDashboardStat("\(minutes) min", icon: "timer", label: "Active time")
+                    weeklyDashboardStat("\(weekWalks.count)", icon: "figure.walk", label: "Sessions")
                 }
-                Button("Remove weekly goal", role: .destructive) { goalEnabled = false; editingGoal = false }
-                    .font(.caption)
+            } else {
+                HStack(spacing: 10) {
+                    weeklyDashboardStat("\(minutes) min", icon: "timer", label: "Active time")
+                    weeklyDashboardStat("\(weekWalks.count)", icon: "figure.walk", label: "Sessions")
+                }
             }
-        }.pathCard()
+            Rectangle().fill(.white.opacity(0.18)).frame(height: 1)
+            if goalEnabled {
+                HStack {
+                    Label("Weekly goal", systemImage: "flag.fill").font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 8)
+                    Button("Edit") { editingGoal = true }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(PausePathPalette.lime)
+                        .frame(minHeight: 44)
+                }
+                .foregroundStyle(.white)
+                ProgressView(value: min(goalValue, goalTarget), total: max(goalTarget, 1))
+                    .tint(PausePathPalette.lime)
+                HStack(spacing: 8) {
+                    Text("\(goalValue, specifier: "%.1f") / \(goalTarget, specifier: "%.0f") \(goalUnit)")
+                        .monospacedDigit()
+                    Spacer(minLength: 8)
+                    if goalValue >= goalTarget {
+                        Label("Done", systemImage: "checkmark.circle.fill").foregroundStyle(PausePathPalette.lime)
+                    } else {
+                        Text("PausePath only")
+                    }
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.white.opacity(0.84))
+            } else {
+                Button("Set a weekly goal", systemImage: "plus.circle.fill") {
+                    goalEnabled = true
+                    editingGoal = true
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(PausePathPalette.lime)
+                .frame(minHeight: 44)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 26)
+                .fill(LinearGradient(colors: [Color(red: 0.02, green: 0.31, blue: 0.37), Color(red: 0.01, green: 0.22, blue: 0.27)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+        }
+        .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(.white.opacity(0.12)))
     }
-    private var goalEditButton: some View {
-        Button(editingGoal ? "Done" : "Edit goal") { editingGoal.toggle() }
-            .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+    private func weeklyDashboardStat(_ value: String, icon: String, label: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon).foregroundStyle(PausePathPalette.lime)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(value).font(.subheadline.weight(.bold)).foregroundStyle(.white)
+                Text(label).font(.caption2).foregroundStyle(.white.opacity(0.72))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+        .accessibilityElement(children: .combine)
+    }
+    private var goalEditor: some View {
+        NavigationStack {
+            Form {
+                Section("Measure") {
+                    Picker("Track", selection: $goalMetric) {
+                        Text("Distance").tag("distance")
+                        Text("Active minutes").tag("minutes")
+                        Text("Active days").tag("days")
+                    }
+                }
+                Section("Target") {
+                    Stepper(value: $goalTarget, in: goalRange, step: 1) {
+                        Text("\(goalTarget, specifier: "%.0f") \(goalUnit)")
+                    }
+                }
+                Section {
+                    Button("Remove weekly goal", role: .destructive) {
+                        goalEnabled = false
+                        editingGoal = false
+                    }
+                }
+            }
+            .pausePathSurface()
+            .navigationTitle("Weekly goal")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { editingGoal = false } } }
+            .onChange(of: goalMetric) { _, metric in
+                switch metric {
+                case "days": goalTarget = 3
+                case "minutes": goalTarget = 60
+                default: goalTarget = 5
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
     private var goalUnit: String { goalMetric == "distance" ? "km" : goalMetric }
     private var goalRange: ClosedRange<Double> {
@@ -1016,29 +1120,6 @@ struct MyPathView: View {
         case "days": return 1.0...7.0
         case "minutes": return 1.0...600.0
         default: return 1.0...100.0
-        }
-    }
-    private var goalPicker: some View {
-        Menu {
-            Picker("Measure", selection: $goalMetric) {
-                Text("Distance (km)").tag("distance")
-                Text("Minutes").tag("minutes")
-                Text("Active days").tag("days")
-            }
-        } label: {
-            HStack(alignment: .firstTextBaseline) {
-                Text(goalMetric == "distance" ? "Distance (km)" : (goalMetric == "minutes" ? "Minutes" : "Active days"))
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.up.chevron.down").font(.caption)
-            }.frame(minHeight: 44)
-        }.accessibilityLabel("Goal measure")
-        .onChange(of: goalMetric) { _, metric in
-            switch metric {
-            case "days": goalTarget = 3.0
-            case "minutes": goalTarget = 60.0
-            default: goalTarget = 5.0
-            }
         }
     }
     private var healthTotals: some View {
@@ -1055,18 +1136,67 @@ struct MyPathView: View {
     private func optionalTotal(_ values: [Double]) -> String {
         values.isEmpty ? "Not available" : values.reduce(0, +).formatted(.number.precision(.fractionLength(0)))
     }
+    private var insightSummary: some View {
+        let measuredDistance = recent.filter(\.hasDistance)
+        let distance = measuredDistance.reduce(0) { $0 + $1.meters } / 1_000
+        let activeMinutes = Int(recent.reduce(0) { $0 + $1.seconds } / 60)
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Last \(period) days").font(.headline)
+                Spacer(minLength: 8)
+                Text(source)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(PausePathPalette.teal)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(PausePathPalette.teal.opacity(0.10), in: Capsule())
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 170 : 90), spacing: 8)], spacing: 8) {
+                insightMetric("Distance", value: measuredDistance.isEmpty ? "—" : distance.formatted(.number.precision(.fractionLength(1))) + " km", icon: "map")
+                insightMetric("Active time", value: "\(activeMinutes) min", icon: "timer")
+                insightMetric("Sessions", value: "\(recent.count)", icon: "figure.walk")
+            }
+            if measuredDistance.count < recent.count {
+                Text("Distance totals include only sessions with recorded distance.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .pathCard()
+    }
+    private func insightMetric(_ title: String, value: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(PausePathPalette.teal)
+            Text(value)
+                .font(.system(.title3, design: .rounded).weight(.bold))
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(title).font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+        .padding(10)
+        .background(PausePathPalette.teal.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .combine)
+    }
     private var trends: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("Your rhythm", systemImage: "chart.xyaxis.line").font(.headline)
-            Chart {
-                ForEach(0..<period, id: \.self) { index in
-                    let day = Calendar.current.date(byAdding: .day, value: index - period + 1, to: Calendar.current.startOfDay(for: Date()))!
-                    let distance = recent.filter { Calendar.current.isDate($0.date, inSameDayAs: day) }.reduce(0) { $0 + $1.meters } / 1000
-                    BarMark(x: .value("Day", day, unit: .day), y: .value("Distance (km)", distance))
-                        .foregroundStyle(PausePathPalette.teal.gradient).cornerRadius(3)
-                }
-            }.chartYAxisLabel("km").frame(height: 160)
-                .accessibilityLabel("Daily distance for the last \(period) days")
+            Label("Distance by day", systemImage: "chart.bar.fill").font(.headline)
+            if recent.contains(where: \.hasDistance) {
+                Chart {
+                    ForEach(0..<period, id: \.self) { index in
+                        let day = Calendar.current.date(byAdding: .day, value: index - period + 1, to: Calendar.current.startOfDay(for: Date()))!
+                        let distance = recent.filter { $0.hasDistance && Calendar.current.isDate($0.date, inSameDayAs: day) }
+                            .reduce(0) { $0 + $1.meters } / 1000
+                        BarMark(x: .value("Day", day, unit: .day), y: .value("Distance (km)", distance))
+                            .foregroundStyle(PausePathPalette.teal.gradient).cornerRadius(3)
+                    }
+                }.chartYAxisLabel("km").frame(height: 160)
+                    .accessibilityLabel("Daily recorded distance for the last \(period) days")
+            } else {
+                Text("Distance was not recorded in this period.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
             trendRow(days: 7, title: "Short term")
             Divider()
             trendRow(days: 30, title: "Long term")
@@ -1125,7 +1255,7 @@ struct MyPathView: View {
                 Text("Synthetic weekly records generated from the sample model.")
                     .font(.caption.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
             } else {
-                Text("PausePath walks + available Apple Health walking workouts. Overlaps count once; missing records don’t mean no walking.")
+                Text("Recorded walking minutes · PausePath + available Apple Health")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if !summary.observedPoints.isEmpty {
@@ -1152,7 +1282,7 @@ struct MyPathView: View {
                 Text(String(format: "Recent direction: %+.1f recorded min/day/week", slope))
                     .font(.subheadline.weight(.semibold))
             } else {
-                Text("Not enough recorded history yet. A trend needs at least four observed weeks; unrecorded weeks stay unknown.")
+                Text("Keep recording to see a direction across four observed weeks.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             if let baseline = summary.baselineAverage, let recent = summary.recentAverage {
@@ -1174,11 +1304,13 @@ struct MyPathView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             DisclosureGroup("About this trend") {
-                Text("Eight completed calendar weeks are shown. Dots are recorded sessions; the line estimates the trend between observed weeks. Weeks without a record are unknown, not zero. The direction is the fitted change at the latest observed week. Four observed weeks are needed to draw a line; comparisons need all eight.\(summary.limitation.map { " \($0)" } ?? "")")
-                    .font(.caption).foregroundStyle(.secondary)
-            }.font(.caption.weight(.semibold))
-            Text(isSample ? "Sample values are not measured results." : "This describes records over time, not an effect caused by PausePath or a measure of medical readiness.")
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Eight completed calendar weeks are shown. PausePath walks and available Apple Health walking workouts are combined; overlaps count once. Dots are recorded weeks and the line estimates a trend between observed weeks.")
+                    Text("Weeks without a record are unknown, not zero. Four observed weeks are needed for a line; comparisons need all eight.\(summary.limitation.map { " \($0)" } ?? "")")
+                    Text(isSample ? "Sample values are not measured results." : "These records do not show an effect caused by PausePath or indicate medical readiness.")
+                }
                 .font(.caption).foregroundStyle(.secondary)
+            }.font(.caption.weight(.semibold))
         }.pathCard()
     }
     private func trendRow(days: Int, title: String) -> some View {
