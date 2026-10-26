@@ -184,10 +184,6 @@ struct ExploreRoutePlannerView: View {
                         .frame(width: 44, height: 44).background(.quaternary, in: Circle())
                 }.accessibilityLabel("Collapse route options and return to map")
             }.padding(.horizontal, 16).padding(.top, 20).padding(.bottom, 8)
-                .contentShape(Rectangle())
-                .simultaneousGesture(DragGesture(minimumDistance: 25).onEnded { value in
-                    if value.translation.height > 65 { onClose() }
-                })
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
@@ -366,33 +362,31 @@ struct ExploreRoutePlannerView: View {
         let isSelected = option.id == discovery.selectedRouteOptionID
         let missing = mandatoryKinds.subtracting(Set(option.stops.map(\.kind))).map(\.chipTitle).sorted()
         let restAssessment = option.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops)
-        let estimatedMinutes = max(1, Int(ceil(option.distance / max(0.3, routePreferences.speedMetersPerSecond) / 60)))
         VStack(alignment: .leading, spacing: 12) {
             Button { discovery.selectRouteOption(option.id) } label: {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(PausePathPalette.teal)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(option.stops.isEmpty ? "Direct route" : "Route with \(option.stops.count) stops")
-                                .font(.headline).foregroundStyle(PausePathPalette.teal)
-                            if profileMatches(option) {
-                                Label("Matches your preferences", systemImage: "checkmark.circle")
-                                    .font(.caption.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
-                            }
+                VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.gray)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(option.stops.isEmpty ? "Direct route" : "Route with \(option.stops.count) stops").font(.headline).foregroundStyle(.primary)
+                        if profileMatches(option) {
+                            Label("Matches your preferences", systemImage: "checkmark.circle")
+                                .font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
                         }
-                        Spacer(minLength: 0)
                     }
-                    Text("\(distanceUnit.distance(option.distance)) · ~\(estimatedMinutes) min · Terrain unknown · \(option.stops.count) stops")
-                        .font(.caption.weight(.medium)).foregroundStyle(PausePathPalette.teal)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Label(restGapSummary(restAssessment),
-                          systemImage: restAssessment.status == .meets ? "checkmark.circle.fill" : "exclamationmark.circle")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(restAssessment.status == .exceeds ? Color.orange : PausePathPalette.teal)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
                 }
-                .contentShape(Rectangle())
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 80), spacing: 8)], spacing: 8) {
+                    routeMetric("Distance", value: distanceUnit.distance(option.distance))
+                    routeMetric("Est. time", value: "\(max(1, Int(ceil(option.distance / max(0.3, routePreferences.speedMetersPerSecond) / 60)))) min")
+                    routeMetric("Planned stops", value: "\(option.stops.count)")
+                }
+                Label(restBadgeTitle(restAssessment.status),
+                      systemImage: restAssessment.status == .meets ? "checkmark.circle.fill" : "exclamationmark.circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(PausePathPalette.teal)
+                }.contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityAddTraits(isSelected ? [.isSelected] : [])
                 .accessibilityHint("Preview this route on the map")
             if !missing.isEmpty {
@@ -435,15 +429,24 @@ struct ExploreRoutePlannerView: View {
         }
     }
 
-    private func restGapSummary(_ assessment: RestGapAssessment) -> String {
-        guard let gap = assessment.longestGap else { return "Longest rest gap unknown" }
-        let distance = distanceUnit.nearby(gap)
-        switch assessment.status {
-        case .meets: return "Longest rest gap \(distance) · within your limit"
-        case .unverified: return "Longest rest gap \(distance) · availability unverified"
-        case .exceeds: return "Longest rest gap \(distance) · over your limit"
-        case .unknown: return "Longest rest gap \(distance) · status unknown"
+    private func restBadgeTitle(_ status: RestGapAssessment.Status) -> String {
+        switch status {
+        case .meets: "Mapped rest gap meets your preference"
+        case .unverified: "Rest gap fits · stops unverified"
+        case .exceeds: "Rest gap exceeds your preference"
+        case .unknown: "Rest gap unknown"
         }
+    }
+
+    private func routeMetric(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(PausePathPalette.background, in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .combine)
     }
 
     private func buildRoutes() async {
