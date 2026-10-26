@@ -332,7 +332,8 @@ private struct WelcomeSetupView: View {
         }
     }
 
-    private var isDarkInsight: Bool { step == 3 }
+    // Keep the illustrated walk in one visual mode as it moves between stops.
+    private var isDarkInsight: Bool { false }
     private var chapter: String {
         switch step {
         case 0...3: "Your starting point"
@@ -758,19 +759,19 @@ private struct WelcomeSetupView: View {
     }
 
     private var startingPointStep: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 14) {
             Text(currentFrequency == .unsure ? "—" : currentFrequency.title)
-                .font(.system(size: 112, weight: .heavy, design: .rounded))
-                .monospacedDigit().foregroundStyle(PausePathPalette.lime)
+                .font(.system(size: 82, weight: .heavy, design: .rounded))
+                .monospacedDigit().foregroundStyle(PausePathPalette.teal)
                 .contentTransition(.numericText())
                 .minimumScaleFactor(0.75)
             Text(currentFrequency == .unsure ? "No number needed" : "walks in a typical week")
                 .font(.title3.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(PausePathPalette.teal)
             HStack(spacing: 9) {
                 ForEach(0..<7, id: \.self) { index in
                     Capsule()
-                        .fill(index < max(currentFrequency.rawValue, 0) ? PausePathPalette.lime : .white.opacity(0.22))
+                        .fill(index < max(currentFrequency.rawValue, 0) ? PausePathPalette.lime : PausePathPalette.teal.opacity(0.13))
                         .frame(maxWidth: .infinity).frame(height: 13)
                         .accessibilityHidden(true)
                 }
@@ -778,17 +779,17 @@ private struct WelcomeSetupView: View {
             .padding(.horizontal, 12)
             Text("YOUR FOCUS  ·  \(displayTitle(for: profile.goal).uppercased())")
                 .font(.caption.weight(.bold)).tracking(0.6)
-                .foregroundStyle(.white.opacity(0.8))
+                .foregroundStyle(PausePathPalette.teal.opacity(0.78))
             Text("Next, you’ll choose where you want to go from here.")
                 .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.8))
+                .foregroundStyle(PausePathPalette.teal.opacity(0.78))
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 24)
-        .padding(.vertical, 48)
-        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 30))
-        .overlay(RoundedRectangle(cornerRadius: 30).strokeBorder(.white.opacity(0.12)))
+        .padding(.horizontal, 20)
+        .padding(.vertical, 24)
+        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 30))
+        .overlay(RoundedRectangle(cornerRadius: 30).strokeBorder(PausePathPalette.teal.opacity(0.10)))
     }
 
     private func changeWeeklyGoal(by amount: Int) {
@@ -1587,8 +1588,19 @@ private struct OnboardingJourneyWorld: View, Animatable {
                 }
                 ForEach(JourneyCheckpoint.allCases.filter { $0 != .trailhead }) { stop in
                     let point = JourneyCurve.point(at: stop.progress, in: routeRect)
+                    let markerX = point.x + cameraOffset + 64
+                    let markerY = point.y - 36
+                    let spur = Path { path in
+                        path.move(to: CGPoint(x: point.x + cameraOffset + 30, y: point.y + 15))
+                        path.addQuadCurve(to: CGPoint(x: markerX, y: markerY + 18),
+                                          control: CGPoint(x: markerX - 16, y: point.y + 13))
+                    }
+                    spur.stroke(PausePathPalette.teal.opacity(0.25),
+                                style: StrokeStyle(lineWidth: 14, lineCap: .round))
+                    spur.stroke(Color(red: 0.98, green: 0.94, blue: 0.78),
+                                style: StrokeStyle(lineWidth: 10, lineCap: .round))
                     JourneyStopPin(stop: stop, selected: stop == checkpoint)
-                        .position(x: point.x + cameraOffset + 68, y: point.y - 20)
+                        .position(x: markerX, y: markerY)
                 }
                 Image(systemName: "figure.walk")
                     .font(.system(size: 31, weight: .bold))
