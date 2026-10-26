@@ -164,6 +164,9 @@ struct CommunityChallengesView: View {
                         sharePrompt
                     }
                     socialShortcuts
+                    if communities.isEmpty && (!account.isSignedIn || (communityLoadMessage == nil && !busy)) {
+                        communityPossibilities
+                    }
                     if account.isSignedIn && !communities.isEmpty {
                         feedSection
                     }
@@ -284,11 +287,7 @@ struct CommunityChallengesView: View {
                 }
             }
             if !account.isSignedIn {
-                Label("Sign in to see your groups. Tap + to create or join one.", systemImage: "person.3")
-                    .font(.subheadline).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(18)
-                    .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 20))
+                emptyGroupsCard(signedOut: true)
             } else {
                 if let communityLoadMessage {
                     VStack(alignment: .leading, spacing: 8) {
@@ -302,11 +301,7 @@ struct CommunityChallengesView: View {
                     ProgressView("Loading groups…")
                         .frame(maxWidth: .infinity, minHeight: 100)
                 } else if communities.isEmpty {
-                    Label("No groups yet. Tap + to create one or join with a code.", systemImage: "person.3")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(18)
-                        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 20))
+                    emptyGroupsCard(signedOut: false)
                 } else {
                     if communities.count > 4 || !communitySearch.isEmpty {
                         TextField("Search your groups", text: $communitySearch)
@@ -333,6 +328,131 @@ struct CommunityChallengesView: View {
                 }
             }
         }
+    }
+
+    private func emptyGroupsCard(signedOut: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            communityWelcomeArt
+            VStack(alignment: .leading, spacing: 5) {
+                Text(signedOut ? "Walk better together" : "Find your walking circle")
+                    .font(.system(.title2, design: .rounded).weight(.bold))
+                    .foregroundStyle(PausePathPalette.teal)
+                Text(signedOut
+                     ? "Sign in with Apple, then join a group or start one with people you know."
+                     : "Have an invite? Join your group. Or start a new one and bring friends along.")
+                    .font(.subheadline)
+                    .foregroundStyle(PausePathPalette.ink.opacity(0.72))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if typeSize.isAccessibilitySize {
+                VStack(spacing: 9) { emptyGroupActions }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 9) { emptyGroupActions }
+                    VStack(spacing: 9) { emptyGroupActions }
+                }
+            }
+            Label("Groups are private. Ask a member for an invite code.", systemImage: "lock.shield")
+                .font(.caption)
+                .foregroundStyle(PausePathPalette.teal.opacity(0.74))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(PausePathPalette.teal.opacity(0.10)))
+    }
+
+    @ViewBuilder private var emptyGroupActions: some View {
+        Button {
+            communityComposerRoute = CommunityComposerRoute(joining: true, inviteCode: "")
+        } label: {
+            Label("Join with code", systemImage: "person.badge.plus")
+                .frame(maxWidth: .infinity, minHeight: 48)
+        }
+        .foregroundStyle(PausePathPalette.ink)
+        .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 15))
+        .accessibilityHint("Enter an invite code from a community member")
+
+        Button {
+            communityComposerRoute = CommunityComposerRoute(joining: false, inviteCode: "")
+        } label: {
+            Label("Start a group", systemImage: "plus")
+                .frame(maxWidth: .infinity, minHeight: 48)
+        }
+        .foregroundStyle(PausePathPalette.teal)
+        .background(PausePathPalette.background, in: RoundedRectangle(cornerRadius: 15))
+        .overlay(RoundedRectangle(cornerRadius: 15).strokeBorder(PausePathPalette.teal.opacity(0.18)))
+    }
+
+    private var communityWelcomeArt: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 19).fill(PausePathPalette.teal.gradient)
+            GeometryReader { geometry in
+                Path { path in
+                    path.move(to: CGPoint(x: 10, y: geometry.size.height * 0.77))
+                    path.addCurve(to: CGPoint(x: geometry.size.width - 8, y: geometry.size.height * 0.32),
+                                  control1: CGPoint(x: geometry.size.width * 0.32, y: geometry.size.height * 0.89),
+                                  control2: CGPoint(x: geometry.size.width * 0.56, y: geometry.size.height * 0.13))
+                }
+                .stroke(PausePathPalette.lime.opacity(0.75), style: StrokeStyle(lineWidth: 6, lineCap: .round))
+            }
+            .padding(12)
+            HStack(spacing: -10) {
+                ForEach(0..<3) { index in
+                    Image(systemName: index == 1 ? "figure.walk" : "person.fill")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(index == 1 ? PausePathPalette.ink : PausePathPalette.teal)
+                        .frame(width: 48, height: 48)
+                        .background(index == 1 ? PausePathPalette.lime : PausePathPalette.background, in: Circle())
+                        .overlay(Circle().strokeBorder(PausePathPalette.teal, lineWidth: 2))
+                }
+                Spacer()
+                Image(systemName: "figure.walk.motion")
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundStyle(PausePathPalette.lime)
+                    .padding(.trailing, 10)
+            }
+            .padding(.horizontal, 20)
+        }
+        .frame(height: 86)
+        .accessibilityHidden(true)
+    }
+
+    private var communityPossibilities: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("What can a group do?")
+                .font(.headline).foregroundStyle(PausePathPalette.teal)
+            if typeSize.isAccessibilitySize {
+                VStack(spacing: 8) { communityPossibilityItems }
+            } else {
+                HStack(spacing: 8) { communityPossibilityItems }
+            }
+        }
+    }
+
+    @ViewBuilder private var communityPossibilityItems: some View {
+        possibility("Plan walks", icon: "map")
+        possibility("Share goals", icon: "flag")
+        possibility("Cheer each other", icon: "hands.clap")
+    }
+
+    private func possibility(_ title: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(PausePathPalette.teal)
+                .frame(width: 28, height: 28)
+                .background(PausePathPalette.lime.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(PausePathPalette.teal)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
+        .padding(9)
+        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 17))
     }
 
     private func groupCard(_ community: WalkingCommunity) -> some View {
@@ -406,7 +526,7 @@ struct CommunityChallengesView: View {
                 socialShortcut("Find friends", icon: "person.2.fill", detail: "Search people")
             }
             NavigationLink { SocialInboxView() } label: {
-                socialShortcut("Inbox", icon: "tray.fill", detail: social.unread > 0 ? "\(social.unread) new" : "Updates & invites")
+                socialShortcut("Inbox", icon: "tray.fill", detail: social.unread > 0 ? "\(social.unread) new" : "Invites & news")
             }
         }
         .buttonStyle(.plain)
