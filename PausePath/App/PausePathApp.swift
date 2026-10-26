@@ -396,12 +396,6 @@ private struct WelcomeSetupView: View {
                             }
                             .scrollDismissesKeyboard(.interactively)
                             .id(step)
-                            .overlay(alignment: .bottom) {
-                                LinearGradient(colors: [.clear, isDarkInsight ? PausePathPalette.teal : PausePathPalette.background],
-                                               startPoint: .top, endPoint: .bottom)
-                                    .frame(height: 20)
-                                    .allowsHitTesting(false)
-                            }
                             footer
                                 .padding(.horizontal, 22)
                                 .padding(.top, 5)
@@ -410,8 +404,12 @@ private struct WelcomeSetupView: View {
                     }
                     .frame(maxWidth: 620)
                     .frame(height: traveling ? 94 : geometry.size.height * panelFraction)
-                    .background(isDarkInsight ? PausePathPalette.teal : PausePathPalette.background,
-                                in: UnevenRoundedRectangle(topLeadingRadius: 30, topTrailingRadius: 30))
+                    .background(alignment: .top) {
+                        UnevenRoundedRectangle(topLeadingRadius: 30, topTrailingRadius: 30)
+                            .fill(isDarkInsight ? PausePathPalette.teal : PausePathPalette.background)
+                            .frame(height: (traveling ? 94 : geometry.size.height * panelFraction)
+                                   + geometry.safeAreaInsets.bottom)
+                    }
                     .shadow(color: PausePathPalette.ink.opacity(0.15), radius: 20, y: -6)
                     .allowsHitTesting(!traveling)
                 }
@@ -567,7 +565,7 @@ private struct WelcomeSetupView: View {
 
     private var subtitle: String {
         switch step {
-        case 0: "A route can feel different when you know where you can stop."
+        case 0: "Find walks with places to pause."
         case 1: "Your answer shapes the routes we suggest."
         case 2: "Tell us about a typical week, or leave it open."
         case 3: "Just your answer, shown back to you."
@@ -634,13 +632,13 @@ private struct WelcomeSetupView: View {
 
     private var introductionStep: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Walk with us. Each stop reveals a little more about the app and lets you choose what matters.")
+            Text("Walk with us. Choose your goals and nearby stops along the way.")
                 .font(.subheadline)
                 .foregroundStyle(PausePathPalette.ink.opacity(0.78))
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
-                featurePill("Real walking routes", icon: "map")
-                featurePill("Places to pause", icon: "bench")
+                featurePill("Route options", icon: "map")
+                featurePill("Rest stops", icon: "bench")
             }
         }
     }
@@ -1589,22 +1587,8 @@ private struct OnboardingJourneyWorld: View, Animatable {
                 }
                 ForEach(JourneyCheckpoint.allCases.filter { $0 != .trailhead }) { stop in
                     let point = JourneyCurve.point(at: stop.progress, in: routeRect)
-                    if stop == checkpoint {
-                        VStack(spacing: 3) {
-                            JourneyStopPin(stop: stop, selected: true)
-                                .scaleEffect(1.25)
-                            Text(stop.title)
-                                .font(.caption2.weight(.heavy))
-                                .foregroundStyle(PausePathPalette.teal)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(PausePathPalette.background, in: Capsule())
-                        }
-                        .position(x: point.x + cameraOffset + 58, y: point.y - 52)
-                    } else {
-                        JourneyStopPin(stop: stop, selected: false)
-                            .position(x: point.x + cameraOffset + 58, y: point.y - 52)
-                    }
+                    JourneyStopPin(stop: stop, selected: stop == checkpoint)
+                        .position(x: point.x + cameraOffset + 68, y: point.y - 20)
                 }
                 Image(systemName: "figure.walk")
                     .font(.system(size: 31, weight: .bold))
@@ -1631,23 +1615,114 @@ private struct JourneyStopPin: View {
 
     var body: some View {
         ZStack {
-            Circle().fill(stop.color.opacity(selected ? 0.30 : 0.16))
-                .frame(width: selected ? 43 : 34, height: selected ? 43 : 34)
-            Circle().fill(stop.color)
-                .frame(width: 29, height: 29)
+            Ellipse()
+                .fill(PausePathPalette.teal.opacity(0.13))
+                .frame(width: 66, height: 17)
+                .offset(y: 22)
+            Ellipse()
+                .fill(PausePathPalette.background.opacity(0.94))
+                .frame(width: 62, height: 13)
+                .offset(y: 18)
+            landmark
+                .offset(x: -8, y: 2)
+            Circle()
+                .fill(stop == .cafe || stop == .finish ? PausePathPalette.teal : stop.color)
+                .frame(width: 25, height: 25)
                 .overlay {
-                    Group {
-                        if stop == .bench {
-                            BenchSymbol().fill(.white).frame(width: 16, height: 16)
-                        } else {
-                            Image(systemName: stop.symbol)
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(stop == .restroom ? .white : PausePathPalette.ink)
-                        }
+                    if stop == .bench {
+                        BenchSymbol().fill(.white).frame(width: 15, height: 15)
+                    } else {
+                        Image(systemName: stop.symbol)
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
                     }
                 }
+                .overlay(Circle().strokeBorder(PausePathPalette.background, lineWidth: 2))
+                .offset(x: 23, y: -21)
         }
-        .frame(width: 44, height: 44)
+        .frame(width: 76, height: 66)
+        .scaleEffect(selected ? 1.06 : 0.88)
+        .shadow(color: PausePathPalette.ink.opacity(selected ? 0.16 : 0.10), radius: 5, y: 3)
+    }
+
+    @ViewBuilder private var landmark: some View {
+        switch stop {
+        case .bench:
+            BenchSymbol()
+                .fill(PausePathPalette.teal)
+                .frame(width: 36, height: 36)
+        case .water:
+            ZStack {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(red: 0.83, green: 0.95, blue: 0.94))
+                    .frame(width: 24, height: 30)
+                    .offset(y: 6)
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(PausePathPalette.teal)
+                    .frame(width: 30, height: 6)
+                    .offset(y: -8)
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(stop.color)
+                    .frame(width: 9, height: 12)
+                    .offset(x: -7, y: 7)
+            }
+            .frame(width: 42, height: 44)
+        case .restroom:
+            ZStack {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(red: 0.92, green: 0.94, blue: 0.85))
+                    .frame(width: 37, height: 35)
+                    .offset(y: 3)
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(PausePathPalette.teal)
+                    .frame(width: 42, height: 7)
+                    .offset(y: -17)
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(PausePathPalette.teal.opacity(0.72))
+                    .frame(width: 12, height: 21)
+                    .offset(y: 10)
+                Text("WC")
+                    .font(.system(size: 8, weight: .heavy, design: .rounded))
+                    .foregroundStyle(PausePathPalette.teal)
+                    .offset(y: -8)
+            }
+            .frame(width: 46, height: 45)
+        case .cafe:
+            ZStack {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(red: 1.00, green: 0.96, blue: 0.84))
+                    .frame(width: 42, height: 33)
+                    .offset(y: 5)
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(PausePathPalette.teal)
+                    .frame(width: 12, height: 17)
+                    .offset(x: -10, y: 12)
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color(red: 0.56, green: 0.79, blue: 0.78))
+                    .frame(width: 14, height: 10)
+                    .offset(x: 10, y: 5)
+                HStack(spacing: 0) {
+                    ForEach(0..<4) { index in
+                        Rectangle()
+                            .fill(index.isMultiple(of: 2) ? PausePathPalette.teal : PausePathPalette.lime)
+                    }
+                }
+                .frame(width: 44, height: 9)
+                .clipShape(RoundedRectangle(cornerRadius: 2))
+                .offset(y: -13)
+            }
+            .frame(width: 48, height: 45)
+        case .finish:
+            Image(systemName: "flag.checkered")
+                .font(.system(size: 28, weight: .bold))
+                .foregroundStyle(PausePathPalette.teal)
+                .frame(width: 42, height: 42)
+        case .trailhead:
+            Image(systemName: "figure.walk")
+                .font(.system(size: 27, weight: .bold))
+                .foregroundStyle(PausePathPalette.teal)
+                .frame(width: 42, height: 42)
+        }
     }
 }
 
