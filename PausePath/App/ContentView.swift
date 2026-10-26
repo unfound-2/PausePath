@@ -175,6 +175,13 @@ struct ProfileSettingsView: View {
                         }
                     }
                     section("Product demo") {
+                        Button {
+                            NotificationCenter.default.post(name: .pausePathReplayOnboarding, object: nil)
+                        } label: {
+                            row("Replay onboarding", detail: "Take the guided sample walk again", icon: "arrow.counterclockwise")
+                        }
+                        .accessibilityHint("Replays setup without clearing your saved goals or permissions")
+                        Divider().padding(.leading, 60)
                         Toggle(isOn: $demoMode) {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Sample walking insights")

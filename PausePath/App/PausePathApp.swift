@@ -8,6 +8,7 @@ extension Notification.Name {
     static let pausePathShowProgress = Notification.Name("pausepath.showProgress")
     static let pausePathWalkRecorded = Notification.Name("pausepath.walkRecorded")
     static let pausePathJoinCommunity = Notification.Name("pausepath.joinCommunity")
+    static let pausePathReplayOnboarding = Notification.Name("pausepath.replayOnboarding")
 }
 
 final class PausePathNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
@@ -87,6 +88,7 @@ private struct LaunchExperienceView: View {
     @State private var trailProgress: CGFloat = 0
     @State private var showsPause = false
     @State private var exiting = false
+    @State private var isReplayingOnboarding = false
     @State private var health = HealthActivityStore()
     @State private var account = PausePathAccount.shared
     @AppStorage("pausepath.onboarding.permissions-gate.v2.complete") private var onboardingComplete = false
@@ -104,12 +106,14 @@ private struct LaunchExperienceView: View {
         ZStack {
             if finished || exiting {
                 Group {
-                    if onboardingComplete && personalizationComplete {
+                    if onboardingComplete && personalizationComplete && !isReplayingOnboarding {
                         ContentView(health: health)
                     } else {
-                        WelcomeSetupView(account: account, health: health, profileData: $profileData, preferencesData: $preferencesData) {
+                        WelcomeSetupView(account: account, health: health, profileData: $profileData, preferencesData: $preferencesData,
+                                         isReplay: isReplayingOnboarding, onExitReplay: { isReplayingOnboarding = false }) {
                             onboardingComplete = true
                             personalizationComplete = true
+                            isReplayingOnboarding = false
                         }
                     }
                 }
@@ -148,6 +152,12 @@ private struct LaunchExperienceView: View {
                   !code.isEmpty else { return }
             UserDefaults.standard.set(code, forKey: "pausepath.pendingCommunityInvite")
             NotificationCenter.default.post(name: .pausePathJoinCommunity, object: nil, userInfo: ["code": code])
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pausePathReplayOnboarding)) { _ in
+            guard onboardingComplete && personalizationComplete else { return }
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
+                isReplayingOnboarding = true
+            }
         }
         .task { await WalkLiveActivity.endOrphanedActivities(); await runIntro() }
     }
@@ -224,6 +234,8 @@ private struct WelcomeSetupView: View {
     let health: HealthActivityStore
     @Binding var profileData: Data
     @Binding var preferencesData: Data
+    let isReplay: Bool
+    let onExitReplay: () -> Void
     let onContinue: () -> Void
     @State private var locationDiscovery = PlaceDiscovery()
     @State private var profile = PausePathProfile()
@@ -448,11 +460,23 @@ private struct WelcomeSetupView: View {
             }
             .accessibilityLabel("Setup progress")
             .accessibilityValue("\(chapter), step \(step + 1) of \(stepCount)")
-            Text("\(step + 1)/\(stepCount)")
-                .font(.caption.weight(.bold)).monospacedDigit()
-                .foregroundStyle(isDarkInsight ? .white : PausePathPalette.teal)
-                .padding(.horizontal, 11).padding(.vertical, 8)
-                .background(isDarkInsight ? .white.opacity(0.13) : PausePathPalette.surface, in: Capsule())
+            if isReplay {
+                Button(action: onExitReplay) {
+                    Image(systemName: "xmark")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(isDarkInsight ? .white : PausePathPalette.teal)
+                        .frame(width: 42, height: 42)
+                        .background(isDarkInsight ? .white.opacity(0.13) : PausePathPalette.surface, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close onboarding replay")
+            } else {
+                Text("\(step + 1)/\(stepCount)")
+                    .font(.caption.weight(.bold)).monospacedDigit()
+                    .foregroundStyle(isDarkInsight ? .white : PausePathPalette.teal)
+                    .padding(.horizontal, 11).padding(.vertical, 8)
+                    .background(isDarkInsight ? .white.opacity(0.13) : PausePathPalette.surface, in: Capsule())
+            }
         }
         .frame(height: 54)
         .frame(maxWidth: 560)
