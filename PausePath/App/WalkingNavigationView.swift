@@ -39,6 +39,7 @@ struct WalkingNavigationView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    if navigator.state == .ready { routeReadyControls }
                     Map(position: $camera) {
                         if let coordinate = navigator.displayCoordinate {
                             Annotation("Your location", coordinate: coordinate.mapCoordinate) {
@@ -58,7 +59,10 @@ struct WalkingNavigationView: View {
                         } else {
                             ForEach(Array(plan.legs.dropLast().enumerated()), id: \.offset) { index, leg in
                                 if let coordinate = leg.polyline.walkingCoordinates.last?.mapCoordinate {
-                                    Marker("Stop \(index + 1)", systemImage: "mappin.and.ellipse", coordinate: coordinate).tint(.orange)
+                                    let stop = plan.stops.indices.contains(index) ? plan.stops[index] : nil
+                                    Marker(stop?.item.name ?? "Stop \(index + 1)",
+                                           systemImage: stop?.kind.symbol ?? "mappin.and.ellipse", coordinate: coordinate)
+                                        .tint(stop?.kind.mapColor ?? .orange)
                                 }
                             }
                         }
@@ -69,7 +73,9 @@ struct WalkingNavigationView: View {
                         if let end = plan.paths.last?.last {
                             Marker(endsNearStart ? "Finish" : "Destination", systemImage: "flag.fill", coordinate: end.mapCoordinate)
                         }
-                    }.mapControls { MapCompass(); MapScaleView() }.frame(height: 300)
+                    }.mapControls { MapCompass(); MapScaleView() }
+                        .frame(height: navigator.state == .ready ? 220 : 300)
+                        .clipShape(RoundedRectangle(cornerRadius: 22))
                     HStack {
                         Button("Recenter", systemImage: "location.fill") {
                             if let coordinate = navigator.displayCoordinate { camera = .region(MKCoordinateRegion(center: coordinate.mapCoordinate, latitudinalMeters: 500, longitudinalMeters: 500)) }
@@ -79,10 +85,10 @@ struct WalkingNavigationView: View {
                         Button("Whole route", systemImage: "map") { camera = .automatic }
                     }
                     if navigator.state == .ready {
-                        routeReadyControls
-                    } else {
-                        navigationStatus
+                        previewTimeline
+                        previewDetails
                     }
+                    else { navigationStatus }
                     HStack(spacing: 12) {
                         Button("Weather", systemImage: "cloud.sun") { showWeather = true }
                         Spacer()
@@ -120,7 +126,7 @@ struct WalkingNavigationView: View {
                     }
                 }.padding()
             }.pausePathSurface()
-        .navigationTitle(navigator.state == .ready ? "Route preview" : "Your walk").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(navigator.state == .ready ? "Your walking route" : "Your walk").navigationBarTitleDisplayMode(.inline)
                 .toolbar { Button(navigator.state == .ready || navigator.state == .arrived ? "Close" : "End walk") {
                     if navigator.state == .ready || navigator.state == .arrived { navigator.stop(); dismiss() }
                     else { showEndConfirmation = true }
@@ -133,6 +139,22 @@ struct WalkingNavigationView: View {
                 }
         }
         .interactiveDismissDisabled(navigator.state != .ready)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if navigator.state == .ready {
+                Button(action: startWalk) {
+                    Label("Start navigation", systemImage: "location.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 54)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(PausePathPalette.ink)
+                .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 18))
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 8)
+                .background(.regularMaterial)
+            }
+        }
         .sheet(isPresented: $showWeather) { weatherSheet }
         .sheet(isPresented: $showWalkSettings) { walkSettingsSheet }
         .onAppear { if navigator.plan == nil { navigator.prepare(walk) } }
@@ -216,30 +238,140 @@ struct WalkingNavigationView: View {
     }
     private var routeReadyControls: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("\(distanceUnit.distance(plan.distance)) · \(max(1, Int(plan.duration / 60))) min").font(.title2.bold())
-                Spacer()
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("YOUR WALKING ROUTE")
+                        .font(.caption2.weight(.heavy)).tracking(1.2)
+                        .foregroundStyle(PausePathPalette.teal)
+                    Text(plan.name)
+                        .font(.title2.bold()).foregroundStyle(PausePathPalette.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
                 Button(savedRoute ? "Saved" : "Save", systemImage: savedRoute ? "heart.fill" : "heart") {
                     if var record = SavedRouteStore.saveWalk(plan) { record.isFavorite = true; SavedRouteStore.update(record); savedRoute = true }
                     else { saveMessage = "Route library full. Remove a saved route in Profile." }
-                }.disabled(savedRoute).buttonStyle(.bordered)
+                }
+                .disabled(savedRoute)
+                .buttonStyle(.bordered)
             }
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 7), GridItem(.flexible(), spacing: 7), GridItem(.flexible(), spacing: 7)], spacing: 7) {
+                previewMetric("Distance", value: distanceUnit.distance(plan.distance), icon: "point.topleft.down.to.point.bottomright.curvepath")
+                previewMetric("Estimated time", value: "\(max(1, Int(ceil(plan.duration / 60)))) min", icon: "clock")
+                previewMetric("Planned pauses", value: "\(plan.stops.count)", icon: "bench")
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Label(restStatusTitle, systemImage: plan.restAssessment.status == .meets ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                Text("Longest gap: \(plan.restAssessment.longestGap.map { distanceUnit.nearby($0) } ?? "Unknown") · your maximum: \(distanceUnit.nearby(plan.preferences.maximumRestGapMeters))")
+                    .font(.caption)
+            }
+            .foregroundStyle(PausePathPalette.teal)
+            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+            .padding(.horizontal, 12)
+            .background(plan.restAssessment.status == .meets ? PausePathPalette.lime.opacity(0.24) : PausePathPalette.teal.opacity(0.08),
+                        in: RoundedRectangle(cornerRadius: 13))
+            Label("Terrain: unknown", systemImage: "mountain.2")
+                .font(.caption).foregroundStyle(.secondary)
             if !saveMessage.isEmpty { Text(saveMessage).font(.caption).foregroundStyle(.secondary) }
-            Label("Stop access and terrain may be unverified", systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
-            if plan.restAssessment.status == .exceeds {
-                Label("Rest gap exceeds your preference", systemImage: "exclamationmark.circle").font(.subheadline)
-            }
-            Button(action: startWalk) {
-                Label("Start navigation", systemImage: "location.fill")
-                    .font(.headline).frame(maxWidth: .infinity, minHeight: 52)
-                    .contentShape(Rectangle())
-            }.buttonStyle(.borderedProminent).tint(PausePathPalette.lime).foregroundStyle(PausePathPalette.ink)
-            DisclosureGroup("Route details") {
-                RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: plan.distance, durationSeconds: plan.duration))
-                RestGapStatusCard(assessment: plan.restAssessment, limit: plan.preferences.maximumRestGapMeters)
-                Text(plan.requirements).font(.caption).foregroundStyle(.secondary)
-            }.font(.subheadline)
         }
+        .padding(17)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(PausePathPalette.teal.opacity(0.10)))
+    }
+
+    private var restStatusTitle: String {
+        switch plan.restAssessment.status {
+        case .meets: "Mapped rest gap meets your preference"
+        case .unverified: "Gap fits · stop availability unverified"
+        case .exceeds: "Rest gap exceeds your preference"
+        case .unknown: "Rest gap could not be verified"
+        }
+    }
+
+    private func previewMetric(_ title: String, value: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                if icon == "bench" {
+                    BenchSymbol().fill(PausePathPalette.teal).frame(width: 14, height: 14)
+                } else {
+                    Image(systemName: icon)
+                }
+                Text(title)
+            }
+                .font(.caption2.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
+                .lineLimit(2)
+            Text(value).font(.subheadline.weight(.bold)).foregroundStyle(PausePathPalette.ink)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, minHeight: 57, alignment: .leading)
+        .padding(8)
+        .background(PausePathPalette.background, in: RoundedRectangle(cornerRadius: 13))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var previewTimeline: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Stops along the way")
+                .font(.headline).foregroundStyle(PausePathPalette.teal)
+                .padding(.bottom, 12)
+            timelineRow("Start", detail: "Your chosen starting point", icon: "location.fill", color: PausePathPalette.teal, isLast: false)
+            ForEach(Array(plan.stops.enumerated()), id: \.offset) { index, stop in
+                let distance = plan.legs.prefix(index + 1).reduce(0) { $0 + $1.distance }
+                let arrival = plan.preferences.departure.addingTimeInterval(distance / max(0.3, plan.preferences.speedMetersPerSecond) + Double(index) * 300)
+                timelineRow(stop.item.name ?? stop.kind.chipTitle,
+                            detail: "\(distanceUnit.nearby(distance)) from start · \(stop.shared?.availabilityDescription(at: arrival) ?? "Hours at arrival unknown")",
+                            note: "Last community check: \(stop.shared?.verificationDescription ?? "Unknown")",
+                            icon: stop.kind == .bench ? "bench" : stop.kind.symbol, color: stop.kind.mapColor, isLast: false)
+            }
+            timelineRow("Finish", detail: plan.stops.isEmpty ? "Direct route · no planned pauses" : "After \(plan.stops.count) planned pauses",
+                        icon: "flag.fill", color: PausePathPalette.teal, isLast: true)
+        }
+        .padding(17)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 24))
+    }
+
+    private var previewDetails: some View {
+        DisclosureGroup("Terrain & route details") {
+            Text("Terrain, surface, and stairs are unknown unless route data provides them.")
+                .font(.caption).foregroundStyle(.secondary)
+            RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: plan.distance, durationSeconds: plan.duration))
+            RestGapStatusCard(assessment: plan.restAssessment, limit: plan.preferences.maximumRestGapMeters)
+            Text(plan.requirements).font(.caption).foregroundStyle(.secondary)
+        }
+        .font(.subheadline)
+        .padding(17)
+        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 20))
+    }
+
+    private func timelineRow(_ title: String, detail: String, note: String? = nil, icon: String, color: Color, isLast: Bool) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(spacing: 0) {
+                Group {
+                    if icon == "bench" {
+                        BenchSymbol().fill(.white).frame(width: 18, height: 18)
+                    } else {
+                        Image(systemName: icon).font(.caption.weight(.bold)).foregroundStyle(.white)
+                    }
+                }
+                .frame(width: 34, height: 34).background(color, in: Circle())
+                if !isLast { Rectangle().fill(PausePathPalette.teal.opacity(0.18)).frame(width: 2, height: 38) }
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(PausePathPalette.ink)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let note {
+                    Text(note).font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.top, 2)
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
     }
     private var weatherSheet: some View {
         NavigationStack {

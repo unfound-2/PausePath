@@ -365,6 +365,7 @@ struct ExploreRoutePlannerView: View {
     @ViewBuilder private func routeRow(_ option: WalkingRouteOption) -> some View {
         let isSelected = option.id == discovery.selectedRouteOptionID
         let missing = mandatoryKinds.subtracting(Set(option.stops.map(\.kind))).map(\.chipTitle).sorted()
+        let restAssessment = option.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops)
         VStack(alignment: .leading, spacing: 12) {
             Button { discovery.selectRouteOption(option.id) } label: {
                 VStack(alignment: .leading, spacing: 12) {
@@ -385,6 +386,10 @@ struct ExploreRoutePlannerView: View {
                     routeMetric("Est. time", value: "\(max(1, Int(ceil(option.distance / max(0.3, routePreferences.speedMetersPerSecond) / 60)))) min")
                     routeMetric("Planned stops", value: "\(option.stops.count)")
                 }
+                Label(restBadgeTitle(restAssessment.status),
+                      systemImage: restAssessment.status == .meets ? "checkmark.circle.fill" : "exclamationmark.circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(PausePathPalette.teal)
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityAddTraits(isSelected ? [.isSelected] : [])
                 .accessibilityHint("Preview this route on the map")
@@ -393,17 +398,13 @@ struct ExploreRoutePlannerView: View {
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             }
             if isSelected {
-                Label("Access & terrain unverified", systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
-                if option.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops).status == .exceeds {
-                    Label("Rest gap exceeds your preference", systemImage: "exclamationmark.circle").font(.caption)
-                }
+                RestGapStatusCard(assessment: restAssessment, limit: requestedRestGap)
+                Label("Access & terrain may be unverified", systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Weather", systemImage: "cloud.sun") { showWeather = true }.font(.subheadline)
                     Spacer()
                 }.frame(minHeight: 44)
                 DisclosureGroup("Route details") {
-                    routeMetric("Longest bench gap", value: longestBenchGap(option))
-                    RestGapStatusCard(assessment: option.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops), limit: requestedRestGap)
                     RouteDifficultyPreview(input: RouteDifficultyInput(distanceMeters: option.distance, durationSeconds: option.duration), compact: true)
                     if !option.stops.isEmpty {
                         Text(option.stops.map { $0.item.name ?? $0.kind.rawValue }.joined(separator: " → ")).font(.caption)
@@ -425,16 +426,20 @@ struct ExploreRoutePlannerView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 18))
         .overlay {
             RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(isSelected ? Color.accentColor : Color.primary.opacity(0.1), lineWidth: isSelected ? 2 : 1)
+                .strokeBorder(isSelected ? PausePathPalette.teal : PausePathPalette.teal.opacity(0.10), lineWidth: isSelected ? 2 : 1)
         }
     }
 
-    private func longestBenchGap(_ option: WalkingRouteOption) -> String {
-        guard let meters = option.restAssessment(routePreferences, allowUnknown: allowUnknownRestStops).longestGap else { return "Unknown" }
-        return distanceUnit.nearby(meters)
+    private func restBadgeTitle(_ status: RestGapAssessment.Status) -> String {
+        switch status {
+        case .meets: "Mapped rest gap meets your preference"
+        case .unverified: "Rest gap fits · stops unverified"
+        case .exceeds: "Rest gap exceeds your preference"
+        case .unknown: "Rest gap unknown"
+        }
     }
 
     private func routeMetric(_ title: String, value: String) -> some View {
@@ -444,7 +449,7 @@ struct ExploreRoutePlannerView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
-        .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
+        .background(PausePathPalette.background, in: RoundedRectangle(cornerRadius: 10))
         .accessibilityElement(children: .combine)
     }
 
