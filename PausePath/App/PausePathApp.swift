@@ -233,6 +233,9 @@ private struct WelcomeSetupView: View {
     @State private var selectedSampleStop: SampleStop = .bench
     @State private var helpExpanded = false
     @State private var outlookRevealed = false
+    @State private var introRouteDrawn = false
+    @State private var demoRouteDrawn = false
+    @State private var pinPulse = false
     @State private var demoPlayer = AVPlayer()
     @State private var healthRequested = false
     @State private var notificationEnabled = false
@@ -319,8 +322,14 @@ private struct WelcomeSetupView: View {
         switch step {
         case 0...3: "Your starting point"
         case 4...6: "Your plan"
-        case 10: "See PausePath in action"
-        default: "Your walking baseline"
+        default: "See PausePath in action"
+        }
+    }
+    private var chapterNumber: Int {
+        switch step {
+        case 0...3: 1
+        case 4...6: 2
+        default: 3
         }
     }
 
@@ -394,7 +403,7 @@ private struct WelcomeSetupView: View {
             .opacity(step == 0 ? 0.35 : 1)
             .accessibilityLabel("Back")
             VStack(alignment: .leading, spacing: 7) {
-                Text(chapter.uppercased())
+                Text("CHAPTER 0\(chapterNumber) / 03  ·  \(chapter.uppercased())")
                     .font(.system(size: 10, weight: .heavy, design: .rounded))
                     .tracking(1)
                     .foregroundStyle(isDarkInsight ? PausePathPalette.lime : PausePathPalette.teal)
@@ -457,33 +466,34 @@ private struct WelcomeSetupView: View {
     private var title: String {
         switch step {
         case 0: "PausePath"
-        case 1: "What matters on your walk?"
-        case 2: "How often do you walk now?"
-        case 3: "Your starting point."
-        case 4: "How many walks would you like?"
-        case 5: "Anything else to track?"
-        case 6: "Your next four weeks."
-        case 7: "See a walk come together."
-        case 8: "Tap a stop on the map."
+        case 1: "What brings you outside?"
+        case 2: "What does a week look like?"
+        case 3: "This is where you begin."
+        case 4: "Choose your walking rhythm."
+        case 5: "What else matters to you?"
+        case 6: "See the plan take shape."
+        case 7: "Watch a walk unfold."
+        case 8: "Find a place to pause."
         case 9: "What should we call you?"
-        case 10: "Connect only what you want."
-        default: "A baseline first. Real progress over time."
+        case 10: "Make it yours."
+        default: "Now the real story begins."
         }
     }
 
     private var subtitle: String {
         switch step {
-        case 0: "Plan routes with useful places to pause."
-        case 1: "We’ll tailor your first route suggestions."
-        case 2: "Choose a typical week, or skip the number."
-        case 3: "A picture of the answer you gave."
-        case 4: "Pick a flexible goal you can change later."
-        case 5: "Choose a time goal and optional energy goal."
-        case 6: "See your starting rhythm beside your goal."
-        case 7: "Watch a sample route from plan to next pause."
-        case 8: "Explore a sample walk and its stops."
+        case 0: "A route can feel different when you know where you can stop."
+        case 1: "Your answer shapes the routes we suggest."
+        case 2: "Tell us about a typical week, or leave it open."
+        case 3: "Just your answer, shown back to you."
+        case 4: "Set a flexible goal for the weeks ahead."
+        case 5: "Add a time goal or an optional Health energy goal."
+        case 6: "Your answers become a simple four-week view."
+        case 7: "A sample shows how a route becomes a guided walk."
+        case 8: "Tap a pin and watch the next pause change."
         case 9: "Use a name you’ll recognize."
-        default: "Choose any connections you want."
+        case 10: "Choose the connections you want to use."
+        default: "Recorded activity can tell your story over time."
         }
     }
 
@@ -545,28 +555,44 @@ private struct WelcomeSetupView: View {
                 GeometryReader { geometry in
                     let width = geometry.size.width
                     let height = geometry.size.height
-                    Path { path in
-                        path.move(to: CGPoint(x: width * 0.16, y: height * 0.78))
-                        path.addCurve(to: CGPoint(x: width * 0.78, y: height * 0.24),
-                            control1: CGPoint(x: width * 0.85, y: height * 0.95),
-                            control2: CGPoint(x: width * 0.18, y: height * 0.10))
-                    }
-                    .stroke(PausePathPalette.lime, style: StrokeStyle(lineWidth: 7, lineCap: .round, dash: [10, 9]))
+                    OnboardingRouteLine(layout: .intro)
+                        .trim(from: 0, to: introRouteDrawn ? 1 : 0)
+                        .stroke(PausePathPalette.lime, style: StrokeStyle(lineWidth: 7, lineCap: .round, dash: [10, 9]))
                     Image(systemName: "figure.walk")
                         .font(.title2.weight(.bold)).foregroundStyle(PausePathPalette.ink)
                         .frame(width: 54, height: 54)
                         .background(PausePathPalette.lime, in: Circle())
                         .position(x: width * 0.16, y: height * 0.78)
-                    BenchSymbol()
-                        .fill(PausePathPalette.teal)
-                        .frame(width: 30, height: 30)
-                        .frame(width: 54, height: 54)
-                        .background(.white, in: Circle())
-                        .position(x: width * 0.78, y: height * 0.24)
+                    ZStack {
+                        Circle().fill(PausePathPalette.lime.opacity(0.19))
+                            .frame(width: pinPulse ? 83 : 61, height: pinPulse ? 83 : 61)
+                        BenchSymbol().fill(PausePathPalette.teal)
+                            .frame(width: 30, height: 30)
+                            .frame(width: 54, height: 54)
+                            .background(.white, in: Circle())
+                    }
+                    .position(x: width * 0.78, y: height * 0.24)
                 }.padding(24)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("A WALK WITH ROOM TO PAUSE")
+                        .font(.caption2.weight(.heavy)).tracking(1.2)
+                        .foregroundStyle(PausePathPalette.lime)
+                    Text("Your path, your pace, your next stop.")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(20)
             }
             .frame(height: 250)
             .accessibilityLabel("Illustration of a walking route with a place to rest")
+            .onAppear {
+                introRouteDrawn = reduceMotion
+                pinPulse = false
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 1.25)) { introRouteDrawn = true }
+                withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) { pinPulse = true }
+            }
             HStack(spacing: 8) {
                 featurePill("Real walking routes", icon: "map")
                 featurePill("Places to pause", icon: "bench")
@@ -670,6 +696,21 @@ private struct WelcomeSetupView: View {
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(currentFrequency == .unsure ? [.isSelected] : [])
             }
+            HStack(spacing: 6) {
+                ForEach(0..<7, id: \.self) { day in
+                    Capsule()
+                        .fill(day < max(0, currentFrequency.rawValue) ? PausePathPalette.lime : PausePathPalette.teal.opacity(0.10))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 12)
+                }
+            }
+            .padding(.horizontal, 16)
+            .accessibilityHidden(true)
+            Text(currentFrequency.weeklyText)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(PausePathPalette.teal)
+                .contentTransition(.opacity)
+                .frame(maxWidth: .infinity)
         }
     }
 
@@ -695,6 +736,10 @@ private struct WelcomeSetupView: View {
             Text("YOUR FOCUS  ·  \(displayTitle(for: profile.goal).uppercased())")
                 .font(.caption.weight(.bold)).tracking(0.6)
                 .foregroundStyle(.white.opacity(0.8))
+            Text("Next, you’ll choose where you want to go from here.")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.8))
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 24)
@@ -915,26 +960,11 @@ private struct WelcomeSetupView: View {
                         }
                     }
                     .stroke(PausePathPalette.teal.opacity(0.09), lineWidth: 1)
-                    Path { path in
-                        path.move(to: CGPoint(x: width * 0.08, y: height * 0.86))
-                        path.addCurve(to: CGPoint(x: width * 0.44, y: height * 0.42),
-                                      control1: CGPoint(x: width * 0.48, y: height * 0.85),
-                                      control2: CGPoint(x: width * 0.18, y: height * 0.36))
-                        path.addCurve(to: CGPoint(x: width * 0.9, y: height * 0.18),
-                                      control1: CGPoint(x: width * 0.84, y: height * 0.48),
-                                      control2: CGPoint(x: width * 0.56, y: height * 0.13))
-                    }
-                    .stroke(.white, style: StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round))
-                    Path { path in
-                        path.move(to: CGPoint(x: width * 0.08, y: height * 0.86))
-                        path.addCurve(to: CGPoint(x: width * 0.44, y: height * 0.42),
-                                      control1: CGPoint(x: width * 0.48, y: height * 0.85),
-                                      control2: CGPoint(x: width * 0.18, y: height * 0.36))
-                        path.addCurve(to: CGPoint(x: width * 0.9, y: height * 0.18),
-                                      control1: CGPoint(x: width * 0.84, y: height * 0.48),
-                                      control2: CGPoint(x: width * 0.56, y: height * 0.13))
-                    }
-                    .stroke(PausePathPalette.teal, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                    OnboardingRouteLine(layout: .demo)
+                        .stroke(.white, style: StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round))
+                    OnboardingRouteLine(layout: .demo)
+                        .trim(from: 0, to: demoRouteDrawn ? 1 : 0)
+                        .stroke(PausePathPalette.teal, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
                     Text("DEMO MAP · NOT LIVE")
                         .font(.caption2.weight(.heavy)).tracking(1)
                         .foregroundStyle(PausePathPalette.teal)
@@ -948,6 +978,10 @@ private struct WelcomeSetupView: View {
                             }
                         } label: {
                             ZStack {
+                                if selectedSampleStop == stop && !reduceMotion {
+                                    Circle().fill(stop.mapColor.opacity(0.22))
+                                        .frame(width: pinPulse ? 74 : 56, height: pinPulse ? 74 : 56)
+                                }
                                 Circle().fill(.white).frame(width: selectedSampleStop == stop ? 58 : 50)
                                     .shadow(color: .black.opacity(0.17), radius: 7, y: 3)
                                 Circle().fill(stop.mapColor).frame(width: selectedSampleStop == stop ? 48 : 42)
@@ -970,6 +1004,13 @@ private struct WelcomeSetupView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 28))
             }
             .frame(height: 270)
+            .onAppear {
+                demoRouteDrawn = reduceMotion
+                pinPulse = false
+                guard !reduceMotion else { return }
+                withAnimation(.easeOut(duration: 1.1)) { demoRouteDrawn = true }
+                withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) { pinPulse = true }
+            }
             VStack(alignment: .leading, spacing: 9) {
                 Capsule().fill(PausePathPalette.teal.opacity(0.18))
                     .frame(width: 38, height: 4).frame(maxWidth: .infinity)
@@ -985,6 +1026,7 @@ private struct WelcomeSetupView: View {
                 Text(selectedSampleStop.detail)
                     .font(.subheadline).foregroundStyle(PausePathPalette.ink.opacity(0.7))
                     .fixedSize(horizontal: false, vertical: true)
+                    .contentTransition(.opacity)
             }
             .padding(.horizontal, 19).padding(.vertical, 15)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1301,6 +1343,33 @@ private struct WelcomeSetupView: View {
     }
     private var locationNeedsSettings: Bool {
         locationDiscovery.authorizationStatus == .denied || locationDiscovery.authorizationStatus == .restricted
+    }
+}
+
+private struct OnboardingRouteLine: Shape {
+    enum Layout { case intro, demo }
+    let layout: Layout
+
+    func path(in rect: CGRect) -> Path {
+        let width = rect.width
+        let height = rect.height
+        return Path { path in
+            switch layout {
+            case .intro:
+                path.move(to: CGPoint(x: width * 0.16, y: height * 0.78))
+                path.addCurve(to: CGPoint(x: width * 0.78, y: height * 0.24),
+                              control1: CGPoint(x: width * 0.85, y: height * 0.95),
+                              control2: CGPoint(x: width * 0.18, y: height * 0.10))
+            case .demo:
+                path.move(to: CGPoint(x: width * 0.08, y: height * 0.86))
+                path.addCurve(to: CGPoint(x: width * 0.44, y: height * 0.42),
+                              control1: CGPoint(x: width * 0.48, y: height * 0.85),
+                              control2: CGPoint(x: width * 0.18, y: height * 0.36))
+                path.addCurve(to: CGPoint(x: width * 0.9, y: height * 0.18),
+                              control1: CGPoint(x: width * 0.84, y: height * 0.48),
+                              control2: CGPoint(x: width * 0.56, y: height * 0.13))
+            }
+        }
     }
 }
 

@@ -49,6 +49,15 @@ final class PathMilestoneTests: XCTestCase {
         let milestones = PathMilestones(walks: [invalid, missingTime, walk(3, meters: 0), walk(4, completed: false)])
         XCTAssertEqual(milestones.walks.count, 0)
     }
+    func testTrailKeeperCountsJourneysWhileGoingTheDistanceRequiresOneLongJourney() {
+        let frequentShortWalks = PathMilestones(walks: (1...25).map { walk($0, meters: 1000) })
+        XCTAssertTrue(frequentShortWalks.badges.first { $0.id == "walks-25" }!.earned)
+        XCTAssertFalse(frequentShortWalks.badges.first { $0.id == "longest-5" }!.earned)
+
+        let oneLongWalk = PathMilestones(walks: [walk(1, meters: 5000)])
+        XCTAssertFalse(oneLongWalk.badges.first { $0.id == "walks-25" }!.earned)
+        XCTAssertTrue(oneLongWalk.badges.first { $0.id == "longest-5" }!.earned)
+    }
     func testTrendUsesEqualCompletedDaysExcludingTodayAndOlderRecords() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

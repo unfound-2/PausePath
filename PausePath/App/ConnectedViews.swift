@@ -117,6 +117,13 @@ struct CommunityChallengesView: View {
     @State private var account = PausePathAccount.shared
     @State private var social = SocialActivityStore.shared
     @State private var communities: [WalkingCommunity] = []
+    @State private var feed: [CommunityFeedItem] = []
+    @State private var feedLoading = false
+    @State private var feedLoadToken = UUID()
+    @State private var feedMessage: String?
+    @State private var lastFeedRefresh: Date?
+    @State private var reactingPostIDs = Set<UUID>()
+    @State private var showingPostComposer = false
     @State private var communitySearch = ""
     @State private var lastCommunityRefresh: Date?
     @State private var refreshAgain = false
@@ -138,46 +145,96 @@ struct CommunityChallengesView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Good company. New paths.").font(.system(.title2, design: .rounded).bold()).foregroundStyle(PausePathPalette.teal)
-                        Text("Your people, plans, and little wins.").font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    connectionShortcuts
+                LazyVStack(alignment: .leading, spacing: 22) {
+                    groupsSection
                     if let membershipConfirmation {
-                        HStack {
-                            Label(membershipConfirmation, systemImage: "checkmark.circle.fill").font(.subheadline).foregroundStyle(PausePathPalette.teal)
+                        HStack(spacing: 10) {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text(membershipConfirmation).font(.subheadline.weight(.semibold))
                             Spacer()
-                            Button { self.membershipConfirmation = nil } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }.accessibilityLabel("Dismiss confirmation")
-                        }.padding(12).background(PausePathPalette.lime.opacity(0.15), in: RoundedRectangle(cornerRadius: 16))
+                            Button { self.membershipConfirmation = nil } label: {
+                                Image(systemName: "xmark").frame(minWidth: 44, minHeight: 44)
+                            }.accessibilityLabel("Dismiss confirmation")
+                        }
+                        .foregroundStyle(PausePathPalette.teal)
+                        .padding(.leading, 16)
+                        .background(PausePathPalette.lime.opacity(0.17), in: RoundedRectangle(cornerRadius: 18))
                     }
-                    groupList
                     if account.isSignedIn && !communities.isEmpty {
-                        DisclosureGroup("Progress sharing") {
-                            Toggle("Share my goal totals", isOn: $shareProgress).tint(PausePathPalette.teal)
-                            Text("Only goal totals are shared. Routes, location, and Health data stay private.").font(.caption).foregroundStyle(.secondary)
-                        }.font(.subheadline).padding(16).background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 18))
+                        sharePrompt
+                    }
+                    socialShortcuts
+                    if account.isSignedIn && !communities.isEmpty {
+                        feedSection
+                    }
+                    if account.isSignedIn {
+                        if !upcomingGroups.isEmpty { upcomingSection }
+                        if !social.notifications.isEmpty { activitySection }
+                    }
+                    if account.isSignedIn && !communities.isEmpty {
+                        sharingPreferences
                     }
                     if !message.isEmpty {
-                        Label(message, systemImage: "info.circle").font(.callout).foregroundStyle(.secondary)
-                        Button("Refresh groups") { Task { await refresh(force: true) } }.disabled(busy)
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label(message, systemImage: "exclamationmark.circle")
+                            Button("Refresh groups") { Task { await refresh(force: true) } }.disabled(busy)
+                        }
+                        .font(.callout)
+                        .padding(16)
+                        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 18))
                     }
-                }.padding(20).frame(maxWidth: 680).frame(maxWidth: .infinity)
-            }.pausePathSurface().navigationTitle("Community")
+                }
+                .frame(maxWidth: 680)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+                .padding(.bottom, 32)
+            }
+            .pausePathSurface()
+            .navigationTitle("Community")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("Create group", systemImage: "plus.circle") {
+                            communityComposerRoute = CommunityComposerRoute(joining: false, inviteCode: "")
+                        }
+                        Button("Join by code", systemImage: "person.badge.plus") {
+                            communityComposerRoute = CommunityComposerRoute(joining: true, inviteCode: "")
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(PausePathPalette.teal)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .background(PausePathPalette.lime, in: Circle())
+                    }
+                    .accessibilityLabel("Add a group")
+                    .accessibilityHint("Create a group or join with an invite code")
+                }
+            }
             .task {
                 if UserDefaults.standard.string(forKey: "pausepath.shareProgressOwner") != account.userID { shareProgress = false }
                 if !pendingInviteCode.isEmpty { communityComposerRoute = CommunityComposerRoute(joining: true, inviteCode: pendingInviteCode) }
+                Task { await social.refresh() }
                 await refresh()
             }
-            .refreshable { await refresh(force: true) }
+            .refreshable {
+                async let groups: Void = refresh(force: true)
+                async let activity: Void = social.refresh()
+                _ = await (groups, activity)
+            }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { Task { await refresh() } }
+                if phase == .active {
+                    Task { await social.refresh() }
+                    Task { await refresh() }
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .pausePathWalkRecorded)) { _ in
                 Task { await refresh(force: true) }
             }
             .onChange(of: account.userID) { _, userID in
                 communityRevision = UUID(); communities = []
+                feedLoadToken = UUID(); feed = []; feedMessage = nil; feedLoading = false; lastFeedRefresh = nil
                 communityLoadMessage = nil; message = ""; membershipConfirmation = nil; communitySearch = ""; lastCommunityRefresh = nil
                 if userID != nil {
                     if UserDefaults.standard.string(forKey: "pausepath.shareProgressOwner") != userID { shareProgress = false }
@@ -205,103 +262,479 @@ struct CommunityChallengesView: View {
             }) { route in
                 CommunityJoinSheet(account: account, onCreate: createCommunity, onJoin: joinCommunity, initialUsername: profile.username ?? "", initialInviteCode: route.inviteCode, startsWithJoin: route.joining)
             }
+            .sheet(isPresented: $showingPostComposer, onDismiss: {
+                guard let owner = account.userID else { return }
+                Task { await loadFeed(groups: communities, owner: owner, revision: communityRevision) }
+            }) {
+                CommunityQuickPostSheet(communities: communities)
+            }
 
         }
     }
 
-    private var connectionShortcuts: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { connectionLinks }
-            VStack(spacing: 12) { connectionLinks }
-        }
-    }
-    @ViewBuilder private var connectionLinks: some View {
-        NavigationLink { FriendsSettingsView() } label: {
-            connectionTile("Friends", subtitle: "Find & connect", symbol: "person.2", badge: nil)
-        }.buttonStyle(.plain)
-        NavigationLink { SocialInboxView() } label: {
-            connectionTile("Inbox", subtitle: "Requests & updates", symbol: "tray", badge: social.unread > 0 ? social.unread : nil)
-        }.buttonStyle(.plain)
-    }
-    private func connectionTile(_ title: String, subtitle: String, symbol: String, badge: Int?) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Image(systemName: symbol).font(.title3).foregroundStyle(PausePathPalette.teal)
-                Spacer(minLength: 12)
-                if let badge { Text("\(badge)").font(.caption.bold()).padding(.horizontal, 7).padding(.vertical, 3).background(PausePathPalette.lime, in: Capsule()).foregroundStyle(PausePathPalette.ink) }
-                else { Image(systemName: "chevron.right").font(.caption2.bold()).foregroundStyle(.secondary) }
+    private var groupsSection: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Your groups").font(.title2.bold()).foregroundStyle(PausePathPalette.teal)
+                Spacer()
+                if busy { ProgressView().controlSize(.small) }
+                else if let lastCommunityRefresh {
+                    Text("Updated \(lastCommunityRefresh, style: .relative)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.headline)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
-            }
-        }.padding(16).frame(maxWidth: .infinity, minHeight: 100, alignment: .leading)
-            .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).stroke(PausePathPalette.teal.opacity(0.1), lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 20))
-    }
-    private var groupList: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Your groups").font(.title3.bold())
-            HStack(spacing: 10) {
-                Button { communityComposerRoute = CommunityComposerRoute(joining: false, inviteCode: "") } label: {
-                    Label("Create group", systemImage: "plus").frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.borderedProminent).tint(PausePathPalette.teal)
-                Button { communityComposerRoute = CommunityComposerRoute(joining: true, inviteCode: "") } label: {
-                    Label("Join by code", systemImage: "ticket").frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.bordered).tint(PausePathPalette.teal)
-            }
-            if account.isSignedIn {
-                if communities.count > 1 {
-                    HStack {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Search your groups", text: $communitySearch).autocorrectionDisabled()
-                    }.padding(12).background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 12))
-                }
-                if let communityLoadMessage {
-                    Label(communityLoadMessage, systemImage: "wifi.exclamationmark").font(.callout).foregroundStyle(.secondary)
-                    Button("Retry") { Task { await refresh(force: true) } }.disabled(busy)
-                }
-                if busy && lastCommunityRefresh == nil { ProgressView("Loading groups…").frame(maxWidth: .infinity).padding() }
-                if communities.isEmpty && !busy && lastCommunityRefresh != nil {
-                    ContentUnavailableView("Room for your walking crew", systemImage: "person.3", description: Text("Create a group or enter a friend's invite code to make plans together."))
-                        .padding(.vertical, 8)
-                } else if !communitySearch.isEmpty && filteredCommunities.isEmpty {
-                    Button("No matching groups. Clear search") { communitySearch = "" }.font(.callout)
-                }
-                ForEach(filteredCommunities) { community in
-                    NavigationLink { CommunityHubView(community: community) } label: { groupRow(community) }.buttonStyle(.plain)
-                }
+            if !account.isSignedIn {
+                Label("Sign in to see your groups. Tap + to create or join one.", systemImage: "person.3")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(18)
+                    .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 20))
             } else {
-                Text("Sign in when you create or join a group.").font(.callout).foregroundStyle(.secondary)
+                if let communityLoadMessage {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(communityLoadMessage, systemImage: "arrow.clockwise.circle")
+                        Button("Retry groups") { Task { await refresh(force: true) } }.fontWeight(.semibold)
+                    }
+                    .font(.callout).padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 18))
+                } else if busy && lastCommunityRefresh == nil {
+                    ProgressView("Loading groups…")
+                        .frame(maxWidth: .infinity, minHeight: 100)
+                } else if communities.isEmpty {
+                    Label("No groups yet. Tap + to create one or join with a code.", systemImage: "person.3")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(18)
+                        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 20))
+                } else {
+                    if communities.count > 4 || !communitySearch.isEmpty {
+                        TextField("Search your groups", text: $communitySearch)
+                            .autocorrectionDisabled()
+                            .padding(.horizontal, 15).padding(.vertical, 12)
+                            .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 15))
+                    }
+                    if filteredCommunities.isEmpty {
+                        Button("No groups match. Clear search") { communitySearch = "" }
+                            .font(.subheadline).frame(minHeight: 44)
+                    } else if typeSize.isAccessibilitySize {
+                        ForEach(filteredCommunities) { community in groupCard(community).frame(maxWidth: .infinity) }
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(alignment: .top, spacing: 12) {
+                                ForEach(filteredCommunities) { community in
+                                    groupCard(community).frame(width: 270)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                        .contentMargins(.trailing, 18)
+                    }
+                }
             }
         }
     }
-    private func groupRow(_ community: WalkingCommunity) -> some View {
-        HStack(spacing: 14) {
-            Text(String(community.name.prefix(1)).uppercased()).font(.system(.title3, design: .rounded).bold())
-                .foregroundStyle(PausePathPalette.teal).frame(width: 48, height: 48)
-                .background(PausePathPalette.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 15)).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(community.name).font(.headline)
-                Text("\(community.member_count) members").font(.caption).foregroundStyle(.secondary)
-                if let walk = community.next_walk {
-                    Label(walk.title + " · " + CommunityHubView.dateLabel(walk.starts_at), systemImage: "calendar")
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                } else if let goals = community.active_goal_count, goals > 0 {
-                    Text("\(goals) active goals").font(.caption).foregroundStyle(.secondary)
+
+    private func groupCard(_ community: WalkingCommunity) -> some View {
+        let deepTeal = Color(red: 0.025, green: 0.23, blue: 0.24)
+        return VStack(alignment: .leading, spacing: 15) {
+            NavigationLink { CommunityHubView(community: community) } label: {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top) {
+                        Text(String(community.name.prefix(1)).uppercased())
+                            .font(.title3.bold())
+                            .foregroundStyle(deepTeal)
+                            .frame(width: 48, height: 48)
+                            .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 16))
+                            .accessibilityHidden(true)
+                        Spacer()
+                        Image(systemName: "arrow.up.right")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .frame(width: 36, height: 36)
+                            .background(.white.opacity(0.13), in: Circle())
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(community.name)
+                            .font(.system(.title3, design: .rounded).bold())
+                            .foregroundStyle(.white).lineLimit(2)
+                        Text("\(community.member_count) members")
+                            .font(.caption).foregroundStyle(.white.opacity(0.72))
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            if let walk = community.next_walk {
+                Label(walk.title, systemImage: "calendar")
+                    .font(.caption.weight(.medium)).foregroundStyle(PausePathPalette.lime).lineLimit(1)
+            } else {
+                Text("No walk planned yet").font(.caption).foregroundStyle(.white.opacity(0.7))
+            }
+            HStack(spacing: 8) {
+                NavigationLink { CommunityHubView(community: community, initialSection: "Walks") } label: {
+                    Label("Walks", systemImage: "figure.walk").frame(maxWidth: .infinity, minHeight: 44)
+                }
+                NavigationLink { CommunityHubView(community: community, initialSection: "Goals") } label: {
+                    Label(community.active_goal_count.map { "Goals \($0)" } ?? "Goals", systemImage: "flag")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            .background(.white.opacity(0.13), in: RoundedRectangle(cornerRadius: 13))
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 24).fill(deepTeal.gradient)
+                .overlay {
+                    AdventureContours().stroke(.white.opacity(0.07), lineWidth: 1)
+                        .clipShape(RoundedRectangle(cornerRadius: 24))
+                        .allowsHitTesting(false).accessibilityHidden(true)
+                }
+        }
+    }
+
+    private var socialShortcuts: some View {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 12))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
+            NavigationLink { FriendsSettingsView() } label: {
+                socialShortcut("Find friends", icon: "person.2.fill", detail: "Search people")
+            }
+            NavigationLink { SocialInboxView() } label: {
+                socialShortcut("Inbox", icon: "tray.fill", detail: social.unread > 0 ? "\(social.unread) new" : "Updates & invites")
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func socialShortcut(_ title: String, icon: String, detail: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.headline).foregroundStyle(PausePathPalette.teal)
+                .frame(width: 38, height: 38)
+                .background(PausePathPalette.lime.opacity(0.24), in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
+                Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.secondary)
-        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
-            .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).stroke(PausePathPalette.teal.opacity(0.1), lineWidth: 1))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 64)
+        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 18))
     }
+
+    private var sharePrompt: some View {
+        Button { showingPostComposer = true } label: {
+            HStack(spacing: 12) {
+                Text(String((profile.username ?? "P").prefix(1)).uppercased())
+                    .font(.headline).foregroundStyle(PausePathPalette.lime)
+                    .frame(width: 48, height: 48)
+                    .background(PausePathPalette.teal, in: Circle())
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Have something to share?")
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
+                    Text("Post an update to your group")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "square.and.pencil")
+                    .font(.headline).foregroundStyle(PausePathPalette.teal)
+                    .frame(width: 38, height: 38)
+                    .background(PausePathPalette.lime.opacity(0.32), in: Circle())
+            }
+            .padding(16)
+            .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 22))
+            .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(PausePathPalette.teal.opacity(0.10)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Write a post for one of your groups")
+    }
+
+    private var feedSection: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack {
+                Text("Group feed").font(.title2.bold()).foregroundStyle(PausePathPalette.teal)
+                Spacer()
+                if feedLoading { ProgressView().controlSize(.small) }
+                else if let lastFeedRefresh {
+                    Text("Updated \(lastFeedRefresh, style: .relative)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if let feedMessage {
+                HStack {
+                    Text(feedMessage).font(.callout).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Retry") {
+                        guard let owner = account.userID else { return }
+                        Task { await loadFeed(groups: communities, owner: owner, revision: communityRevision) }
+                    }
+                }
+            }
+            if feed.isEmpty && feedLoading {
+                ProgressView("Loading updates…")
+                    .frame(maxWidth: .infinity, minHeight: 100)
+            } else if feed.isEmpty && feedMessage != nil {
+                ContentUnavailableView("Updates unavailable", systemImage: "wifi.exclamationmark", description: Text("Pull down or tap Retry to load group posts."))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 22))
+            } else if feed.isEmpty {
+                VStack(alignment: .leading, spacing: 13) {
+                    HStack(spacing: -10) {
+                        Image(systemName: "text.bubble.fill")
+                            .foregroundStyle(PausePathPalette.lime)
+                            .frame(width: 44, height: 44)
+                            .background(PausePathPalette.teal, in: Circle())
+                        Image(systemName: "heart.fill")
+                            .foregroundStyle(PausePathPalette.teal)
+                            .frame(width: 44, height: 44)
+                            .background(PausePathPalette.lime, in: Circle())
+                    }
+                    Text("Start the conversation")
+                        .font(.headline).foregroundStyle(PausePathPalette.teal)
+                    Text("There are no group posts yet. Share a walk, a small win, or a question.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    Button("Write the first post", systemImage: "square.and.pencil") {
+                        showingPostComposer = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(PausePathPalette.lime)
+                    .foregroundStyle(PausePathPalette.ink)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
+                .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 22))
+            } else {
+                ForEach(feed) { item in feedCard(item) }
+            }
+        }
+    }
+
+    private func feedCard(_ item: CommunityFeedItem) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 11) {
+                Text(String(item.post.display_name.prefix(1)).uppercased())
+                    .font(.headline).foregroundStyle(PausePathPalette.teal)
+                    .frame(width: 42, height: 42)
+                    .background(PausePathPalette.lime.opacity(0.26), in: Circle())
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.post.display_name).font(.subheadline.weight(.bold))
+                    Text(CommunityHubView.dateLabel(item.post.created_at))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                NavigationLink { CommunityHubView(community: item.community, initialSection: "Posts") } label: {
+                    Image(systemName: "arrow.up.right").frame(minWidth: 44, minHeight: 44)
+                }
+                .accessibilityLabel("Open \(item.community.name) posts")
+            }
+            Text(item.community.name)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(PausePathPalette.teal)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(PausePathPalette.lime.opacity(0.20), in: Capsule())
+            Text(item.post.body).font(.body).frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            Divider()
+            HStack {
+                Button {
+                    Task { await toggleCheer(item) }
+                } label: {
+                    Label("\(item.post.cheers) cheers", systemImage: item.post.cheered ? "hands.clap.fill" : "hands.clap")
+                }
+                .disabled(reactingPostIDs.contains(item.id))
+                Spacer()
+                NavigationLink { CommunityHubView(community: item.community, initialSection: "Posts") } label: {
+                    Label("Open in group", systemImage: "arrow.up.right")
+                        .font(.caption.weight(.semibold))
+                }
+            }
+            .font(.subheadline)
+            .buttonStyle(.plain)
+            .foregroundStyle(PausePathPalette.teal)
+        }
+        .padding(17)
+        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 22))
+    }
+
+    private var sharingPreferences: some View {
+        DisclosureGroup("Sharing preferences") {
+            Toggle("Share my goal totals", isOn: $shareProgress)
+            Text("Group goals can show totals. Routes, location, and Health data stay private.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .font(.subheadline.weight(.semibold))
+        .padding(16)
+        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 18))
+    }
+
     private var filteredCommunities: [WalkingCommunity] {
         let query = communitySearch.trimmingCharacters(in: .whitespacesAndNewlines)
         return query.isEmpty ? communities : communities.filter { $0.name.localizedCaseInsensitiveContains(query) }
     }
+    private var upcomingGroups: [WalkingCommunity] {
+        Array(communities.filter {
+            guard let start = $0.next_walk.flatMap({ SocialAPI.date($0.starts_at) }) else { return false }
+            return start > .now
+        }.sorted {
+            ($0.next_walk.flatMap { SocialAPI.date($0.starts_at) } ?? .distantFuture) <
+            ($1.next_walk.flatMap { SocialAPI.date($0.starts_at) } ?? .distantFuture)
+        }.prefix(3))
+    }
+
+    private var upcomingSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Happening soon").font(.title2.bold()).foregroundStyle(PausePathPalette.teal)
+            ForEach(upcomingGroups) { community in
+                if let walk = community.next_walk {
+                    NavigationLink { CommunityHubView(community: community, initialSection: "Walks") } label: {
+                        HStack(spacing: 14) {
+                            if let date = SocialAPI.date(walk.starts_at) {
+                                VStack(spacing: 1) {
+                                    Text(date.formatted(.dateTime.month(.abbreviated)).uppercased())
+                                        .font(.caption2.weight(.heavy))
+                                    Text(date.formatted(.dateTime.day()))
+                                        .font(.title2.bold())
+                                }
+                                .foregroundStyle(PausePathPalette.ink)
+                                .frame(width: 58, height: 64)
+                                .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 15))
+                            }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(walk.title).font(.headline).foregroundStyle(PausePathPalette.teal).lineLimit(2)
+                                Text(community.name).font(.subheadline).foregroundStyle(.secondary)
+                                Text(CommunityHubView.dateLabel(walk.starts_at))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(PausePathPalette.teal)
+                        }
+                        .padding(15)
+                        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 20))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var activitySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("From your people").font(.title2.bold()).foregroundStyle(PausePathPalette.teal)
+                Spacer()
+                NavigationLink { SocialInboxView() } label: {
+                    Text("See all").font(.subheadline.weight(.semibold))
+                }
+            }
+            VStack(spacing: 0) {
+                ForEach(Array(social.notifications.prefix(3))) { notification in
+                    NavigationLink { SocialInboxView() } label: {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: activityIcon(notification.category))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(PausePathPalette.teal)
+                                .frame(width: 36, height: 36)
+                                .background(PausePathPalette.lime.opacity(0.3), in: Circle())
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(notification.message).font(.subheadline).foregroundStyle(.primary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if let date = SocialAPI.date(notification.created_at) {
+                                    Text(date, style: .relative).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                            if notification.read_at == nil {
+                                Circle().fill(PausePathPalette.lime).frame(width: 8, height: 8)
+                                    .accessibilityLabel("Unread")
+                            }
+                        }
+                        .padding(.vertical, 13)
+                    }
+                    .buttonStyle(.plain)
+                    if notification.id != social.notifications.prefix(3).last?.id { Divider() }
+                }
+            }
+            .padding(.horizontal, 16)
+            .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 20))
+        }
+    }
+
+    private func activityIcon(_ category: String) -> String {
+        switch category {
+        case "walks": "calendar"
+        case "goals": "flag.fill"
+        case "invites": "person.crop.circle.badge.plus"
+        default: "bell.fill"
+        }
+    }
+
+    @MainActor private func loadFeed(groups: [WalkingCommunity], owner: String, revision: UUID) async {
+        guard account.userID == owner, communityRevision == revision else { return }
+        let token = UUID()
+        feedLoadToken = token
+        guard !groups.isEmpty else {
+            feed = []; feedMessage = nil; feedLoading = false
+            return
+        }
+        feedLoading = true
+        var collected: [CommunityFeedItem] = []
+        var failures = 0
+        await withTaskGroup(of: [CommunityFeedItem]?.self) { tasks in
+            var remaining = groups.dropFirst(3).makeIterator()
+            for community in groups.prefix(3) {
+                tasks.addTask { await Self.posts(in: community) }
+            }
+            for await result in tasks {
+                if let result { collected += result }
+                else { failures += 1 }
+                if let next = remaining.next() {
+                    tasks.addTask { await Self.posts(in: next) }
+                }
+            }
+        }
+        guard account.userID == owner, communityRevision == revision, feedLoadToken == token else { return }
+        if failures < groups.count {
+            feed = Array(collected.sorted {
+                (SocialAPI.date($0.post.created_at) ?? .distantPast) > (SocialAPI.date($1.post.created_at) ?? .distantPast)
+            }.prefix(20))
+            lastFeedRefresh = .now
+        }
+        feedMessage = failures == 0 ? nil : (failures == groups.count ? "Updates could not load." : "Some groups could not refresh.")
+        feedLoading = false
+    }
+
+    private static func posts(in community: WalkingCommunity) async -> [CommunityFeedItem]? {
+        do {
+            let data = try await PausePathAPI.request("api/v1/communities/\(community.id.uuidString)/posts", requiresAccount: true)
+            let posts = try JSONDecoder().decode(CommunityPostList.self, from: data).posts
+            return posts.map { CommunityFeedItem(community: community, post: $0) }
+        } catch { return nil }
+    }
+
+    @MainActor private func toggleCheer(_ item: CommunityFeedItem) async {
+        guard reactingPostIDs.insert(item.id).inserted else { return }
+        defer { reactingPostIDs.remove(item.id) }
+        do {
+            _ = try await PausePathAPI.request("api/v1/communities/\(item.community.id.uuidString)/posts/\(item.id.uuidString)/cheer",
+                                               body: ["cheered": !item.post.cheered], requiresAccount: true)
+            guard let index = feed.firstIndex(where: { $0.id == item.id }) else { return }
+            let current = feed[index].post
+            feed[index].post = CommunityPost(id: current.id, body: current.body, created_at: current.created_at,
+                                             display_name: current.display_name,
+                                             cheers: max(0, current.cheers + (current.cheered ? -1 : 1)),
+                                             cheered: !current.cheered, can_delete: current.can_delete)
+        } catch { feedMessage = "Could not update that cheer. Try again." }
+    }
+
     @MainActor private func refresh(force: Bool = false) async {
         guard account.isSignedIn else { return }
         if busy { refreshAgain = refreshAgain || force; return }
@@ -317,6 +750,9 @@ struct CommunityChallengesView: View {
             guard communityRevision == revision, account.isSignedIn else { return }
             communities = loaded
             communityLoadMessage = nil; message = ""; lastCommunityRefresh = .now
+            if let owner = account.userID {
+                Task { await loadFeed(groups: loaded, owner: owner, revision: revision) }
+            }
         } catch {
             guard communityRevision == revision else { return }
             communityLoadMessage = communityErrorMessage(error)
@@ -583,6 +1019,88 @@ private struct SegmentedChallengeProgress: View {
 }
 
 private struct ChallengeTarget: Identifiable { let id: UUID; init(_ id: UUID) { self.id = id } }
+
+private struct CommunityQuickPostSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let communities: [WalkingCommunity]
+    @State private var selectedGroupID: UUID
+    @State private var bodyText = ""
+    @State private var requestID = UUID()
+    @State private var busy = false
+    @State private var errorMessage = ""
+
+    init(communities: [WalkingCommunity]) {
+        self.communities = communities
+        _selectedGroupID = State(initialValue: communities.first?.id ?? UUID())
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Share with") {
+                    if communities.count > 1 {
+                        Picker("Group", selection: $selectedGroupID) {
+                            ForEach(communities) { community in
+                                Text(community.name).tag(community.id)
+                            }
+                        }
+                        .onChange(of: selectedGroupID) { _, _ in requestID = UUID() }
+                    } else {
+                        Text(communities.first?.name ?? "Your group")
+                    }
+                }
+                Section("Your update") {
+                    TextField("What would you like to share?", text: $bodyText, axis: .vertical)
+                        .lineLimit(4...8)
+                        .onChange(of: bodyText) { _, _ in requestID = UUID() }
+                    Text("\(bodyText.count)/280 characters")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section {
+                    Button {
+                        Task { await post() }
+                    } label: {
+                        HStack {
+                            if busy { ProgressView() }
+                            Text(busy ? "Sharing…" : "Share update")
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(PausePathPalette.lime)
+                    .foregroundStyle(PausePathPalette.ink)
+                    .disabled(busy || bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || bodyText.count > 280)
+                    if !errorMessage.isEmpty {
+                        Text(errorMessage).font(.callout).foregroundStyle(.secondary)
+                    }
+                } footer: {
+                    Text("Your update is visible to members of the selected group.")
+                }
+            }
+            .pausePathSurface()
+            .navigationTitle("Share an update")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }.disabled(busy)
+            } }
+            .interactiveDismissDisabled(busy)
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    @MainActor private func post() async {
+        guard !busy, communities.contains(where: { $0.id == selectedGroupID }) else { return }
+        let message = bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty, message.count <= 280 else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await PausePathAPI.request("api/v1/communities/\(selectedGroupID.uuidString)/posts",
+                                               body: ["body": message, "request_id": requestID.uuidString], requiresAccount: true)
+            dismiss()
+        } catch { errorMessage = communityErrorMessage(error) }
+    }
+}
 
 private struct CommunityJoinSheet: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -1028,7 +1546,7 @@ private struct CommunityWalkPlan: Decodable, Identifiable {
     let route_snapshot: SharedRouteSnapshot?
     let meeting_location: SharedRoutePoint?
 }
-private struct CommunityPost: Decodable, Identifiable {
+private struct CommunityPost: Decodable, Identifiable, Sendable {
     let id: UUID
     let body: String
     let created_at: String
@@ -1036,6 +1554,11 @@ private struct CommunityPost: Decodable, Identifiable {
     let cheers: Int
     let cheered: Bool
     let can_delete: Bool
+}
+private struct CommunityFeedItem: Identifiable, Sendable {
+    let community: WalkingCommunity
+    var post: CommunityPost
+    var id: UUID { post.id }
 }
 private struct CommunityMember: Decodable, Identifiable {
     let user_id: String?
@@ -1046,7 +1569,7 @@ private struct CommunityMember: Decodable, Identifiable {
     var id: String { member_id ?? user_id ?? display_name }
 }
 private struct CommunityWalkList: Decodable { let walks: [CommunityWalkPlan] }
-private struct CommunityPostList: Decodable { let posts: [CommunityPost] }
+private struct CommunityPostList: Decodable, Sendable { let posts: [CommunityPost] }
 private struct CommunityMemberList: Decodable {
     let members: [CommunityMember]
     let viewer_is_owner: Bool?

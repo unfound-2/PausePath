@@ -585,7 +585,7 @@ struct MyPathView: View {
             VStack(spacing: 0) {
                 PathSectionPicker(titles: ["Overview", "History", "Insights"], selection: $pathSection, usesMaterialBackground: false)
                     .frame(maxWidth: .infinity)
-                    .frame(minHeight: 60)
+                    .fixedSize(horizontal: false, vertical: true)
                 ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if pathSection != "Overview" && !(demoMode && pathSection == "Insights") { sourceControls }
@@ -617,6 +617,7 @@ struct MyPathView: View {
                     }
                 }.padding(20).frame(maxWidth: 680).frame(maxWidth: .infinity)
                 }.id(pathSection)
+                .frame(maxHeight: .infinity)
                 .refreshable {
                     if source == "Apple Health", health.hasConnected { await health.connect() }
                 }
@@ -1205,7 +1206,7 @@ private struct PathBadgeArtStyle {
         case "walks-1": PathBadgeArtStyle(primary: Color(red: 0.16, green: 0.55, blue: 0.35), highlight: Color(red: 0.63, green: 0.88, blue: 0.40), flourish: "leaf.fill")
         case "walks-5": PathBadgeArtStyle(primary: Color(red: 0.04, green: 0.53, blue: 0.63), highlight: Color(red: 0.42, green: 0.84, blue: 0.87), flourish: "wind")
         case "walks-10": PathBadgeArtStyle(primary: Color(red: 0.77, green: 0.42, blue: 0.12), highlight: Color(red: 1.00, green: 0.78, blue: 0.30), flourish: "sun.max.fill")
-        case "walks-25": PathBadgeArtStyle(primary: Color(red: 0.13, green: 0.43, blue: 0.31), highlight: Color(red: 0.54, green: 0.78, blue: 0.36), flourish: "mountain.2.fill")
+        case "walks-25": PathBadgeArtStyle(primary: Color(red: 0.13, green: 0.43, blue: 0.31), highlight: Color(red: 0.54, green: 0.78, blue: 0.36), flourish: "map.fill")
         case "distance-1": PathBadgeArtStyle(primary: Color(red: 0.10, green: 0.50, blue: 0.76), highlight: Color(red: 0.46, green: 0.82, blue: 0.95), flourish: "location.fill")
         case "distance-5": PathBadgeArtStyle(primary: Color(red: 0.00, green: 0.55, blue: 0.54), highlight: Color(red: 0.37, green: 0.85, blue: 0.71), flourish: "point.topleft.down.to.point.bottomright.curvepath")
         case "distance-10": PathBadgeArtStyle(primary: Color(red: 0.19, green: 0.38, blue: 0.79), highlight: Color(red: 0.47, green: 0.69, blue: 0.98), flourish: "map.fill")
@@ -1213,7 +1214,7 @@ private struct PathBadgeArtStyle {
         case "distance-50": PathBadgeArtStyle(primary: Color(red: 0.86, green: 0.37, blue: 0.16), highlight: Color(red: 1.00, green: 0.69, blue: 0.34), flourish: "sun.horizon.fill")
         case "distance-100": PathBadgeArtStyle(primary: Color(red: 0.73, green: 0.48, blue: 0.08), highlight: Color(red: 1.00, green: 0.83, blue: 0.33), flourish: "sparkles")
         case "longest-3": PathBadgeArtStyle(primary: Color(red: 0.22, green: 0.55, blue: 0.34), highlight: Color(red: 0.71, green: 0.88, blue: 0.38), flourish: "leaf.fill")
-        case "longest-5": PathBadgeArtStyle(primary: Color(red: 0.78, green: 0.29, blue: 0.23), highlight: Color(red: 1.00, green: 0.64, blue: 0.34), flourish: "flag.fill")
+        case "longest-5": PathBadgeArtStyle(primary: Color(red: 0.78, green: 0.29, blue: 0.23), highlight: Color(red: 1.00, green: 0.64, blue: 0.34), flourish: "flag.checkered")
         case "minutes-30": PathBadgeArtStyle(primary: Color(red: 0.06, green: 0.48, blue: 0.56), highlight: Color(red: 0.36, green: 0.80, blue: 0.73), flourish: "clock.fill")
         case "minutes-60": PathBadgeArtStyle(primary: Color(red: 0.77, green: 0.46, blue: 0.08), highlight: Color(red: 1.00, green: 0.79, blue: 0.33), flourish: "sun.max.fill")
         case "days-3": PathBadgeArtStyle(primary: Color(red: 0.31, green: 0.55, blue: 0.26), highlight: Color(red: 0.73, green: 0.88, blue: 0.40), flourish: "calendar")
@@ -1419,6 +1420,9 @@ struct PathSectionPicker: View {
             if usesMaterialBackground { Rectangle().fill(.regularMaterial) }
             else { Rectangle().fill(PausePathPalette.background) }
         }
+        // In a vertical stack, a horizontal ScrollView can otherwise accept surplus
+        // height and appear as a large empty panel above the page content.
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

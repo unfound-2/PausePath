@@ -865,9 +865,10 @@ public struct PathMilestones {
             (1, "First footprint", "shoeprints.fill"),
             (5, "Finding rhythm", "figure.walk"),
             (10, "Path regular", "figure.hiking"),
-            (25, "Trail keeper", "mountain.2.fill")
+            (25, "Trail keeper", "map.circle.fill")
         ] {
-            result.append(PathBadge(id: "walks-\(goal)", name: name, symbol: symbol, requirement: "Complete \(goal) PausePath journeys", value: Double(walks.count), target: Double(goal)))
+            let requirement = goal == 25 ? "Complete 25 separate PausePath journeys" : "Complete \(goal) PausePath journeys"
+            result.append(PathBadge(id: "walks-\(goal)", name: name, symbol: symbol, requirement: requirement, value: Double(walks.count), target: Double(goal)))
         }
         for (goal, name, symbol) in [
             (1, "First kilometre", "point.topleft.down.to.point.bottomright.curvepath"),
@@ -879,8 +880,8 @@ public struct PathMilestones {
         ] {
             result.append(PathBadge(id: "distance-\(goal)", name: name, symbol: symbol, requirement: "Travel \(goal) km across completed journeys", value: distance / 1000, target: Double(goal)))
         }
-        for (goal, name, symbol) in [(3, "Long way home", "map.fill"), (5, "Going the distance", "mountain.2.fill")] {
-            result.append(PathBadge(id: "longest-\(goal)", name: name, symbol: symbol, requirement: "Complete a \(goal) km journey", value: longest / 1000, target: Double(goal)))
+        for (goal, name, symbol) in [(3, "Long way home", "map.fill"), (5, "Going the distance", "flag.checkered")] {
+            result.append(PathBadge(id: "longest-\(goal)", name: name, symbol: symbol, requirement: "Complete one PausePath journey of at least \(goal) km", value: longest / 1000, target: Double(goal)))
         }
         for (goal, name, symbol) in [(30, "Time to wander", "clock.fill"), (60, "An hour outdoors", "sun.max.fill")] {
             result.append(PathBadge(id: "minutes-\(goal)", name: name, symbol: symbol, requirement: "Complete a journey with \(goal) active minutes", value: longestTime / 60, target: Double(goal)))
