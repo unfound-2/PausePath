@@ -246,6 +246,8 @@ private struct WelcomeSetupView: View {
     @State private var helpExpanded = false
     @State private var outlookRevealed = false
     @State private var journeyProgress: CGFloat = JourneyCheckpoint.trailhead.progress
+    @State private var traveling = false
+    @State private var arrivalTask: Task<Void, Never>?
     @State private var demoRouteDrawn = false
     @State private var pinPulse = false
     @State private var demoPlayer = AVPlayer()
@@ -337,13 +339,6 @@ private struct WelcomeSetupView: View {
         default: "See PausePath in action"
         }
     }
-    private var chapterNumber: Int {
-        switch step {
-        case 0...3: 1
-        case 4...6: 2
-        default: 3
-        }
-    }
     private var journeyCheckpoint: JourneyCheckpoint { checkpoint(for: step) }
     private func checkpoint(for step: Int) -> JourneyCheckpoint {
         switch step {
@@ -355,55 +350,66 @@ private struct WelcomeSetupView: View {
         default: .finish
         }
     }
-    private var journeyDetail: String {
-        switch journeyCheckpoint {
-        case .trailhead: "A sample walk begins here."
-        case .bench: "Tell us what makes a walk work for you."
-        case .water: "Build a flexible plan for the weeks ahead."
-        case .restroom: "See how routes and mapped stops appear."
-        case .cafe: "Choose your name and optional connections."
-        case .finish: "Review real activity when it is available."
+    private var panelFraction: CGFloat {
+        if typeSize.isAccessibilitySize { return 0.78 }
+        switch step {
+        case 0: return 0.48
+        case 1, 2, 4, 9: return 0.56
+        case 7, 8, 10, 11: return 0.66
+        default: return 0.60
         }
     }
 
     var body: some View {
-        ZStack {
-            (isDarkInsight ? PausePathPalette.teal : PausePathPalette.background).ignoresSafeArea()
-            LinearGradient(colors: isDarkInsight
-                           ? [PausePathPalette.ink.opacity(0.34), PausePathPalette.teal, PausePathPalette.teal]
-                           : [PausePathPalette.teal.opacity(0.13), PausePathPalette.background,
-                              PausePathPalette.lime.opacity(0.07)], startPoint: .top, endPoint: .bottom)
+        GeometryReader { geometry in
+            ZStack {
+                OnboardingJourneyWorld(progress: journeyProgress, checkpoint: journeyCheckpoint,
+                                       dark: isDarkInsight, reduceMotion: reduceMotion)
                 .ignoresSafeArea()
-            VStack(spacing: 0) {
-                topBar.padding(.horizontal, 22).padding(.top, 12)
-                    .padding(.bottom, 9)
-                    .background(headerFade)
-                OnboardingJourneyScene(progress: journeyProgress, checkpoint: journeyCheckpoint,
-                                       detail: journeyDetail, reduceMotion: reduceMotion)
-                    .frame(maxWidth: 560)
-                    .frame(height: typeSize.isAccessibilitySize ? 146 : 190)
-                    .padding(.horizontal, 22)
-                    .padding(.bottom, 6)
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        journeyStopLabel
-                        prompt
-                        page
-                        howThisWorks
+                VStack(spacing: 0) {
+                    topBar
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(isDarkInsight ? PausePathPalette.teal.opacity(0.91) : PausePathPalette.background.opacity(0.91),
+                                    in: RoundedRectangle(cornerRadius: 22))
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .allowsHitTesting(!traveling)
+                    Spacer(minLength: 12)
+                    VStack(spacing: 0) {
+                        Capsule()
+                            .fill(isDarkInsight ? .white.opacity(0.35) : PausePathPalette.teal.opacity(0.22))
+                            .frame(width: 42, height: 5)
+                            .padding(.top, 12)
+                        ScrollView(.vertical, showsIndicators: false) {
+                            VStack(alignment: .leading, spacing: 18) {
+                                journeyStopLabel
+                                prompt
+                                page
+                                howThisWorks
+                            }
+                            .frame(maxWidth: 560)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 22)
+                            .padding(.top, 17)
+                            .padding(.bottom, 20)
+                        }
+                        .scrollDismissesKeyboard(.interactively)
+                        .id(step)
+                        footer
+                            .padding(.horizontal, 22)
+                            .padding(.top, 9)
+                            .padding(.bottom, 14)
                     }
-                    .frame(maxWidth: 560)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 22)
-                    .padding(.top, 20)
-                    .padding(.bottom, 22)
+                    .frame(maxWidth: 620)
+                    .frame(height: geometry.size.height * panelFraction)
+                    .background(isDarkInsight ? PausePathPalette.teal : PausePathPalette.background,
+                                in: UnevenRoundedRectangle(topLeadingRadius: 30, topTrailingRadius: 30))
+                    .shadow(color: PausePathPalette.ink.opacity(0.15), radius: 20, y: -6)
+                    .offset(y: traveling ? geometry.size.height * panelFraction + 30 : 0)
+                    .opacity(traveling ? 0 : 1)
+                    .allowsHitTesting(!traveling)
                 }
-                .scrollDismissesKeyboard(.interactively)
-                .id(step)
-                footer
-                    .padding(.horizontal, 22)
-                    .padding(.top, 20)
-                    .padding(.bottom, 12)
-                    .background(footerFade)
             }
         }
         .fontDesign(.rounded)
@@ -422,12 +428,16 @@ private struct WelcomeSetupView: View {
             notificationEnabled = profile.dailyRecapNotifications
             if notificationEnabled { notificationStatus = "Reminder set for 8 PM. You can turn it off any time." }
             journeyProgress = journeyCheckpoint.progress
+            if step == 0 && !reduceMotion {
+                withAnimation(.easeOut(duration: 1.2).delay(0.2)) { journeyProgress = 0.035 }
+            }
         }
         .onChange(of: account.appleProvidedName) { _, name in
             guard let name, profile.username?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false else { return }
             profile.username = name
             saveProfile()
         }
+        .onDisappear { arrivalTask?.cancel() }
     }
 
     private var topBar: some View {
@@ -444,7 +454,7 @@ private struct WelcomeSetupView: View {
             .opacity(step == 0 ? 0.35 : 1)
             .accessibilityLabel("Back")
             VStack(alignment: .leading, spacing: 7) {
-                Text("CHAPTER 0\(chapterNumber) / 03  ·  \(chapter.uppercased())")
+                Text(chapter.uppercased())
                     .font(.system(size: 10, weight: .heavy, design: .rounded))
                     .tracking(1)
                     .foregroundStyle(isDarkInsight ? PausePathPalette.lime : PausePathPalette.teal)
@@ -481,22 +491,6 @@ private struct WelcomeSetupView: View {
         .frame(height: 54)
         .frame(maxWidth: 560)
         .frame(maxWidth: .infinity)
-    }
-
-    private var headerFade: some View {
-        LinearGradient(colors: isDarkInsight
-                       ? [PausePathPalette.teal, PausePathPalette.teal.opacity(0)]
-                       : [PausePathPalette.background, PausePathPalette.background.opacity(0)],
-                       startPoint: .top, endPoint: .bottom)
-            .ignoresSafeArea(edges: .top)
-    }
-
-    private var footerFade: some View {
-        LinearGradient(colors: isDarkInsight
-                       ? [PausePathPalette.teal.opacity(0), PausePathPalette.teal.opacity(0.96)]
-                       : [PausePathPalette.background.opacity(0), PausePathPalette.background.opacity(0.97)],
-                       startPoint: .top, endPoint: .bottom)
-            .ignoresSafeArea(edges: .bottom)
     }
 
     private var journeyStopLabel: some View {
@@ -616,13 +610,10 @@ private struct WelcomeSetupView: View {
 
     private var introductionStep: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Take a short sample walk with us. At each pause, choose what matters to you and see how PausePath can help you plan.")
-                .font(.body)
-                .foregroundStyle(PausePathPalette.ink)
+            Text("Walk with us. Each stop reveals a little more about the app and lets you choose what matters.")
+                .font(.subheadline)
+                .foregroundStyle(PausePathPalette.ink.opacity(0.78))
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(18)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 20))
             HStack(spacing: 8) {
                 featurePill("Real walking routes", icon: "map")
                 featurePill("Places to pause", icon: "bench")
@@ -1365,10 +1356,23 @@ private struct WelcomeSetupView: View {
     private func advance(to newStep: Int) {
         guard (0..<stepCount).contains(newStep) else { return }
         helpExpanded = false
-        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.8)) {
-            journeyProgress = checkpoint(for: newStep).progress
+        let destination = checkpoint(for: newStep)
+        guard !reduceMotion && destination != journeyCheckpoint else {
+            journeyProgress = destination.progress
+            withAnimation(reduceMotion ? nil : .snappy(duration: 0.28)) { step = newStep }
+            return
         }
-        withAnimation(reduceMotion ? nil : .snappy(duration: 0.28)) { step = newStep }
+        arrivalTask?.cancel()
+        withAnimation(.easeOut(duration: 0.28)) { traveling = true }
+        withAnimation(.easeInOut(duration: 1.15)) { journeyProgress = destination.progress }
+        arrivalTask = Task { @MainActor in
+            do { try await Task.sleep(for: .milliseconds(1150)) }
+            catch { return }
+            withAnimation(.easeInOut(duration: 0.38)) {
+                step = newStep
+                traveling = false
+            }
+        }
     }
 
     private func saveProfile() { profileData = (try? JSONEncoder().encode(profile)) ?? profileData }
@@ -1427,65 +1431,142 @@ private enum JourneyCheckpoint: String, CaseIterable, Identifiable {
     }
 }
 
-private struct OnboardingJourneyScene: View {
-    let progress: CGFloat
+private struct OnboardingJourneyWorld: View, Animatable {
+    var progress: CGFloat
     let checkpoint: JourneyCheckpoint
-    let detail: String
+    let dark: Bool
     let reduceMotion: Bool
 
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 24).fill(PausePathPalette.teal)
-            AdventureContours()
-                .stroke(.white.opacity(0.08), lineWidth: 1)
-                .clipShape(RoundedRectangle(cornerRadius: 24))
-            GeometryReader { geometry in
-                let mapRect = CGRect(x: 0, y: 0, width: geometry.size.width, height: geometry.size.height)
-                JourneyCurve()
-                    .stroke(.white.opacity(0.38), style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [5, 7]))
-                JourneyCurve()
-                    .trim(from: 0, to: progress)
-                    .stroke(PausePathPalette.lime, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+        GeometryReader { geometry in
+            let size = geometry.size
+            let worldWidth = size.width * 4.8
+            let routeRect = CGRect(x: 0, y: size.height * 0.08, width: worldWidth, height: size.height * 0.38)
+            let walkerPoint = JourneyCurve.point(at: progress, in: routeRect)
+            let cameraOffset = min(0, max(size.width - worldWidth, size.width * 0.42 - walkerPoint.x))
+
+            ZStack {
+                LinearGradient(colors: dark
+                               ? [Color(red: 0.04, green: 0.20, blue: 0.24), PausePathPalette.teal]
+                               : [Color(red: 0.78, green: 0.94, blue: 0.92), Color(red: 0.88, green: 0.98, blue: 0.88)],
+                               startPoint: .top, endPoint: .bottom)
+                Canvas { context, _ in
+                    var drawing = context
+                    drawing.translateBy(x: cameraOffset, y: 0)
+                    let height = size.height
+
+                    var distantHill = Path()
+                    distantHill.move(to: CGPoint(x: 0, y: height * 0.22))
+                    distantHill.addCurve(to: CGPoint(x: worldWidth * 0.5, y: height * 0.19),
+                                         control1: CGPoint(x: worldWidth * 0.16, y: height * 0.11),
+                                         control2: CGPoint(x: worldWidth * 0.35, y: height * 0.28))
+                    distantHill.addCurve(to: CGPoint(x: worldWidth, y: height * 0.20),
+                                         control1: CGPoint(x: worldWidth * 0.68, y: height * 0.08),
+                                         control2: CGPoint(x: worldWidth * 0.84, y: height * 0.30))
+                    distantHill.addLine(to: CGPoint(x: worldWidth, y: height))
+                    distantHill.addLine(to: CGPoint(x: 0, y: height))
+                    distantHill.closeSubpath()
+                    drawing.fill(distantHill, with: .color(dark ? Color(red: 0.06, green: 0.31, blue: 0.31)
+                                                                : Color(red: 0.68, green: 0.87, blue: 0.74)))
+
+                    var meadow = Path()
+                    meadow.move(to: CGPoint(x: 0, y: height * 0.42))
+                    meadow.addCurve(to: CGPoint(x: worldWidth * 0.52, y: height * 0.39),
+                                    control1: CGPoint(x: worldWidth * 0.20, y: height * 0.32),
+                                    control2: CGPoint(x: worldWidth * 0.32, y: height * 0.50))
+                    meadow.addCurve(to: CGPoint(x: worldWidth, y: height * 0.42),
+                                    control1: CGPoint(x: worldWidth * 0.68, y: height * 0.29),
+                                    control2: CGPoint(x: worldWidth * 0.86, y: height * 0.49))
+                    meadow.addLine(to: CGPoint(x: worldWidth, y: height))
+                    meadow.addLine(to: CGPoint(x: 0, y: height))
+                    meadow.closeSubpath()
+                    drawing.fill(meadow, with: .color(dark ? Color(red: 0.08, green: 0.37, blue: 0.32)
+                                                           : Color(red: 0.55, green: 0.81, blue: 0.62)))
+
+                    let treeRows: [CGFloat] = [0.16, 0.23, 0.42, 0.52, 0.65, 0.78, 0.91]
+                    for index in 0..<98 {
+                        let x = worldWidth * CGFloat(index) / 97
+                        let row = index % treeRows.count
+                        let y = height * treeRows[row]
+                            + CGFloat((index * 13) % 17 - 8)
+                        let treeSize = CGFloat(18 + (index * 7) % 15 + (row >= 4 ? 9 : 0))
+                        let trunk = CGRect(x: x - 2, y: y - 3, width: 4, height: treeSize * 0.65)
+                        drawing.fill(Path(roundedRect: trunk, cornerRadius: 2),
+                                     with: .color(dark ? Color(red: 0.10, green: 0.25, blue: 0.24)
+                                                       : Color(red: 0.22, green: 0.40, blue: 0.30)))
+                        let crown = CGRect(x: x - treeSize * 0.50, y: y - treeSize * 0.70,
+                                           width: treeSize, height: treeSize)
+                        drawing.fill(Path(ellipseIn: crown),
+                                     with: .color(dark ? Color(red: 0.13, green: 0.47, blue: 0.39)
+                                                       : Color(red: 0.16, green: 0.55, blue: 0.42)))
+                        drawing.fill(Path(ellipseIn: CGRect(x: x - treeSize * 0.26, y: y - treeSize * 0.65,
+                                                           width: treeSize * 0.48, height: treeSize * 0.48)),
+                                     with: .color(dark ? Color(red: 0.20, green: 0.58, blue: 0.47)
+                                                       : Color(red: 0.31, green: 0.70, blue: 0.49)))
+                    }
+
+                    let route = JourneyCurve().path(in: routeRect)
+                    drawing.stroke(route, with: .color(dark ? .white.opacity(0.25) : PausePathPalette.teal.opacity(0.25)),
+                                   style: StrokeStyle(lineWidth: 32, lineCap: .round, lineJoin: .round))
+                    drawing.stroke(route, with: .color(dark ? Color(red: 0.60, green: 0.73, blue: 0.65)
+                                                            : Color(red: 0.98, green: 0.94, blue: 0.78)),
+                                   style: StrokeStyle(lineWidth: 25, lineCap: .round, lineJoin: .round))
+                    drawing.stroke(route.trimmedPath(from: 0, to: progress), with: .color(PausePathPalette.lime),
+                                   style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                }
                 ForEach(JourneyCheckpoint.allCases.filter { $0 != .trailhead }) { stop in
-                    JourneyStopPin(stop: stop, selected: stop == checkpoint)
-                        .position(JourneyCurve.point(at: stop.progress, in: mapRect))
+                    let point = JourneyCurve.point(at: stop.progress, in: routeRect)
+                    if stop == checkpoint {
+                        VStack(spacing: 3) {
+                            JourneyStopPin(stop: stop, selected: true)
+                                .scaleEffect(1.25)
+                            Text(stop.title)
+                                .font(.caption2.weight(.heavy))
+                                .foregroundStyle(PausePathPalette.teal)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(PausePathPalette.background, in: Capsule())
+                        }
+                        .position(x: point.x + cameraOffset + 68,
+                                  y: point.y + (point.y < size.height * 0.27 ? 55 : -48))
+                    } else {
+                        JourneyStopPin(stop: stop, selected: false)
+                            .position(x: point.x + cameraOffset, y: point.y - 43)
+                    }
                 }
-                JourneyWalker(progress: progress)
+                Image(systemName: "figure.walk")
+                    .font(.system(size: 31, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 58, height: 58)
+                    .background(PausePathPalette.teal, in: Circle())
+                    .overlay(Circle().strokeBorder(PausePathPalette.lime, lineWidth: 4))
+                    .shadow(color: PausePathPalette.ink.opacity(0.25), radius: 8, y: 5)
+                    .position(x: walkerPoint.x + cameraOffset, y: walkerPoint.y - 7)
+                HStack(spacing: 6) {
+                    Image(systemName: "figure.walk")
+                    Text("SAMPLE WALK")
+                    Text("· NOT LIVE")
+                }
+                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .tracking(0.8)
+                .foregroundStyle(dark ? .white : PausePathPalette.teal)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(dark ? PausePathPalette.teal.opacity(0.80) : PausePathPalette.background.opacity(0.88), in: Capsule())
+                .position(x: size.width * 0.5, y: size.height * 0.15)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 34)
-            .padding(.bottom, 46)
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Text("A SAMPLE WALK")
-                        .font(.system(size: 10, weight: .heavy, design: .rounded))
-                        .tracking(1.3)
-                        .foregroundStyle(PausePathPalette.lime)
-                    Spacer()
-                    Text("DEMO · NOT LIVE")
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .tracking(0.7)
-                        .foregroundStyle(.white.opacity(0.76))
-                }
-                Spacer()
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(checkpoint.title)
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.white)
-                    Text("·  \(detail)")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.8))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 14)
+            .frame(width: size.width, height: size.height)
+            .clipped()
         }
-        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.55), value: dark)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Sample walking route. At \(checkpoint.title). \(detail)")
-        .accessibilityHint(reduceMotion ? "Route progress changes without animation." : "The walker moves to each stop as you continue.")
+        .accessibilityLabel("Illustrated sample route through trees. Walker at \(checkpoint.title).")
+        .accessibilityHint(reduceMotion ? "Route progress changes without animation." : "The scene follows the walker to each stop as you continue.")
     }
 }
 
@@ -1502,11 +1583,11 @@ private struct JourneyStopPin: View {
                 .overlay {
                     Group {
                         if stop == .bench {
-                            BenchSymbol().fill(PausePathPalette.ink).frame(width: 16, height: 16)
+                            BenchSymbol().fill(.white).frame(width: 16, height: 16)
                         } else {
                             Image(systemName: stop.symbol)
                                 .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(PausePathPalette.ink)
+                                .foregroundStyle(stop == .restroom ? .white : PausePathPalette.ink)
                         }
                     }
                 }
@@ -1543,28 +1624,6 @@ private struct JourneyCurve: Shape {
         let route = JourneyCurve().path(in: rect)
         return route.trimmedPath(from: 0, to: min(max(progress, 0.0001), 1)).currentPoint
             ?? CGPoint(x: rect.minX + rect.width * nodes[0].x, y: rect.minY + rect.height * nodes[0].y)
-    }
-}
-
-private struct JourneyWalker: View, Animatable {
-    var progress: CGFloat
-
-    var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
-    }
-
-    var body: some View {
-        GeometryReader { geometry in
-            let location = JourneyCurve.point(at: progress, in: CGRect(origin: .zero, size: geometry.size))
-            Image(systemName: "figure.walk")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(PausePathPalette.ink)
-                .frame(width: 32, height: 32)
-                .background(PausePathPalette.lime, in: Circle())
-                .overlay(Circle().strokeBorder(PausePathPalette.teal, lineWidth: 2))
-                .position(x: location.x + 7, y: location.y - 23)
-        }
     }
 }
 
