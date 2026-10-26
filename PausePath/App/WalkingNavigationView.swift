@@ -9,6 +9,10 @@ struct WalkingNavigationView: View {
     @State private var navigator = WalkingNavigator()
     @State private var weatherGuidance = WeatherGuidanceStore()
     @State private var camera: MapCameraPosition = .automatic
+    @State private var followsUser = true
+    @State private var lastCameraCoordinate: Coordinate?
+    @State private var lastCameraHeading: Double?
+    @State private var showRouteDetails = false
     @State private var savedRoute = false
     @State private var saveMessage = ""
     @State private var showWeather = false
@@ -32,105 +36,20 @@ struct WalkingNavigationView: View {
     @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherGuidanceEnabled = true
     @AppStorage("pausepath.weather.openMeteo.walkUpdates.enabled") private var weatherWalkUpdatesEnabled = true
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
     private var plan: GeneratedWalk { navigator.plan ?? walk }
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if navigator.state == .ready { routeReadyControls }
-                    Map(position: $camera) {
-                        if let coordinate = navigator.displayCoordinate {
-                            Annotation("Your location", coordinate: coordinate.mapCoordinate) {
-                                Image(systemName: "location.north.fill")
-                                    .font(.title3.weight(.bold)).foregroundStyle(.white)
-                                    .frame(width: 40, height: 40).background(Color.blue, in: Circle())
-                                    .overlay(Circle().stroke(.white, lineWidth: 3)).shadow(radius: 3)
-                                    .accessibilityLabel("Your current location")
-                            }.annotationTitles(.hidden)
-                        }
-                        ForEach(Array(plan.legs.enumerated()), id: \.offset) { index, leg in
-                            MapPolyline(leg.polyline).stroke(index == navigator.progress.legIndex ? PausePathPalette.teal : .blue.opacity(0.5), lineWidth: index == navigator.progress.legIndex ? 7 : 4)
-                        }
-                        let endsNearStart = plan.paths.last?.last.map { WalkingGeometry.distance(plan.start, $0) <= 40 } ?? false
-                        if endsNearStart, let turnaround = plan.paths.first?.last {
-                            Marker("Turnaround", systemImage: "arrow.uturn.down", coordinate: turnaround.mapCoordinate).tint(.orange)
-                        } else {
-                            ForEach(Array(plan.legs.dropLast().enumerated()), id: \.offset) { index, leg in
-                                if let coordinate = leg.polyline.walkingCoordinates.last?.mapCoordinate {
-                                    let stop = plan.stops.indices.contains(index) ? plan.stops[index] : nil
-                                    Marker(stop?.item.name ?? "Stop \(index + 1)",
-                                           systemImage: stop?.kind.symbol ?? "mappin.and.ellipse", coordinate: coordinate)
-                                        .tint(stop?.kind.mapColor ?? .orange)
-                                }
-                            }
-                        }
-                        ForEach(suggestedStops.filter { !$0.unavailable && $0.location.coordinates.count == 2 }) { poi in
-                            Marker(poi.name ?? "Break stop", systemImage: FacilityKind.fromAPI(poi.category)?.symbol ?? "mappin", coordinate: poi.coordinate).tint(.orange)
-                        }
-                        Marker("Start", coordinate: plan.start.mapCoordinate)
-                        if let end = plan.paths.last?.last {
-                            Marker(endsNearStart ? "Finish" : "Destination", systemImage: "flag.fill", coordinate: end.mapCoordinate)
-                        }
-                    }.mapControls { MapCompass(); MapScaleView() }
-                        .frame(height: navigator.state == .ready ? 220 : 300)
-                        .clipShape(RoundedRectangle(cornerRadius: 22))
-                    HStack {
-                        Button("Recenter", systemImage: "location.fill") {
-                            if let coordinate = navigator.displayCoordinate { camera = .region(MKCoordinateRegion(center: coordinate.mapCoordinate, latitudinalMeters: 500, longitudinalMeters: 500)) }
-                            else { camera = .automatic }
-                        }
-                        Spacer()
-                        Button("Whole route", systemImage: "map") { camera = .automatic }
-                    }
-                    if navigator.state == .ready {
-                        previewTimeline
-                        previewDetails
-                    }
-                    else { navigationStatus }
-                    HStack(spacing: 12) {
-                        Button("Weather", systemImage: "cloud.sun") { showWeather = true }
-                        Spacer()
-                        Button("Walk settings", systemImage: "slider.horizontal.3") { showWalkSettings = true }
-                    }.font(.subheadline).frame(minHeight: 44)
-                    if navigator.state != .ready { NextPauseCard(navigator: navigator) }
-                    DisclosureGroup("More stops") {
-                    RouteBreaksView(walk: plan, currentLocation: navigator.freshLocation() ? navigator.location?.coordinate : nil,
-                        onDetour: { takingBreak = true; navigator.pause() }, onReturn: { takingBreak = false },
-                        onStopsChanged: { suggestedStops = $0 })
-                        .id(plan.id)
-                    }
-                    if let milestoneMessage {
-                        Label(milestoneMessage, systemImage: "trophy.fill").font(.headline)
-                            .padding().frame(maxWidth: .infinity, alignment: .leading)
-                            .foregroundStyle(PausePathPalette.ink)
-                            .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 18))
-                    }
-                    if !navigator.freshLocation() && navigator.state != .ready {
-                        Text(navigator.status).font(.caption).foregroundStyle(.secondary)
-                    }
-                    DisclosureGroup("All directions") {
-                        ForEach(Array(plan.legs.enumerated()), id: \.offset) { index, leg in
-                            Text("Leg \(index + 1)").font(.headline)
-                            ForEach(Array(leg.steps.enumerated()), id: \.offset) { _, step in
-                                if !step.instructions.isEmpty {
-                                    VStack(alignment: .leading) {
-                                        Text(step.instructions)
-                                        Text(distanceUnit.nearby(step.distance)).font(.caption).foregroundStyle(.secondary)
-                                        if let notice = step.notice { Text(notice).font(.caption) }
-                                    }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
-                                }
-                            }
-                        }
-                    }
-                }.padding()
-            }.pausePathSurface()
-        .navigationTitle(navigator.state == .ready ? "Your walking route" : "Your walk").navigationBarTitleDisplayMode(.inline)
-                .toolbar { Button(navigator.state == .ready || navigator.state == .arrived ? "Close" : "End walk") {
-                    if navigator.state == .ready || navigator.state == .arrived { navigator.stop(); dismiss() }
-                    else { showEndConfirmation = true }
-                } }
+            Group {
+                if navigator.state == .ready { routePreview }
+                else { activeNavigation }
+            }
+                .navigationTitle(navigator.state == .ready ? "Your walking route" : "Your walk")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { if navigator.state == .ready { Button("Close") { navigator.stop(); dismiss() } } }
+                .toolbar(navigator.state == .ready ? .visible : .hidden, for: .navigationBar)
                 .confirmationDialog("End this walk?", isPresented: $showEndConfirmation, titleVisibility: .visible) {
                     Button("End walk", role: .destructive) { finishWalk(completed: false) }
                 }
@@ -157,6 +76,7 @@ struct WalkingNavigationView: View {
         }
         .sheet(isPresented: $showWeather) { weatherSheet }
         .sheet(isPresented: $showWalkSettings) { walkSettingsSheet }
+        .sheet(isPresented: $showRouteDetails) { activeRouteDetails }
         .onAppear { if navigator.plan == nil { navigator.prepare(walk) } }
         .task(id: "\(plan.id)-\(weatherGuidanceEnabled)-\(showWeather)") {
             guard weatherGuidanceEnabled, showWeather else { return }
@@ -175,7 +95,12 @@ struct WalkingNavigationView: View {
             }
         }
         .onDisappear { if !takingBreak && scenePhase == .active { navigator.stop() } }
-        .onChange(of: navigator.plan?.id) { camera = .automatic; suggestedStops = [] }
+        .onChange(of: navigator.plan?.id) {
+            if navigator.state == .ready { camera = .automatic } else { updateNavigationCamera() }
+            suggestedStops = []
+        }
+        .onChange(of: navigator.displayCoordinate) { _, _ in updateNavigationCamera() }
+        .onChange(of: navigator.headingDegrees) { _, _ in updateNavigationCamera() }
         .onChange(of: navigator.state) { _, state in
             if state == .arrived { finishWalk(completed: true) }
         }
@@ -189,6 +114,9 @@ struct WalkingNavigationView: View {
                 Form {
                     if !walkCompletionMessage.isEmpty {
                         Section("Walk complete") { Text(walkCompletionMessage) }
+                    }
+                    if let milestoneMessage {
+                        Section { Label(milestoneMessage, systemImage: "trophy.fill") }
                     }
                     Section("How did this walk feel?") {
                         ForEach(Manageability.allCases, id: \.self) { feeling in
@@ -228,13 +156,379 @@ struct WalkingNavigationView: View {
             }
         }
     }
+    private var routePreview: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                routeReadyControls
+                routeMap
+                    .frame(height: 220)
+                    .clipShape(RoundedRectangle(cornerRadius: 22))
+                HStack {
+                    Button("Recenter", systemImage: "location.fill") {
+                        if let coordinate = navigator.displayCoordinate {
+                            camera = .region(MKCoordinateRegion(center: coordinate.mapCoordinate,
+                                                                 latitudinalMeters: 500, longitudinalMeters: 500))
+                        } else { camera = .automatic }
+                    }
+                    Spacer()
+                    Button("Whole route", systemImage: "map") { camera = .automatic }
+                }
+                previewTimeline
+                previewDetails
+                HStack(spacing: 12) {
+                    Button("Weather", systemImage: "cloud.sun") { showWeather = true }
+                    Spacer()
+                    Button("Walk settings", systemImage: "slider.horizontal.3") { showWalkSettings = true }
+                }
+                .font(.subheadline).frame(minHeight: 44)
+                DisclosureGroup("More stops") {
+                    RouteBreaksView(walk: plan, currentLocation: navigator.freshLocation() ? navigator.location?.coordinate : nil,
+                        onDetour: { takingBreak = true; navigator.pause() }, onReturn: { takingBreak = false },
+                        onStopsChanged: { suggestedStops = $0 })
+                        .id(plan.id)
+                }
+                DisclosureGroup("All directions") {
+                    ForEach(Array(plan.legs.enumerated()), id: \.offset) { index, leg in
+                        Text("Leg \(index + 1)").font(.headline)
+                        ForEach(Array(leg.steps.enumerated()), id: \.offset) { _, step in
+                            if !step.instructions.isEmpty {
+                                VStack(alignment: .leading) {
+                                    Text(step.instructions)
+                                    Text(distanceUnit.nearby(step.distance)).font(.caption).foregroundStyle(.secondary)
+                                    if let notice = step.notice { Text(notice).font(.caption) }
+                                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding()
+        }
+        .pausePathSurface()
+    }
     private func closeCheckIn() { checkInWalk = nil; walkCompletionMessage = ""; navigator.stop(); dismiss() }
     private func startWalk() {
         if navigator.plan == nil { navigator.prepare(walk) }
         navigator.backgroundEnabled = backgroundWalks
         navigator.liveActivityEnabled = liveActivities
         navigator.start()
+        followsUser = true
+        lastCameraCoordinate = nil
         camera = .userLocation(followsHeading: true, fallback: .automatic)
+    }
+    private func updateNavigationCamera() {
+        guard followsUser, navigator.state != .ready, let coordinate = navigator.displayCoordinate else { return }
+        let heading = navigator.headingDegrees ?? 0
+        if let lastCameraCoordinate, let lastCameraHeading {
+            let headingChange = abs(heading - lastCameraHeading).truncatingRemainder(dividingBy: 360)
+            if WalkingGeometry.distance(lastCameraCoordinate, coordinate) < 5,
+               min(headingChange, 360 - headingChange) < 8 { return }
+        }
+        lastCameraCoordinate = coordinate
+        lastCameraHeading = heading
+        let radians = heading * .pi / 180
+        let latitudeRadians = coordinate.latitude * .pi / 180
+        let forwardMeters = 55.0
+        let shiftedLongitude = coordinate.longitude + forwardMeters * sin(radians) / (111_195 * max(0.1, cos(latitudeRadians)))
+        let longitude = shiftedLongitude > 180 ? shiftedLongitude - 360 : shiftedLongitude < -180 ? shiftedLongitude + 360 : shiftedLongitude
+        let center = CLLocationCoordinate2D(
+            latitude: max(-89.9, min(89.9, coordinate.latitude + forwardMeters * cos(radians) / 111_195)),
+            longitude: longitude)
+        let position = MapCamera(centerCoordinate: center, distance: 420,
+                                 heading: heading, pitch: 55)
+        withAnimation(.easeOut(duration: 0.55)) { camera = .camera(position) }
+    }
+    private var routeMap: some View {
+        Map(position: $camera) {
+            if let coordinate = navigator.displayCoordinate {
+                Annotation("Your location", coordinate: coordinate.mapCoordinate) {
+                    Image(systemName: "location.north.fill")
+                        .font(.headline.weight(.black)).foregroundStyle(PausePathPalette.ink)
+                        .frame(width: 42, height: 42)
+                        .background(PausePathPalette.lime, in: Circle())
+                        .overlay(Circle().strokeBorder(.white, lineWidth: 3))
+                        .shadow(color: .black.opacity(0.28), radius: 7, y: 3)
+                        .accessibilityLabel("Your current location")
+                }.annotationTitles(.hidden)
+            }
+            ForEach(Array(plan.legs.enumerated()), id: \.offset) { index, leg in
+                MapPolyline(leg.polyline)
+                    .stroke(index == navigator.progress.legIndex ? PausePathPalette.teal : PausePathPalette.teal.opacity(0.65),
+                            lineWidth: index == navigator.progress.legIndex ? 8 : 5)
+            }
+            let endsNearStart = plan.paths.last?.last.map { WalkingGeometry.distance(plan.start, $0) <= 40 } ?? false
+            if endsNearStart, let turnaround = plan.paths.first?.last {
+                Marker("Turnaround", systemImage: "arrow.uturn.down", coordinate: turnaround.mapCoordinate).tint(PausePathPalette.teal)
+            } else {
+                ForEach(Array(plan.legs.dropLast().enumerated()), id: \.offset) { index, leg in
+                    if let coordinate = leg.polyline.walkingCoordinates.last?.mapCoordinate {
+                        let stop = plan.stops.indices.contains(index) ? plan.stops[index] : nil
+                        Marker(stop?.item.name ?? "Stop \(index + 1)",
+                               systemImage: stop?.kind.symbol ?? "mappin.and.ellipse", coordinate: coordinate)
+                            .tint(stop?.kind.mapColor ?? PausePathPalette.teal)
+                    }
+                }
+            }
+            ForEach(suggestedStops.filter { !$0.unavailable && $0.location.coordinates.count == 2 }) { poi in
+                Marker(poi.name ?? "Break stop", systemImage: FacilityKind.fromAPI(poi.category)?.symbol ?? "mappin",
+                       coordinate: poi.coordinate).tint(FacilityKind.fromAPI(poi.category)?.mapColor ?? PausePathPalette.teal)
+            }
+            Marker("Start", coordinate: plan.start.mapCoordinate)
+            if let end = plan.paths.last?.last {
+                Marker(endsNearStart ? "Finish" : "Destination", systemImage: "flag.fill", coordinate: end.mapCoordinate)
+                    .tint(PausePathPalette.lime)
+            }
+        }
+        .mapStyle(.standard(elevation: .realistic, pointsOfInterest: .excludingAll))
+        .mapControls { MapCompass(); MapScaleView() }
+    }
+    private var activeNavigation: some View {
+        ZStack {
+            routeMap
+                .ignoresSafeArea()
+                .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in followsUser = false })
+            VStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("PAUSEPATH · WALKING")
+                            .font(.caption2.weight(.heavy)).tracking(1)
+                            .foregroundStyle(PausePathPalette.lime)
+                        Text(plan.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
+                    Menu {
+                        Button("Weather", systemImage: "cloud.sun") { showWeather = true }
+                        Button("Walk settings", systemImage: "slider.horizontal.3") { showWalkSettings = true }
+                        Button("Return to start", systemImage: "arrow.uturn.backward") { showReturnConfirmation = true }
+                            .disabled(navigator.state != .walking || !navigator.freshLocation() || navigator.isRecalculating)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.headline.weight(.bold))
+                            .frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("More walk options")
+                    Button("End", systemImage: "xmark") { showEndConfirmation = true }
+                        .font(.subheadline.weight(.bold))
+                        .labelStyle(.titleAndIcon)
+                        .frame(minHeight: 44)
+                }
+                .padding(.horizontal, 17).padding(.vertical, 9)
+                .foregroundStyle(.white)
+                .background(PausePathPalette.ink.opacity(0.94), in: RoundedRectangle(cornerRadius: 18))
+                guidanceBanner
+                Spacer(minLength: 16)
+                HStack(spacing: 10) {
+                    mapControl("location.north.fill", label: "Follow me") {
+                        followsUser = true; lastCameraCoordinate = nil; updateNavigationCamera()
+                    }
+                    mapControl("map.fill", label: "Whole route") {
+                        followsUser = false; camera = .automatic
+                    }
+                    Spacer()
+                    mapControl(navigator.voiceEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                               label: navigator.voiceEnabled ? "Mute directions" : "Speak directions") {
+                        navigator.setVoice(!navigator.voiceEnabled)
+                    }
+                }
+                if dynamicTypeSize.isAccessibilitySize {
+                    ScrollView { tripPanel }.frame(maxHeight: 290)
+                } else {
+                    tripPanel
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
+        }
+        .background(PausePathPalette.background)
+    }
+    private var guidanceBanner: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .center, spacing: 14) {
+                Image(systemName: maneuverSymbol)
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundStyle(PausePathPalette.ink)
+                    .frame(width: 54, height: 54)
+                    .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 16))
+                VStack(alignment: .leading, spacing: 3) {
+                    TimelineView(.periodic(from: .now, by: 2)) { timeline in
+                        Text(navigator.state == .paused ? "Walk paused" :
+                             navigator.isRecalculating ? "Finding a new route…" :
+                             !navigator.freshLocation(at: timeline.date) ? "Waiting for GPS" : navigator.currentInstruction)
+                            .font(.title3.weight(.bold))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.85)
+                    }
+                    if let step = navigator.stepDetails, navigator.state == .walking, navigator.freshLocation() {
+                        Text("In \(distanceUnit.nearby(step.meters))")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.78))
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            if navigator.progress.offRoute || navigator.isRecalculating {
+                Text(navigator.status)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.84))
+            }
+            if navigator.progress.offRoute, !navigator.progress.hasStarted,
+               navigator.freshLocation(), !navigator.isRecalculating {
+                Button("Route from my location", systemImage: "arrow.triangle.2.circlepath") {
+                    navigator.recalculate(returnToStart: false)
+                }
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(PausePathPalette.lime)
+                .frame(minHeight: 44)
+            }
+        }
+        .foregroundStyle(.white)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(PausePathPalette.ink, in: RoundedRectangle(cornerRadius: 22))
+        .shadow(color: .black.opacity(0.16), radius: 12, y: 5)
+    }
+    private var maneuverSymbol: String {
+        let instruction = navigator.currentInstruction.lowercased()
+        if instruction.contains("u-turn") || instruction.contains("uturn") { return "arrow.uturn.up" }
+        if instruction.contains("left") { return "arrow.turn.up.left" }
+        if instruction.contains("right") { return "arrow.turn.up.right" }
+        if navigator.state == .paused { return "pause.fill" }
+        return "arrow.up"
+    }
+    private var upcomingRouteStop: (place: DiscoveredPlace, meters: Double)? {
+        let index = navigator.progress.legIndex
+        guard plan.stops.indices.contains(index), plan.legs.indices.contains(index),
+              navigator.progress.paths.indices.contains(index) else { return nil }
+        let legLength = WalkingGeometry.length(navigator.progress.paths[index])
+        let traversed = legLength > 0 ? navigator.progress.metersAlongLeg / legLength * plan.legs[index].distance : 0
+        return (plan.stops[index], max(0, plan.legs[index].distance - traversed))
+    }
+    private func mapControl(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.headline.weight(.bold))
+                .frame(width: 48, height: 48)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+        .background(PausePathPalette.surface, in: Circle())
+        .overlay(Circle().strokeBorder(PausePathPalette.teal.opacity(0.15)))
+        .shadow(color: .black.opacity(0.12), radius: 7, y: 3)
+        .accessibilityLabel(label)
+    }
+    private var tripPanel: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Capsule().fill(PausePathPalette.teal.opacity(0.25)).frame(width: 34, height: 4).frame(maxWidth: .infinity)
+            TimelineView(.periodic(from: .now, by: 30)) { timeline in
+                let minutes = max(1, Int(ceil(navigator.remainingMeters / max(0.3, plan.preferences.speedMetersPerSecond) / 60)))
+                let arrivalAvailable = navigator.state == .walking && navigator.freshLocation(at: timeline.date)
+                let arrival = arrivalAvailable
+                    ? timeline.date.addingTimeInterval(Double(minutes * 60)).formatted(date: .omitted, time: .shortened) : "—"
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 10) {
+                        tripStat("Est. arrival", value: arrival)
+                        tripStat("Time left", value: "\(minutes) min")
+                        tripStat("Distance", value: distanceUnit.distance(navigator.remainingMeters))
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        tripStat("Est. arrival", value: arrival)
+                        tripStat("Time left", value: "\(minutes) min")
+                        tripStat("Distance", value: distanceUnit.distance(navigator.remainingMeters))
+                    }
+                }
+            }
+            ProgressView(value: min(navigator.progress.completedMeters, navigator.progress.totalMeters),
+                         total: max(1, navigator.progress.totalMeters))
+                .tint(PausePathPalette.lime)
+            if let next = upcomingRouteStop {
+                HStack(spacing: 9) {
+                    if next.place.kind == .bench {
+                        BenchSymbol().fill(next.place.kind.mapColor).frame(width: 18, height: 18)
+                    } else {
+                        Image(systemName: next.place.kind.symbol).foregroundStyle(next.place.kind.mapColor)
+                    }
+                    Text(next.place.item.name ?? next.place.kind.chipTitle).lineLimit(1)
+                    Spacer(minLength: 6)
+                    Text(distanceUnit.nearby(next.meters)).fontWeight(.semibold)
+                }
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+            } else if plan.stops.isEmpty {
+                Text("No planned pause on this route").font(.caption).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 10) {
+                Button(navigator.state == .paused ? "Resume" : "Pause",
+                       systemImage: navigator.state == .paused ? "play.fill" : "pause.fill") {
+                    if navigator.state == .paused { navigator.start(); followsUser = true; lastCameraCoordinate = nil; updateNavigationCamera() }
+                    else { navigator.pause() }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(PausePathPalette.ink)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 14))
+                Button("Details", systemImage: "list.bullet") { showRouteDetails = true }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(PausePathPalette.teal.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+            }
+            .font(.subheadline.weight(.bold))
+            if navigator.locationPermissionDenied {
+                Button("Allow location in Settings", systemImage: "location.slash") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                }.font(.caption)
+            }
+        }
+        .padding(17)
+        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 26))
+        .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(PausePathPalette.teal.opacity(0.13)))
+        .shadow(color: .black.opacity(0.18), radius: 16, y: 5)
+    }
+    private func tripStat(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(value).font(.system(.title3, design: .rounded).weight(.bold))
+                .lineLimit(1).minimumScaleFactor(0.75).monospacedDigit()
+                .foregroundStyle(.primary)
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+    private var activeRouteDetails: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    navigationStatus
+                    NextPauseCard(navigator: navigator)
+                    RouteBreaksView(walk: plan, currentLocation: navigator.freshLocation() ? navigator.location?.coordinate : nil,
+                        onDetour: { takingBreak = true; navigator.pause() }, onReturn: { takingBreak = false },
+                        onStopsChanged: { suggestedStops = $0 })
+                        .id(plan.id)
+                    DisclosureGroup("All directions") {
+                        ForEach(Array(plan.legs.enumerated()), id: \.offset) { index, leg in
+                            Text("Leg \(index + 1)").font(.headline)
+                            ForEach(Array(leg.steps.enumerated()), id: \.offset) { _, step in
+                                if !step.instructions.isEmpty {
+                                    Text("\(step.instructions) · \(distanceUnit.nearby(step.distance))")
+                                        .font(.subheadline).padding(.vertical, 3)
+                                }
+                            }
+                        }
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 20))
+                }
+                .padding(16)
+            }
+            .pausePathSurface()
+            .navigationTitle("Walk details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showRouteDetails = false } } }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
     private var routeReadyControls: some View {
         VStack(alignment: .leading, spacing: 14) {

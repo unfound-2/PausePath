@@ -11,6 +11,7 @@ import UIKit
     var state: State = .ready
     var location: CLLocation?
     private(set) var displayCoordinate: Coordinate?
+    private(set) var headingDegrees: Double?
     var plan: GeneratedWalk?
     var progress = WalkProgress(paths: [])
     var status = "Start navigation when you are at the starting point."
@@ -39,6 +40,8 @@ import UIKit
     private var wantsPosition = false
     private var requestedPreciseAccuracy = false
     private var recentGPSCoordinates: [(Coordinate, Date)] = []
+    private var offRouteFixCount = 0
+    private var lastAutomaticReroute: Date?
     private var accumulatedActiveSeconds: TimeInterval = 0
     private var activeIntervalStartedAt: Date?
     private var routeTask: Task<Void, Never>?
@@ -56,6 +59,7 @@ import UIKit
         stop(); stopStatuses = [:]; self.plan = plan; returnOrigin = plan.start; progress = WalkProgress(paths: plan.paths)
         accumulatedActiveSeconds = 0; activeIntervalStartedAt = nil
         recentGPSCoordinates = []
+        offRouteFixCount = 0; lastAutomaticReroute = nil; headingDegrees = nil
         journeySegments = []; journeyStartedAt = nil; beginsJourneySegment = true
         previousSteps = 0; intervalSteps = nil; recordedDistanceMeters = 0
         state = .ready; status = "Go to the start marker, then start navigation."
@@ -89,6 +93,7 @@ import UIKit
             }
             if wantsNavigation {
                 manager.allowsBackgroundLocationUpdates = backgroundEnabled
+                if CLLocationManager.headingAvailable() { manager.startUpdatingHeading() }
                 if voiceEnabled { configureSpeechAudio() }
                 manager.startUpdatingLocation()
                 status = manager.accuracyAuthorization == .fullAccuracy
@@ -116,6 +121,7 @@ import UIKit
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let fix = locations.last else { return }
         location = fix
+        if fix.course.isFinite, fix.course >= 0, fix.speed >= 0.5 { headingDegrees = fix.course }
         guard wantsNavigation, state == .walking || state == .locating, !isRecalculating else {
             if wantsPosition {
                 wantsPosition = false
@@ -150,7 +156,7 @@ import UIKit
         if progress.arrived {
             finishActiveInterval(at: fix.timestamp)
             stopStepCounting()
-            state = .arrived; wantsNavigation = false; manager.stopUpdatingLocation()
+            state = .arrived; wantsNavigation = false; manager.stopUpdatingLocation(); manager.stopUpdatingHeading()
             manager.allowsBackgroundLocationUpdates = false
             backgroundSession?.invalidate(); backgroundSession = nil
             liveActivity.end(activityState)
@@ -158,20 +164,34 @@ import UIKit
             UIApplication.shared.isIdleTimerDisabled = false; status = "You’ve arrived. Your walk is complete."
         } else if progress.offRoute {
             status = progress.hasStarted ? "You appear to be off route. Return to the path or recalculate the remaining walk." : "Go to the start marker, or recalculate from your location."
-        } else { status = "Following your walking route." }
+            if progress.hasStarted {
+                offRouteFixCount += 1
+                if offRouteFixCount >= 4, Date().timeIntervalSince(lastAutomaticReroute ?? .distantPast) >= 60 {
+                    offRouteFixCount = 0
+                    lastAutomaticReroute = .now
+                    recalculate(returnToStart: false)
+                }
+            }
+        } else { offRouteFixCount = 0; status = "Following your walking route." }
         speakIfNeeded()
         updateActivity()
     }
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { beginsJourneySegment = true; status = "GPS is unavailable. Progress is paused until a fresh location arrives." }
+    func locationManager(_ manager: CLLocationManager, didUpdateHeading heading: CLHeading) {
+        guard heading.headingAccuracy >= 0, location?.speed ?? 0 < 0.5 else { return }
+        let value = heading.trueHeading >= 0 ? heading.trueHeading : heading.magneticHeading
+        if value.isFinite, value >= 0 { headingDegrees = value }
+    }
     func pause() {
         stopStepCounting()
         token = UUID(); routeTask?.cancel(); isRecalculating = false
         finishActiveInterval(at: .now)
-        wantsNavigation = false; wantsPosition = false; manager.stopUpdatingLocation(); speech.stopSpeaking(at: .immediate)
+        wantsNavigation = false; wantsPosition = false; manager.stopUpdatingLocation(); manager.stopUpdatingHeading(); speech.stopSpeaking(at: .immediate)
         manager.allowsBackgroundLocationUpdates = false
         backgroundSession?.invalidate(); backgroundSession = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         recentGPSCoordinates = []
+        offRouteFixCount = 0
         beginsJourneySegment = true
         UIApplication.shared.isIdleTimerDisabled = false
         if state != .arrived { state = .paused; status = "Walk paused. Resume when ready. Location tracking stops while paused." }
@@ -263,6 +283,7 @@ import UIKit
     func recalculate(returnToStart: Bool) {
         guard let plan, let location, freshLocation() else { status = "A fresh, accurate GPS location is needed to recalculate."; return }
         token = UUID(); let current = token; routeTask?.cancel(); isRecalculating = true
+        status = "Finding a new walking route…"
         speech.stopSpeaking(at: .immediate)
         let originalStart = returnOrigin ?? plan.start
         let endpoints: [Coordinate] = returnToStart ? [originalStart] : plan.paths.dropFirst(progress.legIndex).compactMap(\.last)
@@ -284,12 +305,18 @@ import UIKit
                 }
                 guard current == token else { return }
                 let remainingStops = returnToStart ? [] : Array(plan.stops.dropFirst(progress.legIndex))
-                let revised = GeneratedWalk(name: returnToStart ? "Return to start" : "Recalculated walk", legs: legs, preferences: plan.preferences, stops: remainingStops, allowUnknownRestStops: plan.allowUnknownRestStops)
+                let revised = GeneratedWalk(name: returnToStart ? "Return to start" : plan.name, legs: legs, preferences: plan.preferences, stops: remainingStops, allowUnknownRestStops: plan.allowUnknownRestStops)
                 self.plan = revised; progress = WalkProgress(paths: revised.paths)
+                // Adopt the fresh fix as the new route's starting position so guidance
+                // does not wait for another GPS callback before showing the first turn.
+                _ = progress.update(position: origin, accuracy: location.horizontalAccuracy,
+                                    age: Date().timeIntervalSince(location.timestamp))
+                offRouteFixCount = 0
                 // Preserve the original origin for subsequent return-to-start actions.
                 returnOrigin = returnOrigin ?? originalStart
                 updateActivity(force: true)
                 lastSpoken = ""; status = "Route updated. Distance has changed; terrain and rest stops remain unverified."
+                speakIfNeeded()
             } catch { if current == token { status = "Could not recalculate. Your previous route is still shown. Try again when connected." } }
         }
     }
