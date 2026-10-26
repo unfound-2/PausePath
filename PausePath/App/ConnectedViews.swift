@@ -139,6 +139,7 @@ struct CommunityChallengesView: View {
     @AppStorage("pausepath.personalProfile") private var profileData = Data()
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.colorScheme) private var colorScheme
     private var walks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedWalkData)) ?? [] }
     private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
 
@@ -350,7 +351,7 @@ struct CommunityChallengesView: View {
                      ? "Sign in with Apple, then join a group or start one with people you know."
                      : "Have an invite? Join your group. Or start a new one and bring friends along.")
                     .font(.subheadline)
-                    .foregroundStyle(PausePathPalette.ink.opacity(0.72))
+                    .foregroundStyle(Color.primary.opacity(0.84))
                     .fixedSize(horizontal: false, vertical: true)
             }
             if typeSize.isAccessibilitySize {
@@ -362,8 +363,8 @@ struct CommunityChallengesView: View {
                 }
             }
             Label("Groups are private. Ask a member for an invite code.", systemImage: "lock.shield")
-                .font(.caption)
-                .foregroundStyle(PausePathPalette.teal.opacity(0.74))
+                .font(.caption.weight(.medium))
+                .foregroundStyle(PausePathPalette.teal)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
@@ -390,8 +391,8 @@ struct CommunityChallengesView: View {
                 .frame(maxWidth: .infinity, minHeight: 48)
         }
         .foregroundStyle(PausePathPalette.teal)
-        .background(PausePathPalette.background, in: RoundedRectangle(cornerRadius: 15))
-        .overlay(RoundedRectangle(cornerRadius: 15).strokeBorder(PausePathPalette.teal.opacity(0.18)))
+        .background(PausePathPalette.teal.opacity(0.09), in: RoundedRectangle(cornerRadius: 15))
+        .overlay(RoundedRectangle(cornerRadius: 15).strokeBorder(PausePathPalette.teal.opacity(0.34)))
     }
 
     private var communityWelcomeArt: some View {
@@ -456,9 +457,10 @@ struct CommunityChallengesView: View {
         VStack(alignment: .leading, spacing: 5) {
             Image(systemName: icon)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(PausePathPalette.teal)
-                .frame(width: 28, height: 28)
-                .background(PausePathPalette.lime.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
+                .foregroundStyle(colorScheme == .dark ? PausePathPalette.lime : PausePathPalette.teal)
+                .frame(width: 30, height: 30)
+                .background(PausePathPalette.teal.opacity(colorScheme == .dark ? 0.20 : 0.10),
+                            in: RoundedRectangle(cornerRadius: 10))
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(PausePathPalette.teal)
@@ -550,9 +552,11 @@ struct CommunityChallengesView: View {
     private func socialShortcut(_ title: String, icon: String, detail: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.headline).foregroundStyle(PausePathPalette.teal)
+                .font(.headline)
+                .foregroundStyle(colorScheme == .dark ? PausePathPalette.lime : PausePathPalette.teal)
                 .frame(width: 38, height: 38)
-                .background(PausePathPalette.lime.opacity(0.24), in: RoundedRectangle(cornerRadius: 12))
+                .background(PausePathPalette.teal.opacity(colorScheme == .dark ? 0.20 : 0.10),
+                            in: RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
                 Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)

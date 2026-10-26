@@ -533,12 +533,12 @@ private struct WelcomeSetupView: View {
                 .font(.system(size: typeSize.isAccessibilitySize ? 30 : step == 0 ? 31 : 27,
                               weight: .bold, design: .rounded))
                 .multilineTextAlignment(.leading)
-                .foregroundStyle(isDarkInsight ? .white : PausePathPalette.ink)
+                .foregroundStyle(isDarkInsight ? Color.white : Color.primary)
                 .fixedSize(horizontal: false, vertical: true)
             Text(subtitle)
                 .font(.subheadline)
                 .multilineTextAlignment(.leading)
-                .foregroundStyle(isDarkInsight ? .white.opacity(0.78) : PausePathPalette.ink.opacity(0.68))
+                .foregroundStyle(isDarkInsight ? Color.white.opacity(0.78) : Color.primary.opacity(0.78))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -555,7 +555,7 @@ private struct WelcomeSetupView: View {
                     .foregroundStyle(isDarkInsight ? PausePathPalette.lime : PausePathPalette.teal.opacity(0.68))
                 Text(destination.title)
                     .font(.title3.weight(.bold))
-                    .foregroundStyle(isDarkInsight ? .white : PausePathPalette.ink)
+                    .foregroundStyle(isDarkInsight ? Color.white : Color.primary)
             }
             Spacer(minLength: 0)
             Image(systemName: "arrow.right")
@@ -639,7 +639,7 @@ private struct WelcomeSetupView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Walk with us. Choose your goals and nearby stops along the way.")
                 .font(.subheadline)
-                .foregroundStyle(PausePathPalette.ink.opacity(0.78))
+                .foregroundStyle(Color.primary.opacity(0.82))
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 featurePill("Route options", icon: "map")
@@ -1088,14 +1088,14 @@ private struct WelcomeSetupView: View {
                 HStack(spacing: 10) {
                     Circle().fill(selectedSampleStop.mapColor).frame(width: 12, height: 12)
                     Text(selectedSampleStop.rawValue)
-                        .font(.headline).foregroundStyle(PausePathPalette.ink)
+                        .font(.headline).foregroundStyle(.primary)
                     Spacer()
                     Text("EXAMPLE")
                         .font(.caption2.weight(.heavy)).tracking(0.7)
                         .foregroundStyle(PausePathPalette.teal)
                 }
                 Text(selectedSampleStop.detail)
-                    .font(.subheadline).foregroundStyle(PausePathPalette.ink.opacity(0.7))
+                    .font(.subheadline).foregroundStyle(Color.primary.opacity(0.78))
                     .fixedSize(horizontal: false, vertical: true)
                     .contentTransition(.opacity)
             }
@@ -1373,7 +1373,7 @@ private struct WelcomeSetupView: View {
                 }
                 Text(title)
                     .font(.subheadline.weight(.bold))
-                    .foregroundStyle(PausePathPalette.ink)
+                    .foregroundStyle(.primary)
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                     .minimumScaleFactor(0.85)
                 if let subtitle {
