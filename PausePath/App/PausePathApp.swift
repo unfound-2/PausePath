@@ -356,12 +356,16 @@ private struct WelcomeSetupView: View {
         if typeSize.isAccessibilitySize { return 0.84 }
         switch step {
         case 0: return 0.45
-        case 1: return 0.70
-        case 2: return 0.66
-        case 3, 4, 9: return 0.59
-        case 5, 6, 7, 8: return 0.68
-        case 10: return 0.76
-        case 11: return 0.82
+        case 1: return 0.72
+        case 2: return 0.61
+        case 3: return 0.53
+        case 4: return 0.52
+        case 5: return 0.63
+        case 6: return 0.64
+        case 7, 8: return 0.65
+        case 9: return 0.53
+        case 10: return 0.60
+        case 11: return 0.69
         default: return 0.60
         }
     }
@@ -586,12 +590,12 @@ private struct WelcomeSetupView: View {
         case 3: "Just your answer, shown back to you."
         case 4: "Set a flexible goal for the weeks ahead."
         case 5: "Set weekly goals. Routes cannot estimate calories."
-        case 6: "Your answers become a simple four-week view."
+        case 6: "A four-week view from your answers, not a prediction."
         case 7: "A sample shows how a route becomes a guided walk."
         case 8: "Tap a pin and watch the next pause change."
         case 9: "Use a name you’ll recognize."
-        case 10: "Choose the connections you want to use."
-        default: "Check My Path for recorded trends; real results may differ."
+        case 10: "Optional connections. Search anywhere."
+        default: "Review recorded trends in My Path."
         }
     }
 
@@ -706,14 +710,14 @@ private struct WelcomeSetupView: View {
 
     private var frequencyStep: some View {
         setupCard(title: "Typical week", subtitle: "", icon: "calendar") {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 82))], spacing: 10) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 3), spacing: 7) {
                 ForEach(WalkingFrequency.allCases.filter { $0 != .unsure }, id: \.self) { answer in
                     Button {
                         withAnimation(reduceMotion ? nil : .smooth(duration: 0.2)) { currentFrequency = answer }
                     } label: {
                         Text(answer.title)
-                            .font(.title3.weight(.bold)).monospacedDigit()
-                            .frame(maxWidth: .infinity, minHeight: 58)
+                            .font(.subheadline.weight(.bold)).monospacedDigit()
+                            .frame(maxWidth: .infinity, minHeight: 48)
                             .background(currentFrequency == answer ? PausePathPalette.lime : PausePathPalette.background,
                                         in: RoundedRectangle(cornerRadius: 16))
                             .overlay(RoundedRectangle(cornerRadius: 16)
@@ -733,7 +737,7 @@ private struct WelcomeSetupView: View {
                     if currentFrequency == .unsure { Image(systemName: "checkmark.circle.fill") }
                 }
                 .font(.subheadline.weight(.semibold))
-                .padding(15)
+                .padding(11)
                 .background(currentFrequency == .unsure ? PausePathPalette.lime.opacity(0.25) : PausePathPalette.background,
                             in: RoundedRectangle(cornerRadius: 15))
             }
@@ -743,9 +747,9 @@ private struct WelcomeSetupView: View {
     }
 
     private var startingPointStep: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 8) {
             Text(currentFrequency == .unsure ? "—" : currentFrequency.title)
-                .font(.system(size: 82, weight: .heavy, design: .rounded))
+                .font(.system(size: 64, weight: .heavy, design: .rounded))
                 .monospacedDigit().foregroundStyle(PausePathPalette.teal)
                 .contentTransition(.numericText())
                 .minimumScaleFactor(0.75)
@@ -756,7 +760,7 @@ private struct WelcomeSetupView: View {
                 ForEach(0..<7, id: \.self) { index in
                     Capsule()
                         .fill(index < max(currentFrequency.rawValue, 0) ? PausePathPalette.lime : PausePathPalette.teal.opacity(0.13))
-                        .frame(maxWidth: .infinity).frame(height: 13)
+                        .frame(maxWidth: .infinity).frame(height: 9)
                         .accessibilityHidden(true)
                 }
             }
@@ -764,14 +768,10 @@ private struct WelcomeSetupView: View {
             Text("YOUR FOCUS  ·  \(displayTitle(for: profile.goal).uppercased())")
                 .font(.caption.weight(.bold)).tracking(0.6)
                 .foregroundStyle(PausePathPalette.teal.opacity(0.78))
-            Text("Next, you’ll choose where you want to go from here.")
-                .font(.subheadline)
-                .foregroundStyle(PausePathPalette.teal.opacity(0.78))
-                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 20)
-        .padding(.vertical, 24)
+        .padding(.vertical, 16)
         .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 30))
         .overlay(RoundedRectangle(cornerRadius: 30).strokeBorder(PausePathPalette.teal.opacity(0.10)))
     }
@@ -832,10 +832,10 @@ private struct WelcomeSetupView: View {
 
     private var extraGoalsStep: some View {
         VStack(spacing: 9) {
-            setupCard(title: "Walking time", subtitle: "A weekly goal you can edit in My Path.", icon: "clock") {
+            setupCard(title: "Walking time", subtitle: "", icon: "clock") {
                 HStack(alignment: .firstTextBaseline) {
                     Text("\(profile.weeklyMinutesTarget)")
-                        .font(.system(size: 39, weight: .bold, design: .rounded))
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
                         .monospacedDigit()
                     Text("min / week").font(.subheadline.weight(.semibold))
                 }
@@ -855,15 +855,35 @@ private struct WelcomeSetupView: View {
                     saveProfile()
                 }))
                 if let target = profile.weeklyActiveEnergyTargetKcal {
-                    Stepper(value: Binding(get: { target }, set: { value in
-                        profile.weeklyActiveEnergyTargetKcal = value; saveProfile()
-                    }), in: 100...5000, step: 50) {
+                    HStack(spacing: 8) {
                         Text("\(target) active kcal / week")
-                            .font(.title3.weight(.bold)).foregroundStyle(PausePathPalette.teal)
+                            .font(.subheadline.weight(.bold)).foregroundStyle(PausePathPalette.teal)
+                        Spacer(minLength: 4)
+                        Button { changeWeeklyEnergyGoal(by: -50) } label: {
+                            Image(systemName: "minus")
+                                .frame(width: 32, height: 32)
+                                .background(PausePathPalette.background, in: Circle())
+                        }
+                        .disabled(target <= 100)
+                        .accessibilityLabel("Decrease weekly active calories goal")
+                        Button { changeWeeklyEnergyGoal(by: 50) } label: {
+                            Image(systemName: "plus")
+                                .frame(width: 32, height: 32)
+                                .background(PausePathPalette.background, in: Circle())
+                        }
+                        .disabled(target >= 5000)
+                        .accessibilityLabel("Increase weekly active calories goal")
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
+    }
+
+    private func changeWeeklyEnergyGoal(by amount: Int) {
+        guard let target = profile.weeklyActiveEnergyTargetKcal else { return }
+        profile.weeklyActiveEnergyTargetKcal = min(5000, max(100, target + amount))
+        saveProfile()
     }
 
     private var outlookStep: some View {
@@ -873,7 +893,7 @@ private struct WelcomeSetupView: View {
                     Text("STARTING RHYTHM")
                         .font(.caption2.weight(.heavy)).tracking(1)
                     Text(currentFrequency.fourWeekText)
-                        .font(.system(size: 42, weight: .heavy, design: .rounded))
+                        .font(.system(size: 36, weight: .heavy, design: .rounded))
                         .monospacedDigit()
                     Text("in 4 weeks")
                         .font(.caption.weight(.semibold))
@@ -886,7 +906,7 @@ private struct WelcomeSetupView: View {
                     Text("CHOSEN GOAL")
                         .font(.caption2.weight(.heavy)).tracking(1)
                     Text(outlookRevealed ? "\(profile.weeklyWalkTarget * 4)" : "0")
-                        .font(.system(size: 42, weight: .heavy, design: .rounded))
+                        .font(.system(size: 36, weight: .heavy, design: .rounded))
                         .monospacedDigit()
                         .contentTransition(.numericText())
                     Text("in 4 weeks")
@@ -895,7 +915,7 @@ private struct WelcomeSetupView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .foregroundStyle(PausePathPalette.ink)
-            .padding(16)
+            .padding(12)
             .frame(maxWidth: .infinity)
             .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 28))
             HStack(spacing: 8) {
@@ -905,12 +925,12 @@ private struct WelcomeSetupView: View {
                             .font(.caption2.weight(.bold)).foregroundStyle(.secondary)
                         Capsule()
                             .fill(PausePathPalette.lime)
-                            .frame(height: outlookRevealed ? CGFloat(24 + profile.weeklyWalkTarget * 3) : 8)
+                            .frame(height: outlookRevealed ? CGFloat(16 + profile.weeklyWalkTarget * 2) : 8)
                         Text("\(profile.weeklyWalkTarget)")
                             .font(.headline.weight(.bold)).monospacedDigit().foregroundStyle(PausePathPalette.teal)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 88, alignment: .bottom)
-                    .padding(.horizontal, 7).padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, minHeight: 74, alignment: .bottom)
+                    .padding(.horizontal, 7).padding(.vertical, 8)
                     .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 17))
                 }
             }
@@ -925,8 +945,6 @@ private struct WelcomeSetupView: View {
             .foregroundStyle(PausePathPalette.teal)
             .lineLimit(2)
             .minimumScaleFactor(0.8)
-            Text("Illustration from your answers, not recorded or predicted activity.")
-                .font(.caption).foregroundStyle(.secondary)
         }
         .onAppear {
             outlookRevealed = false
@@ -1170,9 +1188,6 @@ private struct WelcomeSetupView: View {
                     }.buttonStyle(.bordered)
                 }
             }
-            Text("All connections are optional. Search any area without sharing your location.")
-                .font(.caption).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
             if account.busy { ProgressView("Signing in…") }
             else if account.message != PausePathAccount.signedOutMessage && !account.isSignedIn {
                 Text(account.message).font(.caption).foregroundStyle(.secondary)
@@ -1182,7 +1197,9 @@ private struct WelcomeSetupView: View {
                 Text("Precise Location is off; nearby results may be less accurate.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if !notificationStatus.isEmpty { Text(notificationStatus).font(.caption).foregroundStyle(.secondary) }
+            if !notificationStatus.isEmpty && notificationStatus != "Daily recaps are always available in My Path." {
+                Text(notificationStatus).font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -1198,8 +1215,8 @@ private struct WelcomeSetupView: View {
             Spacer(minLength: 2)
             action()
         }
-        .padding(11)
-        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+        .padding(8)
+        .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
         .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 17))
         .overlay(RoundedRectangle(cornerRadius: 17).strokeBorder(PausePathPalette.teal.opacity(0.08)))
     }
@@ -1210,10 +1227,10 @@ private struct WelcomeSetupView: View {
         let minutes = recentWalks.reduce(0.0) { $0 + max(0, $1.seconds) } / 60
         let sample = ActivityGrowthModel.illustrativeSample
 
-        return VStack(spacing: 12) {
-            setupCard(title: "A sample user’s path", subtitle: "Illustrative model · 8 weeks", icon: "chart.xyaxis.line") {
+        return VStack(spacing: 8) {
+            setupCard(title: "Fictional 8-week path", subtitle: "Not a prediction", icon: "chart.xyaxis.line") {
                 ActivityGrowthChart(model: sample)
-                    .frame(height: 75)
+                    .frame(height: 38)
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("BEFORE").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
@@ -1229,8 +1246,6 @@ private struct WelcomeSetupView: View {
                             .font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit()
                     }
                 }
-                Label("Fictional example · not a predicted result", systemImage: "sparkles")
-                    .font(.caption2.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
                 DisclosureGroup("How the curve is calculated") {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("m(t) = b + A(1 − e⁻ᵏᵗ)").font(.system(.body, design: .serif).weight(.semibold))
@@ -1243,11 +1258,11 @@ private struct WelcomeSetupView: View {
                 .font(.caption.weight(.semibold))
             }
 
-            setupCard(title: "Your starting point", subtitle: "Apple Health walking workouts · 28 days", icon: "figure.walk") {
+            setupCard(title: "Health walking workouts · 28 days", subtitle: "", icon: "figure.walk") {
                 if health.hasConnected && !recentWalks.isEmpty {
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
                         Text(minutes.formatted(.number.precision(.fractionLength(0))))
-                            .font(.system(size: 48, weight: .bold, design: .rounded))
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
                             .monospacedDigit().contentTransition(.numericText())
                         Text("recorded min · \(recentWalks.count) workouts")
                             .font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
@@ -1256,20 +1271,20 @@ private struct WelcomeSetupView: View {
                     .accessibilityElement(children: .combine)
                 } else if health.hasConnected {
                     Label("No walking workouts recorded", systemImage: "minus.circle")
-                        .font(.headline)
-                    Text("Missing workouts do not mean you did not walk.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.subheadline.weight(.semibold))
                 } else {
-                    Label("No Health baseline available", systemImage: "minus.circle")
-                        .font(.headline)
-                    Button {
-                        healthRequested = true
-                        Task { await health.connect() }
-                    } label: {
-                        Label(health.isLoading ? "Connecting…" : "Connect Apple Health", systemImage: "heart.text.square")
+                    HStack(spacing: 8) {
+                        Label("No Health baseline", systemImage: "minus.circle")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer(minLength: 4)
+                        Button(health.isLoading ? "Connecting…" : "Connect") {
+                            healthRequested = true
+                            Task { await health.connect() }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(health.isLoading)
+                        .accessibilityLabel("Connect Apple Health")
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(health.isLoading)
                 }
             }
 
@@ -1626,18 +1641,21 @@ private struct JourneyStopPin: View {
                 .frame(width: 62, height: 13)
                 .offset(y: 18)
             landmark
-                .offset(x: -8, y: 2)
+                .offset(y: 2)
             Circle()
                 .fill(stop == .cafe || stop == .finish ? PausePathPalette.teal : stop.color)
                 .frame(width: 25, height: 25)
                 .overlay {
-                    if stop == .bench {
-                        BenchSymbol().fill(.white).frame(width: 15, height: 15)
-                    } else {
-                        Image(systemName: stop.symbol)
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.white)
+                    Group {
+                        if stop == .bench {
+                            BenchSymbol().fill(.white).frame(width: 15, height: 15)
+                        } else {
+                            Image(systemName: stop.symbol)
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
                     }
+                    .frame(width: 25, height: 25, alignment: .center)
                 }
                 .overlay(Circle().strokeBorder(PausePathPalette.background, lineWidth: 2))
                 .offset(x: 23, y: -21)
