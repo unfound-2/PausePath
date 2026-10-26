@@ -1674,7 +1674,7 @@ private struct JourneyStopPin: View {
             landmark
                 .offset(y: 2)
             Circle()
-                .fill(stop == .cafe || stop == .finish ? PausePathPalette.teal : stop.color)
+                .fill(stop == .finish ? PausePathPalette.teal : stop.color)
                 .frame(width: 25, height: 25)
                 .overlay {
                     Group {
