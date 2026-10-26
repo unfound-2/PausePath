@@ -353,14 +353,16 @@ private struct WelcomeSetupView: View {
         }
     }
     private var panelFraction: CGFloat {
-        if typeSize.isAccessibilitySize { return 0.78 }
+        if typeSize.isAccessibilitySize { return 0.84 }
         switch step {
         case 0: return 0.45
-        case 1, 3: return 0.66
-        case 2: return 0.62
-        case 4, 9: return 0.54
-        case 7, 8, 10, 11: return 0.64
-        default: return 0.58
+        case 1: return 0.70
+        case 2: return 0.66
+        case 3, 4, 9: return 0.59
+        case 5, 6, 7, 8: return 0.68
+        case 10: return 0.76
+        case 11: return 0.82
+        default: return 0.60
         }
     }
 
@@ -383,17 +385,16 @@ private struct WelcomeSetupView: View {
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {
                             ScrollView(.vertical, showsIndicators: false) {
-                                VStack(alignment: .leading, spacing: 14) {
+                                VStack(alignment: .leading, spacing: 10) {
                                     journeyStopLabel
                                     prompt
                                     page
-                                    howThisWorks
                                 }
                                 .frame(maxWidth: 560)
                                 .frame(maxWidth: .infinity)
                                 .padding(.horizontal, 22)
-                                .padding(.top, 22)
-                                .padding(.bottom, 12)
+                                .padding(.top, 16)
+                                .padding(.bottom, 8)
                             }
                             .scrollDismissesKeyboard(.interactively)
                             .id(step)
@@ -503,16 +504,29 @@ private struct WelcomeSetupView: View {
             Circle().fill(journeyCheckpoint.color).frame(width: 8, height: 8)
             Text(journeyCheckpoint.title.uppercased())
                 .font(.caption2.weight(.heavy)).tracking(1.2)
+            Spacer(minLength: 0)
+            Button {
+                helpExpanded = true
+            } label: {
+                Label("How this works", systemImage: "info.circle")
+                    .font(.caption2.weight(.semibold))
+            }
+            .buttonStyle(.plain)
+            .alert("How this works", isPresented: $helpExpanded) {
+                Button("Done", role: .cancel) { }
+            } message: {
+                Text(helpText)
+            }
         }
         .foregroundStyle(isDarkInsight ? .white.opacity(0.86) : PausePathPalette.teal)
         .padding(.horizontal, 4)
-        .accessibilityElement(children: .combine)
     }
 
     private var prompt: some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(title)
-                .font(.system(size: typeSize.isAccessibilitySize ? 30 : 31, weight: .bold, design: .rounded))
+                .font(.system(size: typeSize.isAccessibilitySize ? 30 : step == 0 ? 31 : 27,
+                              weight: .bold, design: .rounded))
                 .multilineTextAlignment(.leading)
                 .foregroundStyle(isDarkInsight ? .white : PausePathPalette.ink)
                 .fixedSize(horizontal: false, vertical: true)
@@ -571,13 +585,13 @@ private struct WelcomeSetupView: View {
         case 2: "Tell us about a typical week, or leave it open."
         case 3: "Just your answer, shown back to you."
         case 4: "Set a flexible goal for the weeks ahead."
-        case 5: "Add a time goal or an optional Health energy goal."
+        case 5: "Set weekly goals. Routes cannot estimate calories."
         case 6: "Your answers become a simple four-week view."
         case 7: "A sample shows how a route becomes a guided walk."
         case 8: "Tap a pin and watch the next pause change."
         case 9: "Use a name you’ll recognize."
         case 10: "Choose the connections you want to use."
-        default: "Recorded activity can tell your story over time."
+        default: "Check My Path for recorded trends; real results may differ."
         }
     }
 
@@ -601,21 +615,6 @@ private struct WelcomeSetupView: View {
         .id(step)
         .transition(reduceMotion ? .opacity : .asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
                                                         removal: .move(edge: .leading).combined(with: .opacity)))
-    }
-
-    private var howThisWorks: some View {
-        DisclosureGroup(isExpanded: $helpExpanded) {
-            Text(helpText)
-                .font(.caption)
-                .foregroundStyle(isDarkInsight ? .white.opacity(0.82) : PausePathPalette.ink.opacity(0.76))
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 8)
-        } label: {
-            Label("How this works", systemImage: "info.circle")
-                .font(.caption.weight(.semibold))
-        }
-        .foregroundStyle(isDarkInsight ? .white.opacity(0.85) : PausePathPalette.teal)
-        .padding(.horizontal, 5)
     }
 
     private var helpText: String {
@@ -656,7 +655,9 @@ private struct WelcomeSetupView: View {
     }
 
     private var goalStep: some View {
-        VStack(spacing: 10) {
+        LazyVGrid(columns: typeSize.isAccessibilitySize
+                  ? [GridItem(.flexible())]
+                  : [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
             ForEach(PersonalGoalProfile.allCases, id: \.self) { goal in
                 selectionCard(title: displayTitle(for: goal), subtitle: shortDescription(for: goal),
                               icon: icon(for: goal), selected: profile.goal == goal) {
@@ -683,12 +684,12 @@ private struct WelcomeSetupView: View {
 
     private func shortDescription(for goal: PersonalGoalProfile) -> String {
         switch goal {
-        case .recovery: "Shorter walks and more rest stops"
-        case .beginner: "Approachable walks, one step at a time"
-        case .seniorFriendly: "Flatter routes with frequent pauses"
-        case .chronicPain: "Flexible walks with nearby stops"
-        case .generalFitness: "Distance and route variety"
-        case .eventTraining: "Longer walks for your own training"
+        case .recovery: "Shorter walks, more stops"
+        case .beginner: "Start a routine"
+        case .seniorFriendly: "Flatter, frequent rests"
+        case .chronicPain: "Flexible nearby stops"
+        case .generalFitness: "Varied routes"
+        case .eventTraining: "Longer training walks"
         }
     }
 
@@ -704,57 +705,40 @@ private struct WelcomeSetupView: View {
     }
 
     private var frequencyStep: some View {
-        VStack(spacing: 14) {
-            setupCard(title: "Typical week", subtitle: "", icon: "calendar") {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 82))], spacing: 10) {
-                    ForEach(WalkingFrequency.allCases.filter { $0 != .unsure }, id: \.self) { answer in
-                        Button {
-                            withAnimation(reduceMotion ? nil : .smooth(duration: 0.2)) { currentFrequency = answer }
-                        } label: {
-                            Text(answer.title)
-                                .font(.title3.weight(.bold)).monospacedDigit()
-                                .frame(maxWidth: .infinity, minHeight: 58)
-                                .background(currentFrequency == answer ? PausePathPalette.lime : PausePathPalette.background,
-                                            in: RoundedRectangle(cornerRadius: 16))
-                                .overlay(RoundedRectangle(cornerRadius: 16)
-                                    .strokeBorder(currentFrequency == answer ? PausePathPalette.teal : PausePathPalette.teal.opacity(0.12)))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(answer.weeklyText)
-                        .accessibilityAddTraits(currentFrequency == answer ? [.isSelected] : [])
+        setupCard(title: "Typical week", subtitle: "", icon: "calendar") {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 82))], spacing: 10) {
+                ForEach(WalkingFrequency.allCases.filter { $0 != .unsure }, id: \.self) { answer in
+                    Button {
+                        withAnimation(reduceMotion ? nil : .smooth(duration: 0.2)) { currentFrequency = answer }
+                    } label: {
+                        Text(answer.title)
+                            .font(.title3.weight(.bold)).monospacedDigit()
+                            .frame(maxWidth: .infinity, minHeight: 58)
+                            .background(currentFrequency == answer ? PausePathPalette.lime : PausePathPalette.background,
+                                        in: RoundedRectangle(cornerRadius: 16))
+                            .overlay(RoundedRectangle(cornerRadius: 16)
+                                .strokeBorder(currentFrequency == answer ? PausePathPalette.teal : PausePathPalette.teal.opacity(0.12)))
                     }
-                }
-                Button {
-                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.2)) { currentFrequency = .unsure }
-                } label: {
-                    HStack {
-                        Text("Not sure yet")
-                        Spacer()
-                        if currentFrequency == .unsure { Image(systemName: "checkmark.circle.fill") }
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .padding(15)
-                    .background(currentFrequency == .unsure ? PausePathPalette.lime.opacity(0.25) : PausePathPalette.background,
-                                in: RoundedRectangle(cornerRadius: 15))
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(currentFrequency == .unsure ? [.isSelected] : [])
-            }
-            HStack(spacing: 6) {
-                ForEach(0..<7, id: \.self) { day in
-                    Capsule()
-                        .fill(day < max(0, currentFrequency.rawValue) ? PausePathPalette.lime : PausePathPalette.teal.opacity(0.10))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 12)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(answer.weeklyText)
+                    .accessibilityAddTraits(currentFrequency == answer ? [.isSelected] : [])
                 }
             }
-            .padding(.horizontal, 16)
-            .accessibilityHidden(true)
-            Text(currentFrequency.weeklyText)
+            Button {
+                withAnimation(reduceMotion ? nil : .smooth(duration: 0.2)) { currentFrequency = .unsure }
+            } label: {
+                HStack {
+                    Text("Not sure yet")
+                    Spacer()
+                    if currentFrequency == .unsure { Image(systemName: "checkmark.circle.fill") }
+                }
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(PausePathPalette.teal)
-                .contentTransition(.opacity)
-                .frame(maxWidth: .infinity)
+                .padding(15)
+                .background(currentFrequency == .unsure ? PausePathPalette.lime.opacity(0.25) : PausePathPalette.background,
+                            in: RoundedRectangle(cornerRadius: 15))
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(currentFrequency == .unsure ? [.isSelected] : [])
         }
     }
 
@@ -841,13 +825,13 @@ private struct WelcomeSetupView: View {
                 .frame(height: 8)
                 .accessibilityHidden(true)
             }
-            .padding(24)
+            .padding(18)
             .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 28))
         }
     }
 
     private var extraGoalsStep: some View {
-        VStack(spacing: 13) {
+        VStack(spacing: 9) {
             setupCard(title: "Walking time", subtitle: "A weekly goal you can edit in My Path.", icon: "clock") {
                 HStack(alignment: .firstTextBaseline) {
                     Text("\(profile.weeklyMinutesTarget)")
@@ -879,19 +863,17 @@ private struct WelcomeSetupView: View {
                     }
                 }
             }
-            Text("Planned routes do not estimate calories burned.")
-                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
     private var outlookStep: some View {
-        VStack(spacing: 15) {
+        VStack(spacing: 10) {
             HStack(alignment: .bottom, spacing: 12) {
                 VStack(alignment: .leading, spacing: 7) {
                     Text("STARTING RHYTHM")
                         .font(.caption2.weight(.heavy)).tracking(1)
                     Text(currentFrequency.fourWeekText)
-                        .font(.system(size: 48, weight: .heavy, design: .rounded))
+                        .font(.system(size: 42, weight: .heavy, design: .rounded))
                         .monospacedDigit()
                     Text("in 4 weeks")
                         .font(.caption.weight(.semibold))
@@ -904,7 +886,7 @@ private struct WelcomeSetupView: View {
                     Text("CHOSEN GOAL")
                         .font(.caption2.weight(.heavy)).tracking(1)
                     Text(outlookRevealed ? "\(profile.weeklyWalkTarget * 4)" : "0")
-                        .font(.system(size: 48, weight: .heavy, design: .rounded))
+                        .font(.system(size: 42, weight: .heavy, design: .rounded))
                         .monospacedDigit()
                         .contentTransition(.numericText())
                     Text("in 4 weeks")
@@ -913,7 +895,7 @@ private struct WelcomeSetupView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .foregroundStyle(PausePathPalette.ink)
-            .padding(22)
+            .padding(16)
             .frame(maxWidth: .infinity)
             .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 28))
             HStack(spacing: 8) {
@@ -927,8 +909,8 @@ private struct WelcomeSetupView: View {
                         Text("\(profile.weeklyWalkTarget)")
                             .font(.headline.weight(.bold)).monospacedDigit().foregroundStyle(PausePathPalette.teal)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 116, alignment: .bottom)
-                    .padding(.horizontal, 7).padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, minHeight: 88, alignment: .bottom)
+                    .padding(.horizontal, 7).padding(.vertical, 9)
                     .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 17))
                 }
             }
@@ -953,10 +935,10 @@ private struct WelcomeSetupView: View {
     }
 
     private var walkthroughStep: some View {
-        VStack(spacing: 15) {
+        VStack(spacing: 10) {
             if let videoURL = Bundle.main.url(forResource: "PausePathWalkthrough", withExtension: "mp4") {
                 VideoPlayer(player: demoPlayer)
-                    .frame(height: 360)
+                    .frame(height: 235)
                     .clipShape(RoundedRectangle(cornerRadius: 27))
                     .overlay(RoundedRectangle(cornerRadius: 27).strokeBorder(PausePathPalette.teal.opacity(0.13)))
                     .accessibilityLabel("Sample video: set distance, terrain, and rest stops; review a route; see the next planned pause")
@@ -980,7 +962,7 @@ private struct WelcomeSetupView: View {
                 .font(.subheadline.weight(.semibold))
             } else {
                 Label("Walkthrough unavailable in this build", systemImage: "video.slash")
-                    .frame(maxWidth: .infinity, minHeight: 250)
+                    .frame(maxWidth: .infinity, minHeight: 190)
                     .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 27))
             }
             Label("Illustrative route · no live location or facility guarantee", systemImage: "info.circle")
@@ -1047,7 +1029,7 @@ private struct WelcomeSetupView: View {
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 28))
             }
-            .frame(height: 270)
+            .frame(height: 205)
             .onAppear {
                 demoRouteDrawn = reduceMotion
                 pinPulse = false
@@ -1087,7 +1069,7 @@ private struct WelcomeSetupView: View {
                     .font(.title2.weight(.bold)).foregroundStyle(PausePathPalette.teal)
                     .contentTransition(.opacity)
             }
-            .frame(maxWidth: .infinity, minHeight: 110)
+            .frame(maxWidth: .infinity, minHeight: 72)
             .background(PausePathPalette.lime.opacity(0.22), in: RoundedRectangle(cornerRadius: 24))
             setupCard(title: "Your name in PausePath", subtitle: "", icon: "person.crop.circle") {
                 TextField("Your name", text: Binding(get: { profile.username ?? "" }, set: {
@@ -1142,53 +1124,42 @@ private struct WelcomeSetupView: View {
     }
 
     private var connectionStep: some View {
-        VStack(spacing: 12) {
-            setupCard(title: "Sign in with Apple", subtitle: "Only needed for shared groups and reports.", icon: "person.crop.circle") {
+        VStack(spacing: 8) {
+            connectionCard(title: "Account", detail: "Groups & reports", icon: "person.crop.circle") {
                 if account.isSignedIn {
-                    Label("Connected · \(account.sessionStatusText)", systemImage: "checkmark.circle.fill")
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(PausePathPalette.teal)
                 } else {
                     SignInWithAppleButton(.continue,
                         onRequest: { request in account.prepareAppleSignIn(request) },
                         onCompletion: { result in Task { await account.completeAppleSignIn(result) } })
                         .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
-                        .frame(height: 48).disabled(account.busy)
-                    if account.busy { ProgressView("Signing in…") }
-                    else if account.message != PausePathAccount.signedOutMessage {
-                        Text(account.message).font(.caption).foregroundStyle(.secondary)
-                    }
+                        .frame(width: 130, height: 38).disabled(account.busy)
                 }
             }
-            setupCard(title: "Apple Health", subtitle: "Optional walking history and speed for estimates. Health data stays on your device.", icon: "heart.text.square") {
-                Button(healthRequested ? "Review Health access" : "Connect Apple Health") {
+            connectionCard(title: "Apple Health", detail: "Walking history · on device", icon: "heart.text.square") {
+                Button(healthRequested ? "Review" : "Connect") {
                     healthRequested = true; Task { await health.connect() }
                 }.buttonStyle(.bordered).disabled(health.isLoading)
-                if health.isLoading { ProgressView("Requesting Health access…") }
-                else { Text(health.status).font(.caption).foregroundStyle(.secondary) }
             }
-            setupCard(title: "Location", subtitle: "You can search any area without sharing your location.", icon: "location") {
+            connectionCard(title: "Location", detail: "Find nearby routes", icon: "location") {
                 if locationDiscovery.authorizationStatus == .authorizedAlways || locationDiscovery.authorizationStatus == .authorizedWhenInUse {
-                    Label("Location access is available", systemImage: "checkmark.circle.fill")
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(PausePathPalette.teal)
                 } else {
-                    Button(locationNeedsSettings ? "Open Location Settings" : "Allow location") {
+                    Button(locationNeedsSettings ? "Settings" : "Allow") {
                         if locationNeedsSettings {
                             if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
                         } else { locationDiscovery.requestLocationAccess() }
                     }.buttonStyle(.bordered)
                 }
-                if locationDiscovery.accuracyAuthorization == .reducedAccuracy && locationDiscovery.authorizationStatus != .notDetermined {
-                    Text("Precise Location is off. Nearby results and live route progress may be less accurate.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
             }
-            setupCard(title: "Daily recap reminder", subtitle: "An optional 8 PM reminder; your recap stays available in My Path.", icon: "bell") {
+            connectionCard(title: "Daily recap", detail: "Optional 8 PM reminder", icon: "bell") {
                 if notificationEnabled {
-                    Label("Reminder is on", systemImage: "checkmark.circle.fill")
-                    Button("Turn off reminder") {
+                    Button("Turn off") {
                         notificationEnabled = false; profile.dailyRecapNotifications = false
                         saveProfile(); DailyRecapNotifications.disable()
                     }.font(.caption)
                 } else {
-                    Button("Allow recap reminder") {
+                    Button("Enable") {
                         Task {
                             let enabled = await DailyRecapNotifications.enable()
                             notificationEnabled = enabled
@@ -1198,9 +1169,39 @@ private struct WelcomeSetupView: View {
                         }
                     }.buttonStyle(.bordered)
                 }
-                Text(notificationStatus).font(.caption).foregroundStyle(.secondary)
             }
+            Text("All connections are optional. Search any area without sharing your location.")
+                .font(.caption).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if account.busy { ProgressView("Signing in…") }
+            else if account.message != PausePathAccount.signedOutMessage && !account.isSignedIn {
+                Text(account.message).font(.caption).foregroundStyle(.secondary)
+            }
+            if health.isLoading { ProgressView("Requesting Health access…") }
+            if locationDiscovery.accuracyAuthorization == .reducedAccuracy && locationDiscovery.authorizationStatus != .notDetermined {
+                Text("Precise Location is off; nearby results may be less accurate.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if !notificationStatus.isEmpty { Text(notificationStatus).font(.caption).foregroundStyle(.secondary) }
         }
+    }
+
+    private func connectionCard<Content: View>(title: String, detail: String, icon: String,
+                                               @ViewBuilder action: () -> Content) -> some View {
+        HStack(spacing: 10) {
+            symbol(icon, size: 18)
+                .frame(width: 28, height: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.weight(.bold)).foregroundStyle(PausePathPalette.teal)
+                Text(detail).font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 2)
+            action()
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 17))
+        .overlay(RoundedRectangle(cornerRadius: 17).strokeBorder(PausePathPalette.teal.opacity(0.08)))
     }
 
     private var activityBaselineStep: some View {
@@ -1212,13 +1213,12 @@ private struct WelcomeSetupView: View {
         return VStack(spacing: 12) {
             setupCard(title: "A sample user’s path", subtitle: "Illustrative model · 8 weeks", icon: "chart.xyaxis.line") {
                 ActivityGrowthChart(model: sample)
-                    .frame(height: 112)
-                    .padding(.vertical, 4)
+                    .frame(height: 75)
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("BEFORE").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
                     Text(sample.baselineMinutesPerDay, format: .number.precision(.fractionLength(0)))
-                        .font(.system(size: 22, weight: .bold, design: .rounded)).monospacedDigit()
+                        .font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit()
                     }
                     Spacer()
                     Image(systemName: "arrow.right").font(.subheadline.bold()).foregroundStyle(PausePathPalette.teal)
@@ -1226,26 +1226,24 @@ private struct WelcomeSetupView: View {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text("WEEK 8 · MODELED").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
                         Text(sample.predictedMinutesPerDay(atWeek: sample.horizonWeeks), format: .number.precision(.fractionLength(1)))
-                            .font(.system(size: 22, weight: .bold, design: .rounded)).monospacedDigit()
+                            .font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit()
                     }
                 }
-                Text("min/day · modeled 8-week average: \(sample.averageMinutesPerDay(), format: .number.precision(.fractionLength(1))) min/day")
-                    .font(.caption).foregroundStyle(.secondary)
-                Label("Fictional example—not an average result or a promise.", systemImage: "sparkles")
+                Label("Fictional example · not a predicted result", systemImage: "sparkles")
                     .font(.caption2.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
-                    .padding(.top, 3)
                 DisclosureGroup("How the curve is calculated") {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("m(t) = b + A(1 − e⁻ᵏᵗ)").font(.system(.body, design: .serif).weight(.semibold))
                         Text("For this example: b = 12 min/day, A = 10 min/day, k = 0.25/week, t = 8 weeks.")
                         Text("Average₀–₈ = 1/8 ∫₀⁸ m(t) dt = b + A[1 − (1 − e⁻⁸ᵏ)/(8k)]")
+                        Text("Modeled average: \(sample.averageMinutesPerDay(), format: .number.precision(.fractionLength(1))) min/day")
                     }
                     .font(.caption).foregroundStyle(.secondary).padding(.top, 5)
                 }
                 .font(.caption.weight(.semibold))
             }
 
-            setupCard(title: "Your starting point", subtitle: "Apple Health walking workouts · last 28 days", icon: "figure.walk") {
+            setupCard(title: "Your starting point", subtitle: "Apple Health walking workouts · 28 days", icon: "figure.walk") {
                 if health.hasConnected && !recentWalks.isEmpty {
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
                         Text(minutes.formatted(.number.precision(.fractionLength(0))))
@@ -1256,18 +1254,14 @@ private struct WelcomeSetupView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityElement(children: .combine)
-                    Text("This is your recorded workout time, not a complete measure of every walk.")
-                        .font(.caption).foregroundStyle(.secondary)
                 } else if health.hasConnected {
                     Label("No walking workouts recorded", systemImage: "minus.circle")
                         .font(.headline)
-                    Text("That does not mean you did not walk. Health data may be incomplete or unavailable.")
+                    Text("Missing workouts do not mean you did not walk.")
                         .font(.caption).foregroundStyle(.secondary)
                 } else {
                     Label("No Health baseline available", systemImage: "minus.circle")
                         .font(.headline)
-                    Text("You can continue without connecting Health. Missing records are not treated as zero.")
-                        .font(.caption).foregroundStyle(.secondary)
                     Button {
                         healthRequested = true
                         Task { await health.connect() }
@@ -1279,9 +1273,6 @@ private struct WelcomeSetupView: View {
                 }
             }
 
-            Text("Keep walking with PausePath, then check Insights for your recorded trend. Your real progress may look different from the sample.")
-                .font(.caption).foregroundStyle(.secondary)
-                .padding(.horizontal, 4)
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: health.activities.count)
     }
@@ -1325,44 +1316,54 @@ private struct WelcomeSetupView: View {
 
     private func selectionCard(title: String, subtitle: String?, icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(alignment: .center, spacing: 12) {
-                symbol(icon, size: 20)
-                    .frame(width: 40, height: 40)
-                    .background(PausePathPalette.teal.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.subheadline.weight(.bold)).foregroundStyle(PausePathPalette.ink)
-                    if let subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    symbol(icon, size: 18)
+                        .frame(width: 28, height: 28)
+                        .background(PausePathPalette.teal.opacity(0.10), in: RoundedRectangle(cornerRadius: 9))
+                    Spacer(minLength: 0)
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .font(.subheadline).foregroundStyle(selected ? PausePathPalette.teal : .secondary)
                 }
-                Spacer(minLength: 0)
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.body).foregroundStyle(selected ? PausePathPalette.teal : .secondary)
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(PausePathPalette.ink)
+                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                    .minimumScaleFactor(0.85)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                }
             }
-            .padding(.horizontal, 13).padding(.vertical, 11)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(11)
+            .frame(maxWidth: .infinity, minHeight: 103, alignment: .topLeading)
             .background(selected ? PausePathPalette.lime.opacity(0.19) : PausePathPalette.surface,
-                        in: RoundedRectangle(cornerRadius: 17))
-            .overlay(RoundedRectangle(cornerRadius: 17).strokeBorder(selected ? PausePathPalette.teal : PausePathPalette.teal.opacity(0.08), lineWidth: selected ? 2 : 1))
+                        in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(selected ? PausePathPalette.teal : PausePathPalette.teal.opacity(0.08), lineWidth: selected ? 2 : 1))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel([title, subtitle].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
     private func setupCard<Content: View>(title: String, subtitle: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                symbol(icon, size: 21)
-                Text(title).font(.headline)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                symbol(icon, size: 18)
+                Text(title).font(.subheadline.weight(.bold))
             }
             .foregroundStyle(PausePathPalette.teal)
             if !subtitle.isEmpty {
-                Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
             content()
         }
-        .padding(18)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 22))
-        .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(PausePathPalette.teal.opacity(0.08)))
+        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(PausePathPalette.teal.opacity(0.08)))
     }
 
     @ViewBuilder private func symbol(_ name: String, size: CGFloat) -> some View {
@@ -1588,19 +1589,8 @@ private struct OnboardingJourneyWorld: View, Animatable {
                 }
                 ForEach(JourneyCheckpoint.allCases.filter { $0 != .trailhead }) { stop in
                     let point = JourneyCurve.point(at: stop.progress, in: routeRect)
-                    let markerX = point.x + cameraOffset + 64
-                    let markerY = point.y - 36
-                    let spur = Path { path in
-                        path.move(to: CGPoint(x: point.x + cameraOffset + 30, y: point.y + 15))
-                        path.addQuadCurve(to: CGPoint(x: markerX, y: markerY + 18),
-                                          control: CGPoint(x: markerX - 16, y: point.y + 13))
-                    }
-                    spur.stroke(PausePathPalette.teal.opacity(0.25),
-                                style: StrokeStyle(lineWidth: 14, lineCap: .round))
-                    spur.stroke(Color(red: 0.98, green: 0.94, blue: 0.78),
-                                style: StrokeStyle(lineWidth: 10, lineCap: .round))
                     JourneyStopPin(stop: stop, selected: stop == checkpoint)
-                        .position(x: markerX, y: markerY)
+                        .position(x: point.x + cameraOffset + 56, y: point.y - 22)
                 }
                 Image(systemName: "figure.walk")
                     .font(.system(size: 31, weight: .bold))
