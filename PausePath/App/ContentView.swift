@@ -99,12 +99,14 @@ struct ProfileSettingsView: View {
     @AppStorage("pausepath.personalProfile") private var profileData = Data()
     @AppStorage("pausepath.trackedWalks") private var trackedData = Data()
     @AppStorage("pausepath.profilePhoto") private var photoData = Data()
+    @AppStorage("pausepath.earnedBadges.v1") private var earnedBadgeData = Data()
     @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherEnabled = true
     @AppStorage("pausepath.weather.openMeteo.walkUpdates.enabled") private var weatherUpdates = true
     @AppStorage("pausepath.demoMode") private var demoMode = false
     @AppStorage("pausepath.appearance") private var appearanceRawValue = PausePathAppearance.light.rawValue
     @AppStorage(DistanceDisplayUnit.storageKey) private var distanceUnitRaw = DistanceDisplayUnit.kilometers.rawValue
     @State private var photo: PhotosPickerItem?
+    @State private var selectedBadge: PathBadge?
     @State private var photoError: String?
     @State private var account = PausePathAccount.shared
     @Environment(\.openURL) private var openURL
@@ -117,6 +119,20 @@ struct ProfileSettingsView: View {
         return trackedWalks.filter { interval.contains($0.date) }
     }
     private var minutes: Int { Int(weeklyWalks.reduce(0) { $0 + $1.activeSeconds } / 60) }
+    private var earnedBadgeDates: [String: Date] {
+        (try? JSONDecoder().decode([String: Date].self, from: earnedBadgeData)) ?? [:]
+    }
+    private var recentBadges: [PathBadge] {
+        PathMilestones(walks: trackedWalks).badges.enumerated()
+            .filter { $0.element.earned || earnedBadgeDates[$0.element.id] != nil }
+            .sorted { left, right in
+                let leftDate = earnedBadgeDates[left.element.id] ?? .distantPast
+                let rightDate = earnedBadgeDates[right.element.id] ?? .distantPast
+                return leftDate == rightDate ? left.offset > right.offset : leftDate > rightDate
+            }
+            .prefix(3)
+            .map(\.element)
+    }
 
     var body: some View {
         NavigationStack {
@@ -125,6 +141,7 @@ struct ProfileSettingsView: View {
                     profileHeader
                     if let photoError { Text(photoError).font(.caption).foregroundStyle(.secondary) }
                     weeklyProgress
+                    badgePreview
 
                     section("Your walking") {
                         NavigationLink { PlannerView(preferences: $preferences, health: health) } label: {
@@ -137,13 +154,6 @@ struct ProfileSettingsView: View {
                         Divider().padding(.leading, 62)
                         NavigationLink { SavedRoutesSettingsView(preferences: preferences) } label: {
                             row("Saved routes", icon: "heart")
-                        }
-                        Divider().padding(.leading, 62)
-                        NavigationLink {
-                            ScrollView { PathBadgeCollection(walks: trackedWalks).padding(20) }
-                                .pausePathSurface().navigationTitle("Path badges")
-                        } label: {
-                            row("Badges", icon: "seal")
                         }
                     }
                     section("Community") {
@@ -175,6 +185,11 @@ struct ProfileSettingsView: View {
                     .frame(maxWidth: 620).frame(maxWidth: .infinity)
             }.pausePathSurface().navigationTitle("Profile")
                 .navigationBarTitleDisplayMode(.inline)
+                .onAppear { saveEarnedBadges() }
+                .onChange(of: trackedWalks.map(\.id)) { saveEarnedBadges() }
+                .sheet(item: $selectedBadge) { badge in
+                    PathBadgeDetailSheet(badge: badge, isEarned: badge.earned || earnedBadgeDates[badge.id] != nil)
+                }
                 .task(id: photo) {
                     guard let photo else { return }
                     do {
@@ -310,6 +325,83 @@ struct ProfileSettingsView: View {
         }
         .padding(16)
         .background(PausePathPalette.teal.opacity(0.07), in: RoundedRectangle(cornerRadius: 24))
+    }
+
+    private var badgePreview: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Label("Earned badges", systemImage: "seal.fill")
+                    .font(.headline).foregroundStyle(PausePathPalette.teal)
+                Spacer(minLength: 0)
+                NavigationLink {
+                    ScrollView { PathBadgeCollection(walks: trackedWalks).padding(20) }
+                        .pausePathSurface().navigationTitle("Path badges")
+                } label: {
+                    Text("See all").font(.caption.weight(.semibold))
+                        .foregroundStyle(PausePathPalette.teal).frame(minHeight: 44)
+                }
+            }
+            if recentBadges.isEmpty {
+                Text("Complete a PausePath walk to earn your first walking badge.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if typeSize.isAccessibilitySize {
+                VStack(spacing: 8) {
+                    ForEach(recentBadges) { badge in badgePreviewRow(badge) }
+                }
+            } else {
+                HStack(spacing: 8) {
+                    ForEach(recentBadges) { badge in badgePreviewTile(badge) }
+                }
+            }
+        }
+        .padding(16)
+        .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(PausePathPalette.teal.opacity(0.08)))
+    }
+
+    private func badgePreviewTile(_ badge: PathBadge) -> some View {
+        Button { selectedBadge = badge } label: {
+            VStack(spacing: 7) {
+                PathBadgeMedallion(badge: badge, isEarned: true, size: 48)
+                Text(badge.name).font(.caption2.weight(.semibold))
+                    .multilineTextAlignment(.center).foregroundStyle(PausePathPalette.teal)
+                    .lineLimit(2).frame(minHeight: 30)
+            }
+            .frame(maxWidth: .infinity, minHeight: 104)
+            .padding(.horizontal, 5)
+            .background(PausePathPalette.teal.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(badge.name), earned. \(badge.requirement)")
+        .accessibilityHint("Show badge details")
+    }
+
+    private func badgePreviewRow(_ badge: PathBadge) -> some View {
+        Button { selectedBadge = badge } label: {
+            HStack(spacing: 12) {
+                PathBadgeMedallion(badge: badge, isEarned: true, size: 48)
+                Text(badge.name).font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PausePathPalette.teal)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .background(PausePathPalette.teal.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(badge.name), earned. \(badge.requirement)")
+        .accessibilityHint("Show badge details")
+    }
+
+    private func saveEarnedBadges() {
+        var result = earnedBadgeDates
+        for badge in PathMilestones(walks: trackedWalks).badges where badge.earned && result[badge.id] == nil {
+            result[badge.id] = Date()
+        }
+        if result.count != earnedBadgeDates.count {
+            earnedBadgeData = (try? JSONEncoder().encode(result)) ?? earnedBadgeData
+        }
     }
 
     private var creditsPage: some View {
@@ -1434,6 +1526,34 @@ private struct PathBadgeMedallion: View {
     }
 }
 
+private struct PathBadgeDetailSheet: View {
+    let badge: PathBadge
+    let isEarned: Bool
+    @Environment(\.dismiss) private var dismiss
+    private var style: PathBadgeArtStyle { PathBadgeArtStyle.forID(badge.id) }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 18) {
+                PathBadgeMedallion(badge: badge, isEarned: isEarned, size: 112)
+                Text(badge.name).font(.title2.bold()).multilineTextAlignment(.center)
+                    .foregroundStyle(isEarned ? style.primary : Color.primary)
+                Text(isEarned ? "Earned" : "Locked")
+                    .font(.headline).foregroundStyle(isEarned ? style.primary : Color.secondary)
+                Text(badge.requirement).multilineTextAlignment(.center)
+                if !isEarned {
+                    ProgressView(value: badge.fraction).tint(Color.gray.opacity(0.55))
+                    Text("\(min(badge.value, badge.target), specifier: "%.1f") of \(badge.target, specifier: "%.0f")")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(30).frame(maxWidth: .infinity, maxHeight: .infinity).pausePathSurface()
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
 struct PathBadgeCollection: View {
     private var welcomeBadge: PathBadge {
         PathBadge(
@@ -1466,26 +1586,7 @@ struct PathBadgeCollection: View {
         .onAppear { saveEarned() }
         .onChange(of: walks.map(\.id)) { saveEarned() }
         .sheet(item: $selected) { badge in
-            let isEarned = earned(badge)
-            let style = PathBadgeArtStyle.forID(badge.id)
-            NavigationStack {
-                VStack(spacing: 18) {
-                    PathBadgeMedallion(badge: badge, isEarned: isEarned, size: 112)
-                    Text(badge.name).font(.title2.bold()).multilineTextAlignment(.center)
-                        .foregroundStyle(isEarned ? style.primary : Color.primary)
-                    Text(isEarned ? "Earned" : "Locked")
-                        .font(.headline).foregroundStyle(isEarned ? style.primary : Color.secondary)
-                    Text(badge.requirement).multilineTextAlignment(.center)
-                    if !isEarned {
-                        ProgressView(value: badge.fraction).tint(Color.gray.opacity(0.55))
-                        Text("\(min(badge.value, badge.target), specifier: "%.1f") of \(badge.target, specifier: "%.0f")")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .padding(30).frame(maxWidth: .infinity, maxHeight: .infinity).pausePathSurface()
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { selected = nil } }
-                }
-            }.presentationDetents([.medium, .large])
+            PathBadgeDetailSheet(badge: badge, isEarned: earned(badge))
         }
     }
 
