@@ -111,6 +111,7 @@ struct ProfileSettingsView: View {
     @State private var account = PausePathAccount.shared
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
     private var name: String { profile.username.flatMap { $0.isEmpty ? nil : $0 } ?? "Walker" }
     private var trackedWalks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedData)) ?? [] }
@@ -133,6 +134,9 @@ struct ProfileSettingsView: View {
             .prefix(3)
             .map(\.element)
     }
+    private var displayedBadges: [PathBadge] {
+        Array(recentBadges.prefix(horizontalSizeClass == .regular ? 3 : 2))
+    }
 
     var body: some View {
         NavigationStack {
@@ -146,10 +150,6 @@ struct ProfileSettingsView: View {
                     section("Your walking") {
                         NavigationLink { PlannerView(preferences: $preferences, health: health) } label: {
                             row("Walking preferences", detail: "\(preferences.terrain.rawValue) · Rest every \(Int(preferences.maximumRestGapMeters)) m", icon: "slider.horizontal.3")
-                        }
-                        Divider().padding(.leading, 62)
-                        NavigationLink { GoalPreferencesEditor(preferences: $preferences) } label: {
-                            row("Your goals", detail: profile.goal.rawValue, icon: "scope")
                         }
                         Divider().padding(.leading, 62)
                         NavigationLink { SavedRoutesSettingsView(preferences: preferences) } label: {
@@ -279,10 +279,15 @@ struct ProfileSettingsView: View {
     }
 
     private var accountStatus: some View {
-        Label(account.sessionState == .ready ? "Apple connected" : account.isSignedIn ? "Checking account" : "On this device",
-              systemImage: account.sessionState == .ready ? "checkmark.circle.fill" : "lock.shield")
-            .font(.caption.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
-            .fixedSize(horizontal: false, vertical: true)
+        NavigationLink { AccountView() } label: {
+            Label(account.sessionState == .ready ? "Connected" : account.isSignedIn ? "Checking" : "Sign in",
+                  systemImage: account.sessionState == .ready ? "checkmark.circle.fill" : "person.crop.circle")
+                .font(.caption.weight(.semibold)).foregroundStyle(PausePathPalette.teal)
+                .padding(.horizontal, 12).frame(minHeight: 44)
+                .background(PausePathPalette.teal.opacity(0.08), in: Capsule())
+        }
+        .accessibilityLabel(account.sessionState == .ready ? "Apple account connected" : account.isSignedIn ? "Check Apple account" : "Sign in with Apple")
+        .accessibilityHint("Open account settings")
     }
 
     private var profileEditActions: some View {
@@ -347,11 +352,11 @@ struct ProfileSettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else if typeSize.isAccessibilitySize {
                 VStack(spacing: 8) {
-                    ForEach(recentBadges) { badge in badgePreviewRow(badge) }
+                    ForEach(displayedBadges) { badge in badgePreviewRow(badge) }
                 }
             } else {
                 HStack(spacing: 8) {
-                    ForEach(recentBadges) { badge in badgePreviewTile(badge) }
+                    ForEach(displayedBadges) { badge in badgePreviewTile(badge) }
                 }
             }
         }
@@ -1534,20 +1539,23 @@ private struct PathBadgeDetailSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 18) {
-                PathBadgeMedallion(badge: badge, isEarned: isEarned, size: 112)
-                Text(badge.name).font(.title2.bold()).multilineTextAlignment(.center)
-                    .foregroundStyle(isEarned ? style.primary : Color.primary)
-                Text(isEarned ? "Earned" : "Locked")
-                    .font(.headline).foregroundStyle(isEarned ? style.primary : Color.secondary)
-                Text(badge.requirement).multilineTextAlignment(.center)
-                if !isEarned {
-                    ProgressView(value: badge.fraction).tint(Color.gray.opacity(0.55))
-                    Text("\(min(badge.value, badge.target), specifier: "%.1f") of \(badge.target, specifier: "%.0f")")
-                        .font(.caption).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(spacing: 18) {
+                    PathBadgeMedallion(badge: badge, isEarned: isEarned, size: 112)
+                    Text(badge.name).font(.title2.bold()).multilineTextAlignment(.center)
+                        .foregroundStyle(isEarned ? style.primary : Color.primary)
+                    Text(isEarned ? "Earned" : "Locked")
+                        .font(.headline).foregroundStyle(isEarned ? style.primary : Color.secondary)
+                    Text(badge.requirement).multilineTextAlignment(.center)
+                    if !isEarned {
+                        ProgressView(value: badge.fraction).tint(Color.gray.opacity(0.55))
+                        Text("\(min(badge.value, badge.target), specifier: "%.1f") of \(badge.target, specifier: "%.0f")")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
+                .padding(30).frame(maxWidth: .infinity)
             }
-            .padding(30).frame(maxWidth: .infinity, maxHeight: .infinity).pausePathSurface()
+            .pausePathSurface()
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
         .presentationDetents([.medium, .large])
