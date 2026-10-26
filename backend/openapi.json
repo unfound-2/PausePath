@@ -1592,6 +1592,50 @@
         }
       }
     },
+    "/api/v1/account/delete": {
+      "post": {
+        "tags": [
+          "account"
+        ],
+        "summary": "Delete Account",
+        "operationId": "delete_account_api_v1_account_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountDeletion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -2700,6 +2744,26 @@
   },
   "components": {
     "schemas": {
+      "AccountDeletion": {
+        "properties": {
+          "apple_authorization_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apple Authorization Code"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "AccountDeletion"
+      },
       "Attributes": {
         "properties": {
           "backrest": {

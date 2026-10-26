@@ -32,3 +32,15 @@ services:
         sync: false
       - key: OVERPASS_URL
         value: https://overpass-api.de/api/interpreter
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: APPLE_TEAM_ID
+        sync: false
+      - key: APPLE_KEY_ID
+        sync: false
+      - key: APPLE_CLIENT_ID
+        sync: false
+      - key: APPLE_PRIVATE_KEY
+        sync: false

@@ -268,6 +268,80 @@ private enum SessionKeychain {
             throw error
         }
     }
+    // MARK: Account deletion (App Store Review Guideline 5.1.1(v))
+    private var deletionChallenge: AppleSignInChallenge?
+    var deletingAccount = false
+    var deletionMessage: String?
+
+    /// Re-confirms with Apple so the server can revoke this app's Apple tokens.
+    func prepareAccountDeletion(_ request: ASAuthorizationAppleIDRequest) {
+        deletionChallenge = try? AppleSignInChallenge()
+        request.requestedScopes = []
+        if let challenge = deletionChallenge {
+            request.nonce = challenge.hashedNonce
+            request.state = challenge.state
+        }
+        deletionMessage = nil
+    }
+
+    /// Returns true once the server confirmed deletion and local account state is cleared.
+    @discardableResult func deleteAccount(_ result: Result<ASAuthorization, Error>) async -> Bool {
+        let challenge = deletionChallenge
+        deletionChallenge = nil
+        guard !deletingAccount, let owner = userID else { return false }
+        var body: [String: Any] = [:]
+        do {
+            let authorization = try result.get()
+            guard let challenge,
+                  let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+                  challenge.accepts(state: credential.state) else {
+                deletionMessage = "Apple confirmation expired. Please try again."
+                return false
+            }
+            if let code = credential.authorizationCode.flatMap({ String(data: $0, encoding: .utf8) }), !code.isEmpty {
+                body["apple_authorization_code"] = code
+            }
+        } catch let error as ASAuthorizationError where error.code == .canceled {
+            deletionMessage = "Deletion cancelled. Your account was not changed."
+            return false
+        } catch {
+            deletionMessage = "Apple could not confirm your identity. Your account was not changed."
+            return false
+        }
+        deletingAccount = true
+        defer { deletingAccount = false }
+        do {
+            _ = try await PausePathAPI.request("api/v1/account/delete", body: body, requiresAccount: true)
+        } catch {
+            guard userID == owner else { return false }
+            deletionMessage = (error as? ServiceFailure)?.message
+                ?? "PausePath could not reach the server. Your account was not deleted; check your connection and try again."
+            return false
+        }
+        guard userID == owner else { return false }
+        clearLocalAccountState(owner: owner)
+        message = "Your PausePath account and community data were deleted."
+        deletionMessage = nil
+        return true
+    }
+
+    /// Clears everything on this device that belongs to the signed-in account.
+    /// Walks and Health readings saved only on this iPhone are kept.
+    private func clearLocalAccountState(owner: String) {
+        revision = UUID(); refreshTask?.cancel(); refreshTask = nil
+        appleChallenge = nil; busy = false
+        session = nil; SessionKeychain.clear()
+        sessionState = .signedOut
+        let defaults = UserDefaults.standard
+        for key in ["pausepath.shareChallengeProgress", "pausepath.shareProgressOwner",
+                    "pausepath.walkReminders.\(owner)", "pausepath.pendingProgressRemoval.\(owner)",
+                    "pausepath.communitySubmissionDraft.v1", "pausepath.pendingCommunityInvite",
+                    "pausepath.pendingInbox"] {
+            defaults.removeObject(forKey: key)
+        }
+        SocialActivityStore.shared.reset()
+    }
+
     func signOut() async {
         UserDefaults.standard.set(false, forKey: "pausepath.shareChallengeProgress")
         let old = session?.access_token

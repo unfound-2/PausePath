@@ -9,6 +9,7 @@ struct AccountView: View {
     @AppStorage("pausepath.weather.openMeteo.guidance.enabled") private var weatherGuidanceEnabled = true
     @AppStorage("pausepath.weather.openMeteo.walkUpdates.enabled") private var weatherWalkUpdatesEnabled = true
     @Environment(\.colorScheme) private var colorScheme
+    @State private var showDeleteAccount = false
     var body: some View {
         NavigationStack {
             Form {
@@ -32,6 +33,8 @@ struct AccountView: View {
                                 .disabled(account.sessionState == .checking)
                         }
                         Button("Sign out", role: .destructive) { Task { await account.signOut() } }
+                        Button("Delete account…", role: .destructive) { showDeleteAccount = true }
+                            .disabled(account.deletingAccount)
                     } else {
                         SignInWithAppleButton(.continue) { request in
                             account.prepareAppleSignIn(request)
@@ -94,7 +97,67 @@ struct AccountView: View {
                 }
             }.pausePathSurface()
         .navigationTitle("Account")
+        .sheet(isPresented: $showDeleteAccount) {
+            DeleteAccountSheet(account: account) { showDeleteAccount = false }
         }
+        }
+    }
+}
+
+/// Permanent deletion of the server account, confirmed again with Apple.
+private struct DeleteAccountSheet: View {
+    let account: PausePathAccount
+    let onClose: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("This permanently deletes your PausePath account. It cannot be undone.")
+                        .font(.headline)
+                }
+                Section("Deleted from PausePath’s servers") {
+                    Label("Your sign-in and friend username", systemImage: "person.crop.circle.badge.xmark")
+                    Label("Community memberships, posts, cheers and shared goal progress", systemImage: "person.3")
+                    Label("Group walks you organized, friends, invitations and inbox", systemImage: "calendar.badge.minus")
+                    Label("Stop reports and pending stop suggestions", systemImage: "mappin.slash")
+                }.font(.subheadline)
+                Section("What else happens") {
+                    Text("Communities you own pass to their longest-standing member; communities with no other members are deleted. Goals you created stay with their group without your name. Approved stop suggestions remain as public map data.")
+                    Text("Walks, notes and Health readings saved only on this iPhone are kept. You can delete them from My Path or by removing the app.")
+                    Text("Apple asks you to confirm. PausePath then asks Apple to revoke this app’s Sign in with Apple access.")
+                }.font(.footnote)
+                Section {
+                    if account.deletingAccount {
+                        ProgressView("Deleting your account…")
+                    } else {
+                        SignInWithAppleButton(.continue) { request in
+                            account.prepareAccountDeletion(request)
+                        } onCompletion: { result in
+                            Task { if await account.deleteAccount(result) { onClose() } }
+                        }
+                        .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+                        .frame(height: 50)
+                        .accessibilityHint("Confirms with Apple and permanently deletes your PausePath account")
+                    }
+                    if let message = account.deletionMessage {
+                        Text(message).font(.callout).foregroundStyle(.red)
+                    }
+                } footer: {
+                    Text("Continue with Apple to confirm deletion.")
+                }
+            }
+            .pausePathSurface()
+            .navigationTitle("Delete account")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onClose).disabled(account.deletingAccount)
+                }
+            }
+        }
+        .interactiveDismissDisabled(account.deletingAccount)
     }
 }
 
@@ -134,13 +197,13 @@ struct CommunityChallengesView: View {
     @State private var communityLoadMessage: String?
     @State private var communityRevision = UUID()
     @State private var busy = false
-    @AppStorage("pausepath.trackedWalks") private var trackedWalkData = Data()
+    private let walkStore = WalkHistoryStore.shared
     @AppStorage("pausepath.shareChallengeProgress") private var shareProgress = false
     @AppStorage("pausepath.personalProfile") private var profileData = Data()
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorScheme) private var colorScheme
-    private var walks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedWalkData)) ?? [] }
+    private var walks: [TrackedWalk] { walkStore.walks }
     private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
 
     var body: some View {
@@ -195,7 +258,7 @@ struct CommunityChallengesView: View {
                 .padding(.top, 18)
                 .padding(.bottom, 32)
             }
-            .pausePathSurface()
+            .pausePathAnimatedSurface()
             .toolbar(.hidden, for: .navigationBar)
             .task {
                 if UserDefaults.standard.string(forKey: "pausepath.shareProgressOwner") != account.userID { shareProgress = false }
@@ -989,10 +1052,10 @@ struct WeeklySuggestionsView: View {
     @AppStorage("pausepath.challengePointsMonth") private var pointsMonthKey = ""
     @State private var weeklyChallenges: [WeeklyPersonalChallenge] = []
     @AppStorage("pausepath.weeklyChallengeRewards") private var rewardLedgerData = Data()
-    @AppStorage("pausepath.trackedWalks") private var trackedWalkData = Data()
+    private let walkStore = WalkHistoryStore.shared
     @AppStorage("pausepath.personalProfile") private var profileData = Data()
     @Environment(\.scenePhase) private var scenePhase
-    private var walks: [TrackedWalk] { (try? JSONDecoder().decode([TrackedWalk].self, from: trackedWalkData)) ?? [] }
+    private var walks: [TrackedWalk] { walkStore.walks }
     private var profile: PausePathProfile { (try? JSONDecoder().decode(PausePathProfile.self, from: profileData)) ?? PausePathProfile() }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1046,7 +1109,7 @@ struct WeeklySuggestionsView: View {
         .padding(16).background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 22))
             .onAppear { loadWeeklyChallenges() }
             .onChange(of: scenePhase) { _, phase in if phase == .active { loadWeeklyChallenges() } }
-            .onChange(of: trackedWalkData) { _, _ in loadWeeklyChallenges() }
+            .onChange(of: walkStore.walks.map(\.id)) { _, _ in loadWeeklyChallenges() }
             .onChange(of: preferences) { _, _ in personalizeUnstartedChallenges() }
             .onChange(of: profileData) { _, _ in personalizeUnstartedChallenges() }
             .onReceive(NotificationCenter.default.publisher(for: .pausePathWalkRecorded)) { _ in loadWeeklyChallenges() }

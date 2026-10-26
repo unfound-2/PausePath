@@ -37,6 +37,8 @@ from .community_features import router as community_router
 app.include_router(community_router)
 from .social import router as social_router, notify_group
 app.include_router(social_router)
+from .account import router as account_router
+app.include_router(account_router)
 
 _booted_at = monotonic()
 
