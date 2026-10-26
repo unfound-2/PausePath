@@ -54,7 +54,7 @@ struct DiscoverView: View {
     @State private var showRoutePlanner = false
     @State private var sheetLevel = 0
     @GestureState private var sheetDrag: CGFloat = 0
-    @ScaledMetric(relativeTo: .body) private var compactSheetHeight: CGFloat = 76
+    @ScaledMetric(relativeTo: .body) private var compactSheetHeight: CGFloat = 100
     @State private var browseQuery = ""
     @State private var browseMatches: [MKMapItem] = []
     @State private var browseTask: Task<Void, Never>?
@@ -602,13 +602,15 @@ struct DiscoverView: View {
             }.padding(.horizontal, 15).frame(minHeight: 52)
                 .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 18))
                 .shadow(color: .black.opacity(0.12), radius: 9, y: 3)
-            HStack(spacing: 2) {
+            HStack(spacing: 6) {
                 ForEach(FacilityKind.allCases, id: \.self) { kind in
                     Button {
-                        if kinds.contains(kind) { kinds.remove(kind) } else { kinds.insert(kind) }
-                        if let selectedID, let place = discovery.places.first(where: { $0.id == selectedID }), !kinds.contains(place.kind) { self.selectedID = nil }
+                        animate {
+                            if kinds.contains(kind) { kinds.remove(kind) } else { kinds.insert(kind) }
+                            if let selectedID, let place = discovery.places.first(where: { $0.id == selectedID }), !kinds.contains(place.kind) { self.selectedID = nil }
+                        }
                     } label: {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 5) {
                             Image(systemName: kind.symbol)
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(.white)
@@ -619,9 +621,10 @@ struct DiscoverView: View {
                                 .lineLimit(1).minimumScaleFactor(0.75)
                         }
                         .foregroundStyle(kinds.contains(kind) ? Color.primary : Color.secondary)
+                        .padding(.horizontal, 7)
                         .frame(maxWidth: .infinity, minHeight: 40)
-                        .background(kinds.contains(kind) ? kind.mapColor.opacity(0.13) : Color.clear,
-                                    in: RoundedRectangle(cornerRadius: 13))
+                        .background(.regularMaterial, in: Capsule())
+                        .overlay(Capsule().strokeBorder(kinds.contains(kind) ? kind.mapColor.opacity(0.75) : Color.secondary.opacity(0.22), lineWidth: 1))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(filterTitle(kind))
@@ -629,9 +632,7 @@ struct DiscoverView: View {
                     .accessibilityAddTraits(kinds.contains(kind) ? [.isSelected] : [])
                 }
             }
-            .padding(4)
-            .background(PausePathPalette.surface, in: RoundedRectangle(cornerRadius: 17))
-            .shadow(color: .black.opacity(0.10), radius: 8, y: 3)
+            .shadow(color: .black.opacity(0.10), radius: 7, y: 2)
             if !browseMatches.isEmpty {
                 destinationSuggestions(browseMatches, selecting: selectBrowseResult)
             } else if !browseMessage.isEmpty {
@@ -768,7 +769,7 @@ struct DiscoverView: View {
                     Divider().padding(.horizontal, 16)
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 14) {
-                            if sheetLevel == 2, let place = selectedPlace { selectedCard(place) }
+                            if let place = selectedPlace { selectedCard(place, expanded: sheetLevel == 2) }
                             else {
                                 if !pinnedStops.isEmpty {
                                     Text("\(pinnedStops.count) stops added to your route").font(.subheadline.weight(.semibold))
@@ -809,7 +810,7 @@ struct DiscoverView: View {
             Capsule().fill(PausePathPalette.teal.opacity(0.25)).frame(width: 32, height: 4).padding(.top, 8)
             HStack(spacing: 10) {
                 if sheetLevel == 0, let place = selectedPlace {
-                    Button { animate { sheetLevel = 2 } } label: {
+                    Button { animate { sheetLevel = 1 } } label: {
                         HStack(spacing: 10) {
                             Image(systemName: place.kind.symbol)
                                 .font(.caption.weight(.bold)).foregroundStyle(.white)
@@ -823,7 +824,7 @@ struct DiscoverView: View {
                             Image(systemName: "chevron.up")
                                 .font(.caption.weight(.bold)).foregroundStyle(PausePathPalette.teal)
                         }
-                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .frame(maxWidth: .infinity, minHeight: 72)
                     }.buttonStyle(.plain).accessibilityHint("Open stop details")
                 } else if sheetLevel == 0 {
                     Button { openPlanner() } label: {
@@ -840,7 +841,7 @@ struct DiscoverView: View {
                             }
                             Spacer(minLength: 0)
                         }
-                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .frame(maxWidth: .infinity, minHeight: 72)
                         .contentShape(Rectangle())
                     }.buttonStyle(.plain)
                     Button { animate { sheetLevel = 1 } } label: {
@@ -849,23 +850,30 @@ struct DiscoverView: View {
                             .frame(width: 44, height: 44)
                     }.buttonStyle(.plain).foregroundStyle(PausePathPalette.teal)
                         .accessibilityLabel("Show nearby stops")
+                } else if selectedPlace != nil {
+                    Text("Stop details")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(sheetLevel == 1 ? "More details" : "Less", systemImage: sheetLevel == 1 ? "chevron.up" : "chevron.down") {
+                        animate { sheetLevel = sheetLevel == 1 ? 2 : 1 }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(PausePathPalette.teal)
+                    .frame(minHeight: 36)
                 } else {
                     Button { animate { sheetLevel = sheetLevel == 1 ? 2 : 1 } } label: {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(sheetLevel == 2 && selectedPlace != nil ? "Stop details" : "Nearby stops")
+                            Text("Nearby stops")
                                 .font(.subheadline.weight(.bold)).foregroundStyle(PausePathPalette.teal)
-                            if sheetLevel != 2 || selectedPlace == nil {
-                                Text("\(visiblePlaces.count) mapped in this area")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                            }
+                            Text("\(visiblePlaces.count) mapped in this area")
+                                .font(.caption2).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }.buttonStyle(.plain).accessibilityHint("Change panel size")
-                    if sheetLevel != 2 || selectedPlace == nil {
-                        Button { openPlanner() } label: {
-                            Label("Plan", systemImage: "figure.walk").font(.caption.weight(.semibold))
-                                .frame(minHeight: 44)
-                        }.buttonStyle(.plain).foregroundStyle(PausePathPalette.teal)
-                    }
+                    Button { openPlanner() } label: {
+                        Label("Plan", systemImage: "figure.walk").font(.caption.weight(.semibold))
+                            .frame(minHeight: 44)
+                    }.buttonStyle(.plain).foregroundStyle(PausePathPalette.teal)
                 }
             }.padding(.horizontal, 16).padding(.bottom, 8)
         }
@@ -881,51 +889,45 @@ struct DiscoverView: View {
     }
 
     private func distanceLabel(_ place: DiscoveredPlace) -> String {
-        guard let location = discovery.currentLocation, isFresh(location) else { return "Distance from you unknown" }
+        guard let location = discovery.currentLocation, isFresh(location) else { return "Distance unavailable" }
         return distanceText(from: location.coordinate, to: place.item.placemark.coordinate) + " · straight-line"
     }
 
-    private func selectedCard(_ place: DiscoveredPlace) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
+    private func selectedCard(_ place: DiscoveredPlace, expanded: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .center, spacing: 10) {
                 Image(systemName: place.kind.symbol)
-                    .font(.headline).foregroundStyle(.white)
-                    .frame(width: 42, height: 42).background(place.kind.mapColor, in: Circle())
+                    .font(.subheadline.weight(.bold)).foregroundStyle(.white)
+                    .frame(width: 38, height: 38).background(place.kind.mapColor, in: Circle())
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(place.item.name ?? place.kind.chipTitle).font(.title3.bold()).foregroundStyle(PausePathPalette.teal)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(place.item.name ?? place.kind.chipTitle)
+                        .font(.headline).foregroundStyle(.primary).lineLimit(2)
                     Text(place.kind.chipTitle + " · " + distanceLabel(place))
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Spacer()
-                Button { animate { selectedID = nil } } label: { Image(systemName: "xmark").frame(width: 44, height: 44).background(.quaternary, in: Circle()) }.accessibilityLabel("Close stop details")
+                Spacer(minLength: 0)
+                Button { animate { selectedID = nil; sheetLevel = 0 } } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .frame(width: 36, height: 36)
+                        .background(PausePathPalette.teal.opacity(0.10), in: Circle())
+                }
+                .accessibilityLabel("Close stop details")
             }
-            VStack(alignment: .leading, spacing: 9) {
+            VStack(alignment: .leading, spacing: 5) {
                 Label(place.shared?.hoursDescription ?? "Hours unknown", systemImage: "clock")
+                    .lineLimit(2)
                 Label("Access: \(place.shared?.attributes?.access ?? "Unknown")", systemImage: "door.left.hand.open")
-                Label("Verified: \(place.shared?.verificationDescription ?? "Unknown")", systemImage: "checkmark.shield")
             }
-            .font(.subheadline)
+            .font(.caption)
             .foregroundStyle(PausePathPalette.teal)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(PausePathPalette.teal.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
-            DisclosureGroup("Accessibility & more") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Wheelchair access: \(place.shared?.accessibilityDescription ?? "Unknown")", systemImage: "figure.roll")
-                    Label("Backrest: \(place.shared?.backrestDescription ?? "Unknown") · Shade: \(place.shared?.shadeDescription ?? "Unknown")", systemImage: "sun.max")
-                    if let summary = place.businessSummary { Text(summary) }
-                    if let website = place.website { Link("Business website", destination: website) }
-                }
-                .font(.caption).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 8)
-            }
-            .font(.subheadline.weight(.semibold))
             Button { routeDestination = place.item; routeDestinationQuery = place.item.name ?? "Selected stop"; openPlanner() } label: {
-                Label("Navigate here", systemImage: "arrow.triangle.turn.up.right.diamond.fill").frame(maxWidth: .infinity, minHeight: 48)
-            }.buttonStyle(.plain).font(.headline).foregroundStyle(PausePathPalette.ink)
-                .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 16))
+                Label("Navigate here", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
+                    .frame(maxWidth: .infinity, minHeight: 46)
+            }.buttonStyle(.plain).font(.subheadline.weight(.bold)).foregroundStyle(PausePathPalette.ink)
+                .background(PausePathPalette.lime, in: RoundedRectangle(cornerRadius: 14))
                 .accessibilityHint("Review a walking route before starting navigation")
             HStack {
                 Button {
@@ -938,7 +940,24 @@ struct DiscoverView: View {
                 Button { reportPlace = place; showReport = true } label: { Label("Report", systemImage: "exclamationmark.bubble") }
             }.font(.subheadline.weight(.semibold)).frame(minHeight: 44)
             if pinnedStops.count >= 3 { Text("Three stops added. Remove one to choose another.").font(.caption).foregroundStyle(.secondary) }
-            Text("\(place.provider) · Hours and access may change.").font(.caption2).foregroundStyle(.secondary)
+            if expanded {
+                Divider()
+                Label("Last community verification: \(place.shared?.verificationDescription ?? "Unknown")", systemImage: "checkmark.shield")
+                    .font(.caption).foregroundStyle(.secondary)
+                DisclosureGroup("Accessibility & more") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Wheelchair access: \(place.shared?.accessibilityDescription ?? "Unknown")", systemImage: "figure.roll")
+                        Label("Backrest: \(place.shared?.backrestDescription ?? "Unknown") · Shade: \(place.shared?.shadeDescription ?? "Unknown")", systemImage: "sun.max")
+                        if let summary = place.businessSummary { Text(summary) }
+                        if let website = place.website { Link("Business website", destination: website) }
+                    }
+                    .font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 8)
+                }
+                .font(.subheadline.weight(.semibold))
+                Text("\(place.provider) · Hours and access may change.").font(.caption2).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -949,7 +968,7 @@ struct DiscoverView: View {
         searchFocused = false
         cancelAreaRefresh()
         discovery.cancelPending()
-        animate { sheetLevel = 2; selectedID = place.id; discovery.route = nil; discovery.itinerary = []; discovery.routeOptions = []; discovery.selectedRouteOptionID = nil }
+        animate { sheetLevel = 1; selectedID = place.id; discovery.route = nil; discovery.itinerary = []; discovery.routeOptions = []; discovery.selectedRouteOptionID = nil }
     }
     private func cancelAreaRefresh() {
         areaRefreshTask?.cancel()

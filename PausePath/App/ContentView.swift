@@ -878,6 +878,14 @@ struct MyPathView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                Text("My Path")
+                    .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                    .foregroundStyle(PausePathPalette.teal)
+                    .frame(maxWidth: 680, alignment: .leading)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+                    .padding(.bottom, 4)
                 PathSectionPicker(titles: ["Overview", "History", "Insights"], selection: $pathSection, usesMaterialBackground: false)
                     .frame(maxWidth: .infinity)
                     .fixedSize(horizontal: false, vertical: true)
@@ -918,9 +926,7 @@ struct MyPathView: View {
             }
                 .pausePathSurface()
                 .navigationTitle("My Path")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbarBackground(PausePathPalette.background, for: .navigationBar)
-                .toolbarBackground(.visible, for: .navigationBar)
+                .toolbar(.hidden, for: .navigationBar)
                 .task { await health.refreshIfConnected() }
                 .onChange(of: pathScenePhase) { _, phase in if phase == .active { Task { await health.refreshIfConnected() } } }
                 .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .commaSeparatedText, defaultFilename: "PausePath-history") { result in
