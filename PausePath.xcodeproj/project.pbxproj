@@ -121,6 +121,7 @@
 				"C926F11FBDAA6EED693BECB8",
 				"315294D0EC4F596157AAF561",
 				"A5A0E472C4AF1B07252AA69E",
+				"CD646A5C66CF09B841649778",
 			);
 		};
 		"6A5D13928443573078CD612A" = {
@@ -538,6 +539,7 @@
 				"98F5FBE34F3153597C6185FF",
 				"7645A26DB174C7D8A299EE36",
 				"91DD2923C32DAF9D0C92FB4D",
+				"0F3243D0C22EA0C1F823C02B",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 		};
@@ -791,6 +793,16 @@
 		"91DD2923C32DAF9D0C92FB4D" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "A5A0E472C4AF1B07252AA69E";
+		};
+		"CD646A5C66CF09B841649778" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "PausePath/App/AnimatedBackdrop.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"0F3243D0C22EA0C1F823C02B" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "CD646A5C66CF09B841649778";
 		};
 	};
 	"rootObject" = "000000000000000000000001";
